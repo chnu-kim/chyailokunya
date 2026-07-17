@@ -47,6 +47,44 @@
   --ok: #47613f;
   --warn: #7a5c26;
   --danger: #9a453d;
+
+  /* ── 아래는 Tailwind @theme 네임스페이스에 안 맞아 유틸리티를 만들지 않는 런타임
+     변수다. 이식한 크롬/페이지 CSS(chrome.css·*.css)가 이 이름 그대로 var() 로
+     참조하므로 여기 살려 둔다. 색·타입 정본은 위 토큰 + @theme 이고, 이건 리듬·
+     지속·장식 부품 값이다. 구 site.css 를 충실 이식한 것. */
+
+  /* 간격 리듬 (구 --space-*) */
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+
+  --dur-fast: 120ms;
+  --dur-base: 220ms;
+
+  /* 테이프 종이+글자는 한 쌍이라 항상 같이 선언한다(라이트/다크/사진지 섬 세 곳).
+     한쪽만 옮기면 조용히 깨진다 — 다크 테이프는 갈색 페이지에 얹히려 어두워지는데
+     글자가 브랜드 브라운에 박혀 있으면 섬 밖 테이프에서 1.09:1 로 사라졌었다. */
+  --tape-amber: rgba(214, 196, 168, 0.72);
+  --tape-ink: var(--brand-brown-deep); /* 라이트 테이프 위 5.86:1 */
+
+  /* 컷아웃 다이컷 테두리 — 테마 독립. 목적이 "검은 옷을 배경에서 떼는 것"이라
+     다크에서 잉크로 뒤집으면 정확히 그 분리를 잃는다(팔레트 스와치 테두리와 같은 이유). */
+  --sticker-edge: #ffffff;
+
+  /* 썸네일/스냅 슬롯 플레이스홀더 종이 톤 — .polaroid 사진지 섬 안이라 라이트·다크
+     양쪽에서 같은 크림(섬 안의 --fg 처럼 테마 독립). */
+  --thumb-paper: #f4eee9;
+  --thumb-mark: #e2d6ca;
+  --thumb-edge: #e3d8cf;
+
+  /* .nav 실측 높이: 12+12 패딩 + 44 최대 자식 + 1.5 보더 ≈ 70px. sticky offset 과
+     앵커 scroll-margin 이 손으로 찍은 상수 대신 여기서 파생된다. */
+  --nav-h: 70px;
 }
 
 [data-theme="dark"] {
@@ -68,6 +106,14 @@
   --ok: #8fbf87;
   --warn: #e0b567;
   --danger: #e88b80;
+
+  /* 어두워진 테이프에는 밝은 글자 — 이 테이프는 갈색이라 "브라운 위의 글자" 토큰이
+     그대로 맞는다. 다이얼로그 표면 위 7.98:1, 스크림 걸친 윗동 8.36:1. */
+  --tape-amber: rgba(122, 104, 82, 0.55);
+  --tape-ink: var(--fg-on-brown);
+  /* 컷 그림자도 charcoal 배경에 맞춰 더 짙게 — @theme 의 라이트 값을 이 unlayered
+     선언이 다크에서 덮는다(레이어드 theme < unlayered). */
+  --shadow-cut: 2px 3px 0 rgba(0, 0, 0, 0.85);
 }
 
 /* ── 정적 스케일 토큰 → Tailwind 유틸리티 (테마 불변) ─────────────────────────
@@ -144,14 +190,27 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
   body {
     background-color: var(--bg);
     color: var(--fg);
     font-family: var(--font-body);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    -webkit-font-smoothing: antialiased;
+    /* 줄노트 텍스처 — 페이지 배경 자체가 종이다. 32px 피치에 1px 룰. 테마 전환 시
+       배경/글자색만 부드럽게 잇는다(텍스처는 var 로 따라온다). */
+    background-image: repeating-linear-gradient(var(--bg) 0 31px, var(--bg-rule) 31px 32px);
+    transition:
+      background-color var(--dur-base),
+      color var(--dur-base);
   }
   /* 포커스 링은 항상 보이게. --accent 는 채움용이라 링으로 쓰면 대비가 안 나므로 --focus. */
   :focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
+    border-radius: 2px;
   }
 }

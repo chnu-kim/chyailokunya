@@ -1,0 +1,370 @@
+/* 홈(런처) 전용 스타일 — 구 index.html <style> 충실 이식. 공유 크롬·토큰은
+   chrome.css·globals.css. 에셋 경로만 /assets/… 로 절대화했다. */
+
+.home {
+  padding: var(--space-8) 0 var(--space-9);
+}
+/* position 은 아래 쿼카 낙서가 이 상자의 바깥 여백을 기준점으로 쓰기 때문이다. */
+.home__hero {
+  text-align: center;
+  max-width: 640px;
+  margin: 0 auto var(--space-8);
+  position: relative;
+}
+.home__hero .chip {
+  margin-bottom: var(--space-5);
+}
+/* 방송 캡처 세 장을 손으로 흩어 붙인 것. 컷아웃 스티커를 대신한다 — 스티커는 받침
+   종이가 없어 줄노트 위에 떠 있었고, 라이트 테마에선 흰 종이 위 흰 다이컷 테두리가
+   안 보여 "오려 붙였다" 신호가 사라졌다. 폴라로이드는 그 자체가 종이라 둘을 같이 없앤다.
+   폭 상한 148 은 28vw 가 148 에 닿는 529px 부터, 하한 100 은 357px 아래에서 걸린다.
+   겹침·중간장 배율을 건드리면 이 계산도 다시 한다. */
+.home__snaps {
+  --snap-w: clamp(100px, 28vw, 148px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  margin: 0 auto var(--space-6);
+}
+
+/* 쉼 상태를 변수로 두는 건 각도를 transform 에 직접 박으면 터치 리셋이 hover·focus 까지
+   삼키기 때문이다. */
+.snap {
+  flex: 0 0 auto;
+  width: var(--snap-w);
+  margin: 0;
+  padding: 7px 7px 5px;
+  box-shadow: var(--shadow-card);
+  --rest-rot: 0deg;
+  --rest-y: 0px;
+  --rest-z: 0;
+  z-index: var(--rest-z);
+  transform: rotate(var(--rest-rot)) translateY(var(--rest-y));
+  transition:
+    transform var(--dur-base) var(--ease-paper),
+    box-shadow var(--dur-base);
+}
+.snap + .snap {
+  margin-left: calc(var(--snap-w) * -0.12);
+}
+/* 가운데 장이 조금 크고 살짝 올라앉아 맨 위에 얹힌 것으로 읽힌다. 셋의 각도가 서로의
+   거울상이 아닌 것도 "손으로 붙였다" 신호다. */
+.snap:nth-child(1) {
+  --rest-rot: -5deg;
+}
+.snap:nth-child(2) {
+  --rest-rot: 2deg;
+  --rest-y: -6px;
+  --rest-z: 2;
+  width: calc(var(--snap-w) * 1.14);
+}
+.snap:nth-child(3) {
+  --rest-rot: -2.5deg;
+  --rest-z: 1;
+}
+.snap:hover {
+  transform: translateY(calc(var(--rest-y) - 4px));
+  box-shadow: var(--shadow-lift);
+  z-index: 3;
+}
+@media (hover: none) {
+  .snap:hover {
+    transform: rotate(var(--rest-rot)) translateY(var(--rest-y));
+    box-shadow: var(--shadow-card);
+    z-index: var(--rest-z);
+  }
+}
+
+/* 정사각 슬롯. 사진 교체 계약이 여기 다 있다: 정사각은 CSS 가 강제(aspect-ratio+cover)
+   하므로 교체본 비율이 달라도 액자가 안 흔들리고, 피사체가 가운데가 아니면 --snap-pos 로
+   보는 지점만 옮긴다. 빗금은 게임 보드가 쓰는 정직한 플레이스홀더 언어라 파일이 없을 때
+   같은 얼굴로 비어 보인다. --thumb-* 를 생 hex 없이 쓸 수 있는 건 여기가 사진지 섬 안이라
+   라이트·다크 양쪽에서 같은 크림으로 해석되기 때문이다. */
+.snap__slot {
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background-color: var(--thumb-paper);
+  border: 1px solid var(--thumb-edge);
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 9px,
+    var(--thumb-mark) 9px 18px
+  );
+}
+.snap__slot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: var(--snap-pos, 50% 50%);
+}
+
+/* 손글씨 캡션은 폴라로이드 기본값(25px)이 100px 종이엔 과하다. 20px 로 낮췄고 색을 부품
+   기본값(taupe)에서 --fg-muted 로 되돌린다: WCAG 큰 텍스트 경계는 24px 이고 20px 로
+   내리면 기준이 3:1 → 4.5:1 로 바뀌어 taupe(4.08)가 미달이 된다. --fg-muted 는 6.39/5.22
+   로 통과한다. taupe 로 되돌리려면 25px 도 같이 되돌려야 한다. */
+.snap figcaption {
+  font-size: var(--text-lg);
+  line-height: 1.1;
+  margin-top: 5px;
+  color: var(--fg-muted);
+}
+
+/* 클립 기본값(20×46)은 본문 카드용이라 이 종이엔 크다 — 13×30 으로 줄이고 오른쪽 끝으로
+   밀어 배경만 덮게 한다. --snap-w 나 가운데 배율을 바꾸면 이 지점도 다시 잡는다. */
+.snap > .clip {
+  width: 13px;
+  height: 30px;
+  top: -7px;
+  right: 10px;
+  border-width: 2.5px;
+  border-radius: 7px;
+}
+
+/* 테이프는 라벨이 아니라 그냥 종잇조각이라 글자가 없다 — 컴포넌트 기본값은 글자 크기로
+   높이를 만들므로 여기서 직접 준다. */
+.snap__tape {
+  width: 44px;
+  height: 14px;
+  padding: 0;
+  top: -6px;
+}
+.snap:nth-child(1) .snap__tape {
+  left: 26%;
+  transform: translateX(-50%) rotate(-9deg);
+}
+.snap:nth-child(3) .snap__tape {
+  left: 72%;
+  transform: translateX(-50%) rotate(7deg);
+}
+/* 얼굴·자간은 .t-script 가 준다. 한글 워드마크는 --font-script 를 통해 Nanum Pen Script
+   로 떨어진다(Sacramento 는 한글이 없다) — 손글씨 다이어리 제목, 그게 목적이다. */
+.home__hero h1 {
+  font-size: var(--text-5xl);
+  line-height: 1.05;
+}
+.home__hero p {
+  color: var(--fg-muted);
+  font-size: var(--text-lg);
+  margin-top: var(--space-3);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+}
+/* 쉼 상태를 --rest-rot/--rest-y 로 두는 게 핵심: 각도를 transform 에 직접 박으면 아래
+   좁은-화면 쿼리가 transform 을 덮을 때 hover·active 까지 삼켜 키보드 사용자가 lift 를
+   잃는다. 변수로 두면 쿼리는 쉼 상태만 0 으로 덮고 상호작용 규칙은 하나로 유지된다. */
+.navcard {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  padding: var(--space-7);
+  --rest-rot: 0deg;
+  --rest-y: 0px;
+  transform: rotate(var(--rest-rot)) translateY(var(--rest-y));
+  transition:
+    transform var(--dur-base) var(--ease-paper),
+    box-shadow var(--dur-base);
+}
+/* 손으로 붙인 두 장이라 각도가 거울상이 아니다. 세로 오프셋을 왼쪽에만 주는 건 오른쪽
+   카드 아래 모서리에 마스코트 스티커가 붙어 있어서다. */
+.navcard:nth-child(1) {
+  --rest-rot: -1.6deg;
+  --rest-y: 9px;
+}
+.navcard:nth-child(2) {
+  --rest-rot: 0.6deg;
+}
+.navcard:hover,
+.navcard:focus-visible {
+  transform: translateY(calc(var(--rest-y) - 4px));
+  box-shadow: var(--shadow-lift);
+}
+.navcard:active {
+  transform: translateY(var(--rest-y));
+  box-shadow: var(--shadow-card);
+}
+.navcard__ic {
+  width: 44px;
+  height: 44px;
+  color: var(--fg);
+  margin-bottom: var(--space-4);
+}
+.navcard h2 {
+  font-size: var(--text-2xl);
+  margin-bottom: var(--space-2);
+}
+.navcard p {
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+/* 카드가 읽을 만한 폭을 가질 수 있을 때만 2열. 640px 에서 각 카드 280px, 패딩 48 을 빼면
+   184px(한 줄 ~13자)라 이 그리드는 600px "모바일" 한참 위에서 이미 접힌다. 진짜 모바일만
+   콜라주 회전을 마저 잃고 패딩을 조인다. */
+@media (max-width: 760px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+  /* 세로 오프셋은 "나란히 붙인 두 장" 표현이라 1열에선 의미가 없다. */
+  .navcard:nth-child(1) {
+    --rest-y: 0px;
+  }
+}
+@media (max-width: 600px) {
+  .navcard {
+    padding: var(--space-5);
+  }
+  .navcard:nth-child(1),
+  .navcard:nth-child(2) {
+    --rest-rot: 0deg;
+  }
+}
+
+/* 발바닥 트레일 — 카드 쪽으로 걸어간 자국. 회전이 한 방향의 이동을 따르고, 자국이
+   경로 위아래로 번갈아 앉아 실제 왼발/오른발처럼, 그리고 뒤로 갈수록 옅어져 물러나는
+   자국으로 읽힌다. --paw-dim 이 다크에서 트레일 전체를 죽이되 단계별 그라데이션은 남긴다. */
+.deco-paws {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  color: var(--brand-taupe);
+  margin-bottom: var(--space-7);
+  pointer-events: none;
+  user-select: none;
+}
+/* 쉼 각도·높이·크기를 변수로 뽑은 건 아래 등장 애니메이션 때문이다. 키프레임 transform 은
+   일반 선언을 이기므로, 각도를 transform 에 박아 두면 등장이 도는 동안 각도가 풀렸다가
+   끝에서 튄다. */
+.deco-paw {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  --paw-dim: 1;
+  --paw-fade: 0.6;
+  --rest-rot: 0deg;
+  --rest-y: 0px;
+  --rest-s: 1;
+  opacity: calc(var(--paw-fade) * var(--paw-dim));
+  transform: rotate(var(--rest-rot)) translateY(var(--rest-y)) scale(var(--rest-s));
+}
+.deco-paw:nth-child(1) {
+  --paw-fade: 0.4;
+  --rest-rot: -10deg;
+  --rest-y: 6px;
+  --rest-s: 0.94;
+  --paw-delay: 420ms;
+}
+.deco-paw:nth-child(2) {
+  --paw-fade: 0.58;
+  --rest-rot: 3deg;
+  --rest-y: -5px;
+  --paw-delay: 465ms;
+}
+.deco-paw:nth-child(3) {
+  --paw-fade: 0.78;
+  --rest-rot: 12deg;
+  --rest-y: 5px;
+  --rest-s: 1.04;
+  --paw-delay: 510ms;
+}
+[data-theme="dark"] .deco-paw {
+  --paw-dim: 0.85;
+}
+
+/* 발바닥은 올라오지 않고 찍힌다 — 위에서 조금 크게 내려와 제자리 크기로 앉는다. 끝
+   키프레임을 비워 둔 건 요소 자신의 쉼 상태로 안착시키기 위해서다. */
+@keyframes paw-step {
+  from {
+    opacity: 0;
+    transform: rotate(var(--rest-rot)) translateY(calc(var(--rest-y) - 5px))
+      scale(calc(var(--rest-s) * 1.15));
+  }
+}
+
+/* 마스코트 잉크 스티커 — 순수 장식(aria-hidden)이라 <img> 일 이유가 없다. 배경으로 두면
+   셀렉터에 걸린 한 장만 받고 테마 스왑에 깜빡임도 없다. 높이는 원본비(206:308)로 고정. */
+.cards-outer {
+  position: relative;
+  max-width: 880px;
+  margin: 0 auto;
+}
+.mascot-sticker {
+  position: absolute;
+  bottom: -32px;
+  right: -18px;
+  width: 72px;
+  height: 108px;
+  background: url("/assets/kunyang-mascot-ink.png") center / contain no-repeat;
+  transform: rotate(-8deg);
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.88;
+}
+[data-theme="dark"] .mascot-sticker {
+  background-image: url("/assets/kunyang-mascot.png");
+}
+
+/* 쿠냐가 그린 쿼카 낙서. 마스코트와 같은 이유로 배경 이미지고 잉크 두 벌도 같은 값이다.
+   부품이 아니라 줄노트 여백에 건다: 아무것에도 안 맞은 채 여백에 있어야 "그려 둔 것"으로
+   읽힌다. bottom 음수는 헤드라인을 피하려는 것 — 좌표는 캡처에서 재서 잡았고 위쪽
+   헤드라인·문단 크기를 건드리면 눈으로 다시 잡는다. 기본값 none 이 핵심: 여백이 남을 때만
+   나오는 덤이지 늘 있다가 좁아지면 숨는 부품이 아니다. */
+.quokka-doodle {
+  display: none;
+  position: absolute;
+  bottom: -80px;
+  left: -108px;
+  width: 92px;
+  height: 120px;
+  background: url("/assets/quokka-doodle-ink.png") center / contain no-repeat;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.88;
+}
+[data-theme="dark"] .quokka-doodle {
+  background-image: url("/assets/quokka-doodle.png");
+}
+@media (min-width: 1280px) and (hover: hover) {
+  .quokka-doodle {
+    display: block;
+  }
+}
+
+/* 낙서는 히어로 나머지와 같은 값으로 들어오되 키프레임만 따로 둔다: 공용 rise 는 끝에
+   투명도 1 을 박는데 이 낙서 쉼 투명도는 0.88 이라 1 까지 올랐다 끝에서 툭 떨어진다.
+   끝을 비우면 요소 자신의 값으로 안착한다. */
+@keyframes doodle-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+/* 감속 선호 사용자에겐 아예 안 걸린다. 지연값은 콘텐츠 뒤에 놓는다: 마지막 카드 360,
+   발바닥 420·465·510, 낙서 560. 장식이 본문보다 먼저 나오면 읽을 것도 없는데 눈이 먼저
+   그리로 간다. */
+@media (prefers-reduced-motion: no-preference) {
+  .deco-paw {
+    animation: paw-step var(--dur-base) var(--ease-paper) backwards;
+    animation-delay: var(--paw-delay, 0ms);
+  }
+  .quokka-doodle {
+    animation: doodle-in var(--dur-base) var(--ease-paper) backwards;
+    animation-delay: 560ms;
+  }
+}
+
+@media (max-width: 600px) {
+  .mascot-sticker {
+    width: 54px;
+    height: 81px;
+    right: 4px;
+    bottom: -14px;
+  }
+}

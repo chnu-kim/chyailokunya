@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<title>OG 커버 — 챠이로 쿠냐</title>
+<!-- Render target only: not linked from the site. 이 페이지를 캡처한 것이
+     assets/og-cover.jpg 이고, 세 페이지의 소셜 카드 메타가 그 파일을 가리킨다.
+
+     교체 절차: 이 저장소엔 HTML→이미지 경로가 없어서 브라우저 캡처가 유일한
+     수단이다. 캡처엔 DPR 배율이 곱해지고 뷰포트 여백이 딸려오므로 그대로 쓰면
+     카드가 한쪽으로 치우친다. 잘라낼 상자는 원점 (0,0) 에서 1200×630 × DPR —
+     DPR 2 면 (0,0)-(2400,1260) 이다. 맞게 잘랐는지는 아래 프레임으로 검증한다:
+     inset 16px 이므로 잘라낸 이미지 안에서 갈색 테두리가 사방 16×DPR px 로
+     대칭이어야 한다(DPR 2 면 32). 카드 밖 body 는 줄 간격이 달라서(32px 대 40px)
+     눈으로도 구분된다. inset 이나 캔버스 크기를 바꾸면 이 값도 같이 바뀐다.
+
+     테마를 라이트로 못박는 이유: 이 파일엔 테마 스크립트가 없어서 속성을 비워
+     둬도 라이트로 떨어지지만, 그건 site.css 가 다크를 속성 선택자 하나로만 걸고
+     시스템 설정은 보지 않는 지금 구조에 기댄 우연이다. 커버는 항상 라이트여야
+     하므로 우연이 아니라 계약으로 박아 둔다. -->
+<meta name="robots" content="noindex" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&family=Gothic+A1:wght@400;500;700&family=Nanum+Myeongjo:wght@400;700&family=Nanum+Pen+Script&family=Sacramento&display=swap" />
+<link rel="stylesheet" href="css/site.css" />
+<style>
+  html, body { margin: 0; }
+  .og {
+    width: 1200px; height: 630px; overflow: hidden; position: relative;
+    background: repeating-linear-gradient(var(--bg) 0 39px, var(--bg-rule) 39px 40px);
+    font-family: var(--font-body); color: var(--fg);
+  }
+  .og__frame { position: absolute; inset: 16px; border: 3px solid var(--brand-brown);
+    border-radius: 20px; pointer-events: none; z-index: 4; }
+
+  /* 좌측 스택 — 칩 → 워드마크 → 발바닥이 캔버스 세로 중심(315) 언저리에 오도록
+     top 을 직접 잡는다. 정확한 값을 계산으로 못 박지 않는 이유: 칩 높이와 스크립트
+     한글의 실제 잉크 높이는 폰트 메트릭이 정하는 값이라 이 파일만 보고 다시 계산할
+     수 없다. 셋 중 하나라도 크기를 바꾸면 눈으로 다시 맞춰야 한다. */
+  .og__text { position: absolute; left: 84px; top: 174px; z-index: 2; }
+  /* 칩 기본값(12px)은 본문 옆에 붙는 크기라 이 캔버스에선 안 보인다. 20px 로
+     키우되 대문자 트래킹은 .t-caps 가 주는 0.18em 을 그대로 쓴다. */
+  .og__chip { font-size: 20px; padding: 7px 18px; }
+  /* Face + tracking come from .t-script. 한글은 --font-script 스택의 두 번째
+     페이스(Nanum Pen Script)로 떨어진다 — Sacramento 엔 한글 글리프가 없다.
+     118px 는 폴라로이드에 플로리시 자리를 내주고 남은 크기다: 이 화면의 주인공은
+     사진이고 워드마크는 신원이라, 둘이 같은 목소리로 말하면 안 된다. */
+  .og__h1 { font-size: 118px; line-height: 1; margin: 24px 0 0; color: var(--fg); }
+
+  /* 발바닥 트레일 — 워드마크 아래에서 사진 쪽으로 걸어간 자국.
+     홈과 같은 규약이다(회전이 진행 방향을 따라가고, 앞선 자국일수록 흐리다).
+     22px 대신 42px 인 이유는 이 캔버스가 뷰포트가 아니라 1200px 고정이라서다 —
+     타임라인에서 절반으로 줄면 21px, 홈에서 보던 그 크기가 된다.
+     가로 실측은 4×42 + 3×30 = 258 이라 x 92..350 이고, 사진 왼쪽 끝(766)과는
+     한참 떨어져 있다. 트레일은 사진에 닿는 게 아니라 지나간 것이다.
+
+     translateY 상한이 −16 인 게 위 워드마크와 묶여 있다: 가장 높이 뜨는 4번째
+     자국(x 308..350)이 h1 의 가로 범위 바로 아래에 들어가서, 더 올리면 스크립트
+     한글의 내림선과 겹칠 여지가 생긴다. h1 크기나 .og__text top 을 바꾸면 이
+     여유부터 다시 본다. */
+  .og__paws { position: absolute; left: 92px; top: 407px; display: flex;
+    align-items: center; gap: 30px; color: var(--brand-taupe); z-index: 1; }
+  .og__paw { width: 42px; height: 42px; flex: 0 0 auto; --paw-fade: .6; opacity: var(--paw-fade); }
+  .og__paw:nth-child(1) { --paw-fade: .34; transform: rotate(-6deg) translateY(14px) scale(.9); }
+  .og__paw:nth-child(2) { --paw-fade: .48; transform: rotate(5deg) translateY(1px); }
+  .og__paw:nth-child(3) { --paw-fade: .64; transform: rotate(15deg) translateY(-7px) scale(1.04); }
+  .og__paw:nth-child(4) { --paw-fade: .80; transform: rotate(24deg) translateY(-16px) scale(1.08); }
+
+  /* 폴라로이드 한 장 — 컷아웃을 대신한다. 전신 컷아웃이 안 읽힌 건 크기가 아니라
+     무엇에 픽셀을 썼느냐의 문제였다: 옛 커버는 308px 폭에 720×973 원본을 넣어
+     308×416 을 만들었고, 그 안에 머리끝부터 발끝까지가 들어가니 정작 얼굴에
+     남는 몫은 얼마 되지 않았다. OG 카드는 타임라인에서 절반 안팎으로 축소돼
+     걸리므로 거기서 표정이 먼저 사라진다.
+     같은 자리에 얼굴만 담는 338 정사각 슬롯은 절반으로 줄어도 169px 이다.
+
+     회전 전 상자(전역 border-box 라 선언 폭 372 안에 보더까지 들어온다):
+       폭 372 = 1 + 16 + 338(슬롯) + 16 + 1,
+       높이 422 = 1 + 16 + 338 + 54(캡션 립: margin 10 + 40×1.1) + 12 + 1.
+     right 62 · 세로 중앙이므로 x 766..1138, y 104..526.
+     -3.5° 회전 후 바운딩 폭은 372·cos3.5 + 422·sin3.5 = 397, 높이는
+     422·cos3.5 + 372·sin3.5 = 444 다. 좌우로 (397−372)/2 = 12.6 씩 삐져나와도
+     오른쪽 끝 1150.6 과 프레임 상자(1184) 사이에 33px 이 남고, 세로는 93..537 로
+     프레임(16..614) 안쪽이다.
+     폭·회전·캡션 크기 중 하나라도 건드리면 이 계산을 다시 한다. */
+  .og__photo { position: absolute; top: 50%; right: 62px; width: 372px; margin: 0;
+    padding: 16px 16px 12px; transform: translateY(-50%) rotate(-3.5deg); z-index: 2; }
+  /* 슬롯 계약은 홈의 .snap__slot 과 같다: 정사각을 CSS 가 강제하므로 교체본을
+     미리 크롭할 필요가 없고, 피사체가 가운데가 아니면 --snap-pos 로 보는 지점만
+     옮긴다. 빗금은 파일이 없을 때 게임 보드와 같은 얼굴로 비어 보이게 남긴다. */
+  .og__slot { aspect-ratio: 1 / 1; overflow: hidden;
+    background-color: var(--thumb-paper); border: 1px solid var(--thumb-edge);
+    background-image: repeating-linear-gradient(135deg,
+      transparent 0 9px, var(--thumb-mark) 9px 18px); }
+  .og__slot img { display: block; width: 100%; height: 100%;
+    object-fit: cover; object-position: var(--snap-pos, 50% 50%); }
+  /* 캡션이 40px 인 게 색과 묶여 있다. WCAG 의 큰 텍스트 경계는 18pt(=24px)이고
+     40px 은 그 위라 3:1 만 넘기면 된다 — 사진지 위 taupe 는 4.08 로 통과다.
+     24px 아래로 내리는 순간 기준이 4.5 로 바뀌어 같은 색이 미달이 되므로,
+     크기를 줄이려면 색을 --fg-muted 로 같이 바꿔야 한다(홈 캡션이 그 경우다). */
+  .og__photo figcaption { font-size: 40px; line-height: 1.1; margin-top: 10px; }
+
+  /* 모서리를 물린 테이프 두 장. 큰 사진 한 장을 위쪽 테이프 하나로만 붙이면
+     아래가 들뜬 것으로 읽혀서, 실물처럼 대각으로 맞물린다.
+     104×30 짜리를 모서리에 정확히 얹으려면 중심을 모서리에 맞춘 뒤(-52/-15)
+     대각선과 직교하는 -45° 로 돌린다. .tape 기본값이 top/left/transform 을
+     모두 잡고 있으므로 세 값을 다 덮어야 한다. */
+  .og__tape { width: 104px; height: 30px; padding: 0; }
+  .og__tape--tl { top: -15px; left: -52px; transform: rotate(-45deg); }
+  .og__tape--br { top: auto; left: auto; bottom: -15px; right: -52px; transform: rotate(-45deg); }
+
+  /* Brand mark · A 잉크 도장 — the watermark half of the locked A+C pair.
+     Spec: logo-identity-directions.html
+     A stamp is pressed, not stuck on: ±2° is the whole allowance (route A rule). */
+  .og__seal { position: absolute; bottom: 46px; left: 84px; width: 48px; height: 48px;
+    color: var(--brand-ink); opacity: .8; transform: rotate(-1.5deg); z-index: 1; }
+</style>
+</head>
+<body>
+
+<!-- 발바닥 도형. 홈·landing 과 이름·채움 규약을 맞춘 것 — 채움은 참조하는 쪽이
+     아니라 심볼에 건다. SVG 의 기본 채움은 currentColor 가 아니라 검정이라,
+     참조부에서 color 만 바꾸면 자국이 검정에 박힌다.
+     도형의 정본은 assets/deco-paw.svg — 고칠 땐 거기와 홈·games·landing 까지
+     다섯 곳이다. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="mk-paw" viewBox="0 0 64 64" fill="currentColor">
+    <ellipse cx="22.4" cy="17.6" rx="7.4" ry="9.1" transform="rotate(-7 22.4 17.6)"/>
+    <ellipse cx="41.6" cy="17.6" rx="7.4" ry="9.1" transform="rotate(7 41.6 17.6)"/>
+    <ellipse cx="9.2"  cy="30"   rx="7.4" ry="9.1" transform="rotate(-34 9.2 30)"/>
+    <ellipse cx="54.8" cy="30"   rx="7.4" ry="9.1" transform="rotate(34 54.8 30)"/>
+    <path d="M32 29.4C35.3 30.6 40.4 32.2 43.2 35.7C46.3 39.4 48.9 42.6 48.8 46.6C48.7 51.3 45.6 55.1 40.6 55.4C37.2 55.6 34.2 54.9 32 53.6C29.8 54.9 26.8 55.6 23.4 55.4C18.4 55.1 15.3 51.3 15.2 46.6C15.1 42.6 17.7 39.4 20.8 35.7C23.6 32.2 28.7 30.6 32 29.4Z"/>
+  </symbol>
+</svg>
+
+<div class="og">
+  <span class="og__frame" aria-hidden="true"></span>
+
+  <div class="og__text">
+    <span class="chip chip--ink t-caps og__chip">Unofficial Fan Site</span>
+    <h1 class="og__h1 t-script">챠이로 쿠냐</h1>
+  </div>
+
+  <div class="og__paws" aria-hidden="true">
+    <svg class="og__paw"><use href="#mk-paw"/></svg>
+    <svg class="og__paw"><use href="#mk-paw"/></svg>
+    <svg class="og__paw"><use href="#mk-paw"/></svg>
+    <svg class="og__paw"><use href="#mk-paw"/></svg>
+  </div>
+
+  <!-- 홈 히어로가 가운데·맨 위에 얹어 주인공으로 지목한 그 장이다. 사이트가 이미
+       고른 얼굴을 커버가 다시 고를 이유가 없다. 사진을 바꾸려면 assets/snap-2.jpg
+       를 덮어쓰기만 하면 되고, 피사체가 가운데가 아니면 --snap-pos 만 준다. -->
+  <figure class="polaroid og__photo">
+    <span class="tape og__tape og__tape--tl" aria-hidden="true"></span>
+    <span class="tape og__tape og__tape--br" aria-hidden="true"></span>
+    <div class="og__slot">
+      <img src="assets/snap-2.jpg" width="400" height="400"
+           alt="분홍 리본을 달고 분홍 고양이 인형을 끌어안은 채 웃는 쿠냐" />
+    </div>
+    <figcaption>바보</figcaption>
+  </figure>
+
+  <svg class="og__seal" viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
+    <path fill-rule="evenodd" d="M6 15C6 10 10 6 15 6h34c5 0 9 4 9 9v34c0 5-4 9-9 9H15c-5 0-9-4-9-9z
+      M16 13l6.5 12.5c3-1.5 16-1.5 19 0L48 13l1.5 18c1 10-6.5 18-17.5 18s-19-8-17.5-18z"/>
+    <circle cx="25" cy="33" r="2.6"/>
+    <circle cx="39" cy="33" r="2.6"/>
+  </svg>
+</div>
+</body>
+</html>

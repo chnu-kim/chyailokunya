@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>챠이로 쿠냐 — 로고 · 아이덴티티 스펙 (A + C)</title>
+<meta name="description" content="챠이로 쿠냐 로고 아이덴티티 확정 스펙 — C 카오모지가 얼굴, A 잉크 도장이 파비콘·워터마크. 심볼·워드마크·락업·팔레트·사용 규칙·실제 배선." />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#15110f" media="(prefers-color-scheme: dark)" />
+<meta name="robots" content="noindex" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&family=Gothic+A1:wght@400;500;700;900&family=Nanum+Myeongjo:wght@400;700;800&family=Nanum+Pen+Script&family=Sacramento&display=swap" />
+<link rel="stylesheet" href="css/site.css" />
+<script>/* apply saved/system theme before first paint — no light-mode flash */try{var t=localStorage.getItem('ck-theme');if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+<style>
+  /* ---- Spec page shell --------------------------------------------------- */
+  .spec-head { padding: var(--space-8) 0 var(--space-6); }
+  .spec-head h1 { font-size: var(--text-4xl); margin-top: var(--space-2); }
+  .spec-head p { color: var(--fg-muted); max-width: 62ch; margin: var(--space-4) 0 0; }
+  .note { margin-top: var(--space-5); padding: var(--space-4) var(--space-5);
+    border-left: 3px solid var(--fg); background: var(--surface-2);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: var(--text-sm);
+    color: var(--fg-muted); max-width: 72ch; }
+  .note b { color: var(--fg); }
+
+  .route { padding: var(--space-7) 0; border-top: 1.5px solid var(--border-strong); }
+  .route__head { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+  .route__head h2 { font-size: var(--text-3xl); }
+  .route__idea { color: var(--fg-muted); max-width: 62ch; margin: var(--space-3) 0 var(--space-6);
+    font-size: var(--text-lg); }
+  .route__grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: var(--space-5); }
+  @media (max-width: 860px) { .route__grid { grid-template-columns: 1fr; } }
+
+  .panel { padding: var(--space-5); }
+  .panel h3 { font-size: var(--text-lg); margin-bottom: var(--space-4); }
+  .panel__hint { font-size: var(--text-xs); color: var(--fg-muted); margin: var(--space-4) 0 0; }
+
+  /* ---- Symbol specimens -------------------------------------------------- */
+  .marks { display: flex; align-items: flex-end; gap: var(--space-5); flex-wrap: wrap; }
+  /* fill must be declared: SVG's default fill is black, not currentColor. Without
+     this the stroked parts follow the theme and the filled parts stay black —
+     which reads as "the eyes vanish in dark mode". */
+  .mark { color: var(--fg); fill: currentColor; flex: 0 0 auto; }
+  .mark--64 { width: 64px; height: 64px; }
+  .mark--32 { width: 32px; height: 32px; }
+  .mark--20 { width: 20px; height: 20px; }
+  /* mk-kao is a 64×22 mark, not a square one. In a square box it would sit in
+     65% dead space and float off the flex-end baseline the row aligns on.
+     Height is pinned to the real aspect so "32" means 32px of actual mark. */
+  .mark--kao.mark--64 { height: 22px; }
+  .mark--kao.mark--32 { height: 11px; }
+  .mark--kao.mark--20 { height: 6.9px; }
+  .mark-size { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  /* 11px needs positive tracking or the counters collide — craft rule for ≤13px. */
+  .mark-size small { font-family: var(--font-mono); font-size: var(--text-2xs);
+    letter-spacing: 0.02em; color: var(--fg-muted); }
+  /* Reversed-out test: every route must survive an ink field.
+     The field is --brand-ink (#181818) and in dark it sits on .paper's --surface
+     (#1f1a17) — 1.03:1. The mark inside stayed legible, so the panel looked fine
+     while the thing being tested (the ink field itself) had no visible edge. A
+     chalk hairline restores the boundary; it only appears in dark, where light
+     mode already has 15:1 of separation and needs no help. */
+  .mark-invert { background: var(--brand-ink); border-radius: var(--radius-sm);
+    padding: var(--space-3); display: inline-flex; }
+  [data-theme="dark"] .mark-invert { box-shadow: 0 0 0 1px var(--border-strong); }
+  .mark-invert .mark { color: var(--fg-on-ink); }
+
+  /* ---- Wordmarks --------------------------------------------------------- */
+  .wm { line-height: 1; color: var(--fg); }
+  .wm--seal-ko { font-family: var(--font-display); font-weight: 800; font-size: 40px; letter-spacing: -0.03em; }
+  .wm--seal-la { font-family: var(--font-display); text-transform: uppercase;
+    font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--fg-muted); margin-top: 10px; }
+  .wm--kao-ko { font-family: var(--font-display); font-weight: 800; font-size: 34px; letter-spacing: -0.04em; }
+  .wm--kao-la { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.24em;
+    text-transform: uppercase; color: var(--fg-muted); margin-top: 8px; }
+
+  /* ---- Lockups ----------------------------------------------------------- */
+  .lockup { display: flex; align-items: center; gap: var(--space-4); }
+  .lockup--stack { flex-direction: column; gap: var(--space-3); text-align: center; }
+  .lockup + .lockup { margin-top: var(--space-6); padding-top: var(--space-5);
+    border-top: 1px dashed var(--border); }
+  .lockup__label { font-family: var(--font-mono); font-size: var(--text-2xs);
+    letter-spacing: 0.02em; color: var(--fg-muted); margin-bottom: var(--space-3); }
+
+  /* ---- Palette ----------------------------------------------------------- */
+  .pal { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .pal__chip { flex: 1 1 88px; border-radius: var(--radius-xs); overflow: hidden;
+    border: 1px solid var(--border); }
+  /* A swatch has one job — show its colour — and two of them were showing
+     nothing. The paper swatch (#ffffff) sits on --surface, also #ffffff in
+     light: 1.00:1. Mirrored, the ink swatch (#181818) sits on dark's --surface
+     (#1f1a17): 1.03:1. The --border hairline (ink at 6%) reaches 1.14:1 and
+     rescues neither.
+     The ring must NOT follow the theme — an --fg-based ring goes light in dark
+     mode and abandons the ink swatch there, which is exactly the trap the first
+     attempt fell into. Mixing two theme-independent brand tokens yields a fixed
+     mid-grey that clears 3:1 against BOTH extremes at once (3.95:1 on paper,
+     4.50:1 on ink) and invents no new colour. */
+  .pal__swatch { height: 44px;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-ink) 55%, var(--brand-paper)); }
+  .pal__meta { padding: 6px 8px; background: var(--surface); }
+  .pal__meta b { display: block; font-size: var(--text-2xs); }
+  .pal__meta code { font-family: var(--font-mono); font-size: var(--text-2xs);
+    letter-spacing: 0.02em; color: var(--fg-muted); }
+  .pal__note { font-size: var(--text-xs); color: var(--fg-muted); margin: var(--space-3) 0 0; }
+
+  /* ---- Rules ------------------------------------------------------------- */
+  .rules { margin: 0; padding: 0; list-style: none; }
+  .rules li { font-size: var(--text-sm); padding: 9px 0 9px 22px; position: relative;
+    border-bottom: 1px dashed var(--border); }
+  .rules li:last-child { border-bottom: 0; }
+  .rules li::before { content: "·"; position: absolute; left: 6px; top: 7px;
+    font-size: 20px; line-height: 1; color: var(--fg-muted); }
+  .rules li.no::before { content: "✕"; font-size: 11px; top: 12px; color: var(--danger); }
+  .rules b { font-family: var(--font-mono); font-size: var(--text-xs); }
+
+  /* ---- Prompt blocks ----------------------------------------------------- */
+  .prompt { margin: var(--space-3) 0 0; padding: var(--space-4); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.65;
+    white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); }
+  .prompt-label { font-family: var(--font-mono); font-size: var(--text-2xs);
+    letter-spacing: 0.02em; color: var(--fg-muted); margin-top: var(--space-5); }
+
+  /* ---- Snippet ----------------------------------------------------------- */
+  .snippet { padding: var(--space-6); }
+  .snippet pre { margin: var(--space-3) 0 0; padding: var(--space-4); overflow-x: auto;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.7; }
+  /* A horizontally scrollable region must be reachable by keyboard (WCAG 2.1.1),
+     so the pre takes focus — which means it also needs a visible focus ring. */
+  .snippet pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<!-- Symbol definitions — every mark is one path family, no raster, no gradients.
+     currentColor throughout so a single instance serves light, dark, and reversed. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <!-- Route A · 잉크 도장. Seal filled, cat knocked out with evenodd, eyes drawn back on top. -->
+  <symbol id="mk-seal" viewBox="0 0 64 64">
+    <path fill-rule="evenodd" d="M6 15C6 10 10 6 15 6h34c5 0 9 4 9 9v34c0 5-4 9-9 9H15c-5 0-9-4-9-9z
+      M16 13l6.5 12.5c3-1.5 16-1.5 19 0L48 13l1.5 18c1 10-6.5 18-17.5 18s-19-8-17.5-18z"/>
+    <circle cx="25" cy="33" r="2.6"/>
+    <circle cx="39" cy="33" r="2.6"/>
+  </symbol>
+
+  <!-- Route C · 카오모지. The streamer's own ﾐ๑•ﻌ•๑ﾐ, redrawn as geometry — no head outline. -->
+  <symbol id="mk-kao" viewBox="0 0 64 22">
+    <circle cx="24" cy="6.5" r="3.6"/>
+    <circle cx="40" cy="6.5" r="3.6"/>
+    <path d="M32 14.3l-3.2-2.8h6.4z"/>
+    <g fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round">
+      <path d="M32 14.3v1.8"/>
+      <path d="M32 16.1c-1.7 3.2-5.8 3.2-6.8-.4"/>
+      <path d="M32 16.1c1.7 3.2 5.8 3.2 6.8-.4"/>
+      <path d="M3 2.5h9M3 9.5h9M3 16.5h9"/>
+      <path d="M52 2.5h9M52 9.5h9M52 16.5h9"/>
+    </g>
+  </symbol>
+</svg>
+
+<div class="page">
+  <a class="skip-link" href="#main">본문 바로가기</a>
+
+  <header class="nav" data-od-id="site-nav">
+    <div class="nav__inner">
+      <a class="brand" href="index.html" aria-label="챠이로 쿠냐 홈">
+        <svg class="brand__cat" aria-hidden="true"><use href="#mk-kao"/></svg>
+        <span class="brand__name">챠이로 쿠냐</span>
+      </a>
+      <span class="brand__tag">VTUBER</span>
+      <span class="nav__spacer"></span>
+      <nav class="nav__links" aria-label="주 메뉴">
+        <a class="nav__link" href="landing.html">소개</a>
+        <a class="nav__link" href="games.html">게임</a>
+      </nav>
+      <button class="theme-toggle" type="button" data-od-id="theme-toggle" data-theme-toggle aria-pressed="false" aria-label="다크 모드">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M19.4 4.6l-1.8 1.8M6.4 17.6l-1.8 1.8"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main" data-od-id="identity-directions">
+    <section class="spec-head" data-od-id="identity-intro">
+      <div class="wrap">
+        <span class="eyebrow">Identity · A + C 확정</span>
+        <h1 data-od-id="identity-title">로고 · 아이덴티티</h1>
+        <p><b>A + C 조합으로 확정했습니다.</b> 둘은 경쟁하지 않고 역할을 나눕니다 —
+          <b>C 카오모지가 얼굴</b>(nav·푸터), <b>A 잉크 도장이 파비콘·워터마크</b>.
+          C의 유일한 약점인 28px 하한을 A가 16px까지 받아주고, A의 도장은 원래 고양이 얼굴을
+          파낸 형태라 둘의 계보가 이어집니다. 아무 마크 둘을 붙인 게 아닙니다.
+          팔레트·타입은 전부 잠긴 디자인 시스템 토큰이며 새 색을 만들지 않았습니다.</p>
+        <div class="note" data-od-id="identity-applied">
+          <b>어디에 들어갔나.</b> <code>css/site.css</code>의 <code>.brand__cat</code> +
+          <code>index · landing · games</code> 3개 페이지의 nav·푸터에 <b>C</b>(인라인
+          <code>#mk-kao</code> 스프라이트), <code>favicon.svg</code>와
+          <code>og-cover.html</code> 워터마크에 <b>A</b>. 이 문서를 고치면 사이트가 따라오는 게
+          아니라, <b>사이트가 정본이고 이 문서는 근거</b>입니다.
+          <br><br>
+          <b>B · 하트 발바닥은 내렸습니다</b> — “젤리 자리에 하트를 넣는다”는 치환 하나가 발상의
+          전부였고, 이 브랜드에서만 나올 수 있는 결정이 아니었습니다. 라벨은 A·C 그대로 둡니다.
+          이미 그 이름으로 이야기해 왔으니까요.
+        </div>
+        <div class="note" data-od-id="identity-medium-note">
+          <b>왜 SVG인가.</b> 마크는 전부 손으로 그린 벡터입니다 — 생성 이미지가 아닙니다.
+          nav 마크는 46px에서 <code>currentColor</code>로 라이트/다크를 따라가야 하고, 파비콘은 16px까지
+          내려가며, 이미지 모델은 “챠이로 쿠냐”를 제대로 렌더하지 못합니다. <b>생성 프롬프트는 두 마크에
+          각각 포함</b>했고, 용도는 로고 자체가 아니라 OG 커버·스티커·굿즈 같은 래스터 적용처입니다.
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ ROUTE A ══════════ -->
+    <section class="route" data-od-id="route-seal">
+      <div class="wrap">
+        <div class="route__head">
+          <span class="eyebrow">Route A</span>
+          <h2 data-od-id="route-seal-title">잉크 도장</h2>
+        </div>
+        <p class="route__idea">다이어리에 <strong>꾹 눌러 찍은 도장</strong>. 고양이는 그려진 게 아니라
+          잉크를 파낸 자리 — 네거티브 스페이스로 존재합니다. 고딕 펑크 쪽에 건 베팅: 단색 솔리드,
+          직각에 가까운 덩어리, 장식 0.</p>
+
+        <div class="route__grid">
+          <div class="paper panel" data-od-id="route-seal-symbol">
+            <h3>심볼</h3>
+            <div class="marks">
+              <div class="mark-size"><svg class="mark mark--64" role="img" aria-label="잉크 도장 심볼 — 64픽셀"><use href="#mk-seal"/></svg><small>64</small></div>
+              <div class="mark-size"><svg class="mark mark--32" aria-hidden="true"><use href="#mk-seal"/></svg><small>32</small></div>
+              <div class="mark-size"><svg class="mark mark--20" aria-hidden="true"><use href="#mk-seal"/></svg><small>20 · favicon</small></div>
+              <div class="mark-size">
+                <span class="mark-invert"><svg class="mark mark--32" aria-hidden="true"><use href="#mk-seal"/></svg></span>
+                <small>reversed</small>
+              </div>
+            </div>
+            <p class="panel__hint">덩어리가 실루엣을 지탱해서 16px까지 버팁니다 — 그래서 A가
+              파비콘·앱 아이콘·워터마크를 맡습니다. 손대지 않고 그대로 씁니다.</p>
+          </div>
+
+          <div class="paper panel" data-od-id="route-seal-wordmark">
+            <h3>워드마크</h3>
+            <div class="wm wm--seal-ko">챠이로 쿠냐</div>
+            <div class="wm wm--seal-la">Chyailo Kunya</div>
+            <p class="panel__hint">한글은 Nanum Myeongjo 800에 −0.03em — 도장의 밀도에 맞춰 조입니다.
+              라틴은 Gloock 스몰캡스에 0.2em, 데뷔 카드의 “Debut” 조판을 그대로 잇습니다.</p>
+          </div>
+
+          <div class="paper panel" data-od-id="route-seal-lockup">
+            <h3>락업</h3>
+            <div>
+              <div class="lockup__label">가로 · 기본</div>
+              <div class="lockup">
+                <svg class="mark mark--64" aria-hidden="true"><use href="#mk-seal"/></svg>
+                <div>
+                  <div class="wm wm--seal-ko" style="font-size:32px">챠이로 쿠냐</div>
+                  <div class="wm wm--seal-la">Chyailo Kunya</div>
+                </div>
+              </div>
+            </div>
+            <div class="lockup lockup--stack">
+              <svg class="mark mark--64" aria-hidden="true"><use href="#mk-seal"/></svg>
+              <div>
+                <div class="wm wm--seal-ko" style="font-size:28px">챠이로 쿠냐</div>
+                <div class="wm wm--seal-la">Chyailo Kunya</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="paper panel" data-od-id="route-seal-palette">
+            <h3>팔레트 · 사용 규칙</h3>
+            <div class="pal">
+              <div class="pal__chip"><div class="pal__swatch" style="background:var(--brand-ink)"></div><div class="pal__meta"><b>잉크</b><code>#181818</code></div></div>
+              <div class="pal__chip"><div class="pal__swatch" style="background:var(--brand-paper)"></div><div class="pal__meta"><b>종이</b><code>#ffffff</code></div></div>
+              <div class="pal__chip"><div class="pal__swatch" style="background:var(--brand-pink)"></div><div class="pal__meta"><b>핑크 1회</b><code>#e0a8b0</code></div></div>
+            </div>
+            <p class="pal__note">2색이 원칙. 핑크는 도장을 대체하지 않고 <em>옆에</em> — 예: 라이브 점 하나.</p>
+            <ul class="rules" style="margin-top:var(--space-4)">
+              <li>최소 <b>16px</b>. 그 아래는 눈 점을 빼고 실루엣만.</li>
+              <li>여백은 도장 한 변의 <b>1/4</b> 이상.</li>
+              <li>다크에서는 도장이 chalk, 파낸 자리가 charcoal로 반전.</li>
+              <li class="no">도장 안을 핑크로 채우기 — 잉크의 무게가 정체성.</li>
+              <li class="no">기울이기 ±2° 초과. 도장은 눌러 찍는 것이지 붙이는 게 아님.</li>
+            </ul>
+            <div class="prompt-label">생성 프롬프트 · 굿즈 목업용(로고 자체 아님)</div>
+            <pre class="prompt">A single black rubber stamp pressed onto lined
+notebook paper, ink slightly uneven at the edges,
+one clean square impression, warm white paper,
+no text, no lettering, top-down flat lay, soft
+daylight, muted brown and charcoal only, no pink,
+photographic, high detail</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ ROUTE C ══════════ -->
+    <section class="route" data-od-id="route-kaomoji">
+      <div class="wrap">
+        <div class="route__head">
+          <span class="eyebrow">Route C</span>
+          <h2 data-od-id="route-kaomoji-title">카오모지</h2>
+        </div>
+        <p class="route__idea">쿠냐가 이미 쓰는 얼굴
+          <strong role="img" aria-label="쿠냐의 고양이 얼굴 카오모지">ﾐ๑•ﻌ•๑ﾐ</strong> 를 그대로 마크로
+          올립니다 (landing 히어로의 손글씨 메모에 살아있는 그 얼굴). 머리 윤곽선이 없습니다 —
+          눈·코·입·수염만. 키치한 소재를 고딕하게 깎은, 충돌 그 자체에 건 베팅.</p>
+
+        <div class="route__grid">
+          <div class="paper panel" data-od-id="route-kaomoji-symbol">
+            <h3>심볼</h3>
+            <div class="marks">
+              <div class="mark-size"><svg class="mark mark--kao mark--64" role="img" aria-label="카오모지 심볼 — 64픽셀"><use href="#mk-kao"/></svg><small>64</small></div>
+              <div class="mark-size"><svg class="mark mark--kao mark--32" aria-hidden="true"><use href="#mk-kao"/></svg><small>32</small></div>
+              <div class="mark-size"><svg class="mark mark--kao mark--20" aria-hidden="true"><use href="#mk-kao"/></svg><small>20 · 한계</small></div>
+              <div class="mark-size">
+                <span class="mark-invert"><svg class="mark mark--kao mark--32" aria-hidden="true"><use href="#mk-kao"/></svg></span>
+                <small>reversed</small>
+              </div>
+            </div>
+            <p class="panel__hint">가장 약한 지점이 여기입니다 — 20px에서 수염이 뭉갭니다. 최소 28px.
+              대신 화면에서 가장 오래 기억에 남고, 팬이 채팅에 타이핑할 수 있는 유일한 마크입니다.</p>
+          </div>
+
+          <div class="paper panel" data-od-id="route-kaomoji-wordmark">
+            <h3>워드마크</h3>
+            <div class="wm wm--kao-ko">챠이로 쿠냐</div>
+            <div class="wm wm--kao-la">Chyailo Kunya · VTuber</div>
+            <p class="panel__hint">마크가 귀여운 쪽을 다 가져가므로 워드마크는 고딕으로 눌러 균형을
+              잡습니다. Nanum Myeongjo 800에 −0.04em, 캡션은 모노.</p>
+          </div>
+
+          <div class="paper panel" data-od-id="route-kaomoji-lockup">
+            <h3>락업</h3>
+            <div>
+              <div class="lockup__label">가로 · 기본</div>
+              <div class="lockup">
+                <svg class="mark mark--kao mark--64" aria-hidden="true"><use href="#mk-kao"/></svg>
+                <div>
+                  <div class="wm wm--kao-ko" style="font-size:30px">챠이로 쿠냐</div>
+                  <div class="wm wm--kao-la">Chyailo Kunya · VTuber</div>
+                </div>
+              </div>
+            </div>
+            <div class="lockup lockup--stack">
+              <svg class="mark mark--kao mark--64" aria-hidden="true"><use href="#mk-kao"/></svg>
+              <div class="wm wm--kao-ko" style="font-size:26px">챠이로 쿠냐</div>
+            </div>
+          </div>
+
+          <div class="paper panel" data-od-id="route-kaomoji-palette">
+            <h3>팔레트 · 사용 규칙</h3>
+            <div class="pal">
+              <div class="pal__chip"><div class="pal__swatch" style="background:var(--brand-ink)"></div><div class="pal__meta"><b>잉크</b><code>#181818</code></div></div>
+              <div class="pal__chip"><div class="pal__swatch" style="background:var(--brand-paper)"></div><div class="pal__meta"><b>종이</b><code>#ffffff</code></div></div>
+              <div class="pal__chip"><div class="pal__swatch" style="background:var(--brand-pink)"></div><div class="pal__meta"><b>볼터치</b><code>#e0a8b0</code></div></div>
+            </div>
+            <p class="pal__note">기본 1색(잉크). 핑크는 축하 상황에서만 눈 아래 볼터치 두 점으로 허용.</p>
+            <ul class="rules" style="margin-top:var(--space-4)">
+              <li>최소 <b>28px</b>. 그 아래에서는 수염 없이 눈·입만.</li>
+              <li>여백은 눈 사이 거리의 <b>1배</b> 이상.</li>
+              <li>수염 stroke는 <b>2.8</b> 고정 — 얇게 하면 다이어리가 아니라 아이콘이 됩니다.</li>
+              <li class="no">머리 윤곽선 추가. 선이 없는 게 이 마크의 전부입니다.</li>
+              <li class="no">눈을 하트/별로 바꾸기. 얼굴은 하나의 표정만 갖습니다.</li>
+            </ul>
+            <div class="prompt-label">생성 프롬프트 · OG 커버 배경용</div>
+            <pre class="prompt">Close-up of lined notebook paper, a few pressed
+black ink strokes and dots in one corner as if
+doodled with a fountain pen, mostly empty warm
+white page, subtle paper grain, no text, no
+letters, no faces, top-down, soft even light,
+charcoal and paper only, minimal, lots of
+negative space for overlay</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ SHARED ══════════ -->
+    <section class="route" data-od-id="identity-shared">
+      <div class="wrap">
+        <div class="route__head">
+          <span class="eyebrow">Shared</span>
+          <h2 data-od-id="identity-shared-title">공통 규칙</h2>
+        </div>
+        <p class="route__idea">A와 C 양쪽에 함께 걸리는 것들. 대부분 디자인 시스템에 이미
+          있는 규칙이고, 로고에 맞춰 구체화만 했습니다.</p>
+
+        <div class="route__grid">
+          <div class="paper panel" data-od-id="shared-invariants">
+            <h3>불변 규칙</h3>
+            <ul class="rules">
+              <li>마크는 <b>단색</b>으로 성립해야 합니다. 그라디언트·그림자·외곽선 금지.</li>
+              <li>색은 <b>var(--token)</b>으로만. 로고 때문에 새 hex를 만들지 않습니다.</li>
+              <li>다크 전환은 <b>currentColor</b>가 처리 — 별도 다크 로고 파일을 만들지 마세요.</li>
+              <li>워드마크는 <b>라이브 텍스트</b>. 이미지로 굽는 순간 검색·선택·확대가 죽습니다.</li>
+              <li class="no">래스터 로고를 nav에 넣기 — 46px에서 테마를 못 따라갑니다.</li>
+              <li class="no">한글 워드마크를 이미지 모델로 생성 — 글자가 깨집니다.</li>
+            </ul>
+          </div>
+
+          <div class="paper panel" data-od-id="shared-roles">
+            <h3>역할 분담</h3>
+            <p style="font-size:var(--text-sm);color:var(--fg-muted);margin:0 0 var(--space-4)">
+              전까지 nav를 지키던 고양이는 디자인 시스템이 준 범용 모티프였습니다 — 브랜드 고유의
+              결정이 담겨 있지 않았죠. 이제 두 마크가 그 자리를 나눠 가집니다.</p>
+            <ul class="rules">
+              <li><b>C</b> 얼굴 — nav·푸터. 28px 하한이 유일한 약점이라 작은 자리엔 안 씁니다.</li>
+              <li><b>A</b> 파비콘·앱 아이콘·워터마크. 16px까지 버티며 C의 하한을 정확히 메웁니다.</li>
+              <li>겹치는 자리 없음. 한 화면에 둘이 동시에 나오지 않습니다.</li>
+              <li class="no">nav에 A를 쓰기 — 도장은 서명이지 얼굴이 아닙니다.</li>
+            </ul>
+            <p class="panel__hint">C는 <code>currentColor</code> 단일 인스턴스라 다크 로고 파일이
+              필요 없습니다. A는 파비콘이라 상속받을 색이 없어서 <code>favicon.svg</code> 안의
+              <code>prefers-color-scheme</code>이 잉크↔chalk를 뒤집습니다 — 그 마크가 유일하게
+              색을 직접 아는 곳입니다.</p>
+          </div>
+        </div>
+
+        <div class="paper snippet" style="margin-top:var(--space-5)" data-od-id="identity-snippet">
+          <h3>실제 배선</h3>
+          <p style="font-size:var(--text-sm);color:var(--fg-muted);margin:0">
+            아래가 지금 <code>index · landing · games</code>에 들어가 있는 코드입니다. 스프라이트를
+            <b>인라인</b>으로 둔 이유는 외부 파일 <code>&lt;use href="sprite.svg#id"&gt;</code>가
+            <code>file://</code>와 크로스오리진에서 조용히 죽기 때문입니다.</p>
+          <pre tabindex="0" role="region" aria-label="nav 배선 코드">&lt;!-- &lt;body&gt; 바로 뒤 · 페이지당 1회 --&gt;
+&lt;svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"&gt;
+  &lt;symbol id="mk-kao" viewBox="0 0 64 22"&gt; … &lt;/symbol&gt;
+&lt;/svg&gt;
+
+&lt;!-- nav · 푸터 각 1회 --&gt;
+&lt;a class="brand" href="index.html" aria-label="챠이로 쿠냐 홈"&gt;
+  &lt;svg class="brand__cat" aria-hidden="true"&gt;&lt;use href="#mk-kao"/&gt;&lt;/svg&gt;
+  &lt;span class="brand__name"&gt;챠이로 쿠냐&lt;/span&gt;
+&lt;/a&gt;</pre>
+          <p class="panel__hint">치수·색은 <code>site.css</code>의 <code>.brand__cat</code>이
+            잡습니다 — <b>46×16</b>, 정사각이 아닙니다. 카오모지는 64×22 마크라 30×30 박스에 넣으면
+            30×10 조각으로 렌더됩니다. 그리고 <code>fill: currentColor</code>가 반드시 있어야
+            합니다. SVG의 <code>fill</code> 기본값은 검정이라, 없으면 수염만 테마를 따라가고
+            눈·코는 검정으로 남아 <b>다크에서 얼굴이 눈을 잃습니다</b>.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot" data-od-id="site-footer">
+    <div class="foot__inner">
+      <div class="brand">
+        <svg class="brand__cat" aria-hidden="true"><use href="#mk-kao"/></svg>
+        <span class="brand__name">챠이로 쿠냐</span>
+      </div>
+      <small>© <span data-year>2026</span> Chyailo Kunya · 비공식 팬 사이트 · 쿠냥이 환영</small>
+      <img class="foot__mascot" src="assets/kunyang-mascot.png" width="206" height="308"
+           alt="" aria-hidden="true" loading="lazy" decoding="async" />
+    </div>
+  </footer>
+</div>
+
+<script src="js/site.js"></script>
+</body>
+</html>

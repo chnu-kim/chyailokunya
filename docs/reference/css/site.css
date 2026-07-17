@@ -1,0 +1,411 @@
+/* ============================================================================
+   챠이로 쿠냐 (Chyailo Kunya) 팬 사이트 — 공통 스타일시트
+   스크랩북 디자인 시스템(Sweet Kitsch × Gothic Punk) 토큰 + 컴포넌트.
+   토큰 출처: design-system colors_and_type.css 를 인라인 바인딩.
+
+   웹폰트는 각 페이지 <head> 의 <link rel="preconnect"> + <link rel="stylesheet">
+   로 로드한다. 여기서 @import 하면 site.css 파싱이 끝나야 폰트 origin 을
+   발견하는 직렬 렌더블로킹 체인이 생긴다.
+   ============================================================================ */
+
+:root {
+  /* Brand */
+  --brand-paper:      #ffffff;
+  --brand-brown:      #76554b;
+  --brand-brown-deep: #604830;
+  --brand-ink:        #181818;
+  --brand-pink-soft:  #f0d8d8;
+  --brand-pink:       #e0a8b0;
+  --brand-taupe:      #907878;
+  --brand-line:       #dfe3ea;
+
+  /* Semantic — light */
+  --bg:            var(--brand-paper);
+  --bg-rule:       var(--brand-line);
+  --surface:       #ffffff;
+  --surface-2:     #f6f3f0;
+  --surface-frame: var(--brand-brown);
+  --fg:            var(--brand-ink);
+  /* Semantic muted text is darker than the decorative --brand-taupe so body
+     copy/captions clear WCAG AA (4.5:1) on the paper bg; taupe stays for
+     handwriting/figcaption flourishes only. */
+  --fg-muted:      #6f5a5a;
+  --fg-on-brown:   #f4ece6;
+  --fg-on-ink:     #f4ece6;
+  --border:        #1818180f;
+  --border-strong: var(--brand-ink);
+  --accent:        var(--brand-pink);
+  --accent-ink:    var(--brand-brown);
+  /* Focus ring is a deeper rose (still pink family) so the keyboard
+     indicator hits 3:1 on the white paper bg; the bright --accent stays
+     for fills/CTAs where contrast is carried by the text on top. */
+  --focus:         #b25a68;
+
+  /* Status — tuned to clear AA (4.5:1) as 12px text on BOTH light surfaces
+     this palette uses: the #ffffff page and the #efe7df photo-paper island.
+     Measured: --ok 5.6:1 / --warn 5.1:1 / --danger 5.2:1 on #efe7df. */
+  --ok:     #47613f;
+  --warn:   #7a5c26;
+  --danger: #9a453d;
+
+  /* Type — Gloock and Sacramento carry no Hangul glyphs, so each stack names
+     a Korean face directly behind its Latin face. Per-glyph fallback then does
+     the work: Latin renders in Gloock/Sacramento, Hangul in Nanum Myeongjo/
+     Nanum Pen Script. Without this, every Korean heading on the site silently
+     drops to whatever serif the OS happens to pick. */
+  --font-script:  'Sacramento', 'Nanum Pen Script', 'Apple Chancery', cursive;
+  --font-display: 'Gloock', 'Nanum Myeongjo', Georgia, serif;
+  --font-body:    'Gothic A1', 'Pretendard', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+  --font-hand:    'Nanum Pen Script', 'Gloria Hallelujah', var(--font-body);
+  --font-mono:    ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  --text-2xs: 11px; --text-xs: 12px; --text-sm: 14px; --text-base: 16px;
+  --text-lg: 20px; --text-xl: 25px; --text-2xl: 31px; --text-3xl: 39px;
+  --text-4xl: 49px; --text-5xl: clamp(3.5rem, 8vw, 5.5rem);
+
+  --leading-tight: 1.15; --leading-normal: 1.6;
+  --tracking-caps: 0.18em;
+
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px;
+  --space-6:32px; --space-7:48px; --space-8:64px; --space-9:96px;
+
+  --radius-xs:4px; --radius-sm:8px; --radius-md:14px; --radius-pill:999px;
+
+  --shadow-tape: 0 1px 2px rgba(96,72,48,.18);
+  --shadow-card: 0 6px 18px rgba(96,72,48,.16);
+  --shadow-lift: 0 18px 40px rgba(24,24,24,.22);
+  --shadow-cut:  2px 3px 0 rgba(24,24,24,.9);
+
+  --ease-paper: cubic-bezier(.2,.7,.2,1);
+  --dur-fast:120ms; --dur-base:220ms;
+  /* 테이프의 종이와 글자는 한 쌍이라 반드시 같이 움직인다 — 그래서 세 곳(여기 ·
+     다크 · 사진지 섬)에서 둘 다 선언한다. 한쪽만 옮기면 조용히 깨진다: 다크의
+     테이프는 차콜 페이지에 얹히려고 어두운 갈색이 되는데 글자가 브랜드 브라운에
+     박혀 있어서, 섬 밖의 테이프(다이얼로그 · 홈 카드)에서 1.09:1 로 사라졌었다.
+     테이프는 장식이지만 글자는 장식이 아니다 — 컴포저에선 이 라벨이 눈에 보이는
+     유일한 제목이다(h2 는 sr-only). */
+  --tape-amber: rgba(214,196,168,.72);
+  --tape-ink:   var(--brand-brown-deep);   /* 라이트 테이프 위 5.86:1 */
+  /* 컷아웃 스티커의 다이컷 테두리. 테마를 따라가면 안 된다 — 목적이 "캐릭터의
+     검은 옷을 배경에서 떼어내는 것"이라, 다크에서 잉크로 뒤집으면 정확히 그
+     분리를 잃는다. 팔레트 스와치 테두리와 같은 이유로 테마 독립값이다. */
+  --sticker-edge: #ffffff;
+
+  /* 게임 썸네일 플레이스홀더의 종이 톤. .polaroid 사진지 섬 안에 살아서 라이트·
+     다크 양쪽에서 같은 크림이어야 하므로 테마 독립값이다(섬 안의 --fg 처럼).
+     games.html 에 생 hex 로 박혀 있던 값을 토큰으로 올린 것. */
+  --thumb-paper: #f4eee9;
+  --thumb-mark:  #e2d6ca;
+  --thumb-edge:  #e3d8cf;
+
+  /* Real measured height of .nav: 12px+12px padding + 44px tallest child
+     (.theme-toggle / .nav__link) + 1.5px border ≈ 70px. Sticky offsets and
+     anchor scroll-margin both derive from this instead of hand-tuned
+     constants — bump the 44 here and everything downstream follows. */
+  --nav-h: 70px;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg:#15110f; --bg-rule:#2a2320; --surface:#1f1a17; --surface-2:#161210;
+  --surface-frame:#0d0b0a; --fg:#f1e8e2; --fg-muted:#b29d96;
+  --fg-on-brown:#f4ece6; --fg-on-ink:#f4ece6;
+  --border:#f1e8e21a; --border-strong:#f1e8e2;
+  --accent:#e9b6bd; --accent-ink:#c79b86;
+  --focus:#e9b6bd; /* bright rose already clears 3:1 on the charcoal bg */
+  /* 어두워진 테이프에는 밝은 글자가 따라간다 — 이 테이프는 갈색이므로 "브라운
+     위의 글자" 토큰이 그대로 맞는다. 다이얼로그 표면 위 7.98:1, 스크림에 걸친
+     윗동에서 8.36:1. */
+  --tape-amber: rgba(122,104,82,.55); --tape-ink: var(--fg-on-brown);
+  --shadow-cut: 2px 3px 0 rgba(0,0,0,.85);
+  /* Status colours invert with the surface — the light-surface values above
+     would sit at ~3:1 on charcoal. Measured here: 6.9:1 on --surface. */
+  --ok:#8fbf87; --warn:#e0b567; --danger:#e88b80;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--fg);
+  background-color: var(--bg);
+  /* lined notebook texture */
+  background-image: repeating-linear-gradient(var(--bg) 0 31px, var(--bg-rule) 31px 32px);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color var(--dur-base), color var(--dur-base);
+}
+
+h1,h2,h3 { font-family: var(--font-display); line-height: var(--leading-tight); font-weight: 400; letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
+p { text-wrap: pretty; }
+a { color: inherit; }
+
+/* Script/hand headlines are decorative cursive — never apply the display
+   negative tracking (it collapses the joined letterforms). */
+.t-script { font-family: var(--font-script); letter-spacing: 0.01em; }
+h1.t-script, h2.t-script { letter-spacing: 0.01em; }
+.t-hand   { font-family: var(--font-hand); }
+.t-caps   { font-family: var(--font-display); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
+
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 var(--space-5); }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+/* Skip link — keyboard users jump past the nav to content.
+   top 이 아니라 transform 으로 움직인다. 이유가 둘이다.
+   ① top 은 레이아웃 속성이라 매 프레임 레이아웃을 더럽힌다. 여긴 absolute 라
+      혼자만 더러워져 비용이 작지만, 키보드 사용자가 이 사이트에서 제일 먼저
+      만지는 요소이므로 첫 인상이 컴포지터 위에 있는 게 맞다.
+   ② 숨는 거리가 자기 높이에서 나온다. 예전 top:-48px 는 이 링크가 얼마나
+      높은지 손으로 찍은 값이었다 — 패딩이나 글자 크기를 바꾸면 조용히 틀린다.
+      -100% 는 자기 높이만큼이라 항상 정확히 뷰포트 위로 넘어간다:
+      쉼 상태의 아래 모서리가 y = 12 − (높이 + 12) + 높이 = 0 에 정확히 앉는다. */
+.skip-link { position:absolute; left:var(--space-4); top:var(--space-3); z-index:60;
+  background:var(--brand-ink); color:var(--fg-on-ink); font-weight:700; font-size:var(--text-sm);
+  padding:10px 16px; border-radius:var(--radius-sm); box-shadow:var(--shadow-cut);
+  transform:translateY(calc(-100% - var(--space-3)));
+  transition:transform var(--dur-base) var(--ease-paper); }
+.skip-link:focus { transform:none; }
+[data-theme="dark"] .skip-link { background:var(--fg); color:#15110f; }
+
+/* sticky-nav-aware anchor targets */
+:target { scroll-margin-top: calc(var(--nav-h) + var(--space-3)); }
+
+/* ---- Kraft scrapbook outer frame ---------------------------------------- */
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ---- Top navigation ----------------------------------------------------- */
+.nav {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+.nav__inner { max-width: 1120px; margin: 0 auto; padding: var(--space-3) var(--space-5);
+  display: flex; align-items: center; gap: var(--space-4); }
+.brand { display: inline-flex; align-items: center; gap: var(--space-2); text-decoration: none; }
+/* The brand mark is C · 카오모지 (#mk-kao) — a 64×22 face, not a square icon.
+   The old 30×30 square rendered it as a 30×10 sliver adrift in dead space.
+   `fill` must be set here: SVG's default fill is black, so without it the eyes
+   and nose would stay black while the stroked whiskers followed the theme —
+   i.e. the face loses its eyes in dark mode. */
+.brand__cat { width: 46px; height: 16px; color: var(--fg); fill: currentColor; flex: 0 0 auto; }
+/* Structural guard, inert whenever there is room. The wordmark's width is set by
+   a webfont that hasn't arrived yet: with font-display:swap, Hangul first paints
+   in a full-width system face (~1em/char) before Nanum Pen Script (~0.55em/char)
+   swaps in — the nav's content minimum jumps to ~430px and, with no overflow-x
+   anywhere, the whole page picks up a horizontal scrollbar at 360/390px on every
+   cold load. min-width:0 lets the name shrink instead of pushing; nowrap keeps
+   it on one line so --nav-h stays 70px. Both are needed: without min-width:0 a
+   flex item refuses to go below its content width. */
+.nav .brand { min-width: 0; }
+.brand__name { font-family: var(--font-script); font-size: var(--text-2xl); line-height: 1;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand__tag { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--fg-muted);
+  letter-spacing: 0.1em; text-transform: uppercase;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); padding: 2px 8px; }
+.nav__spacer { flex: 1; }
+.nav__links { display: flex; gap: var(--space-2); align-items: center; }
+/* 44px minimum on both nav controls: WCAG 2.5.8 (AA) only asks for 24×24, but
+   2.5.5 (AAA), the iOS HIG, and this project's own craft bar all want 44. */
+.nav__link { font-family: var(--font-body); font-weight: 700; font-size: var(--text-sm);
+  text-decoration: none; color: var(--fg); padding: 9px 12px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; min-height: 44px;
+  transition: background var(--dur-base); }
+.nav__link:hover { background: var(--surface-2); }
+.nav__link[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--fg); }
+
+/* theme toggle — lives here, not in a page <style>, so the control behaves
+   identically on every page (a page-level `transition:` shorthand silently
+   drops the background easing). */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; cursor: pointer;
+  background: var(--surface); color: var(--fg);
+  border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm);
+  transition: transform var(--dur-fast) var(--ease-paper), background var(--dur-base);
+}
+.theme-toggle:hover { transform: translateY(-1px); }
+.theme-toggle:active { transform: scale(0.88); }
+.theme-toggle svg { width: 18px; height: 18px; }
+.theme-toggle .icon-moon { display: none; }
+[data-theme="dark"] .theme-toggle .icon-sun  { display: none; }
+[data-theme="dark"] .theme-toggle .icon-moon { display: block; }
+
+/* ---- Buttons ------------------------------------------------------------ */
+.btn { font-family: var(--font-body); font-weight: 700; font-size: var(--text-sm);
+  cursor: pointer; display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+  transition: transform var(--dur-fast) var(--ease-paper), box-shadow var(--dur-base) var(--ease-paper), background var(--dur-base), color var(--dur-base); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+.btn--primary { background: var(--brand-ink); color: var(--fg-on-ink);
+  border: 1.5px solid var(--brand-ink); border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-cut); padding: 11px 20px; }
+[data-theme="dark"] .btn--primary { background: var(--fg); color: #15110f; border-color: var(--fg); }
+.btn--primary:hover { transform: translate(-1px,-1px); box-shadow: 3px 4px 0 rgba(24,24,24,.9); }
+.btn--primary:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 rgba(24,24,24,.9); }
+.btn--secondary { background: var(--surface); color: var(--accent-ink);
+  border: 1.5px solid var(--accent-ink); border-radius: var(--radius-sm); padding: 11px 20px; }
+.btn--secondary:hover { background: var(--accent-ink); color: var(--fg-on-brown); }
+.btn--accent { background: var(--accent); color: #4a2b30;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 78%, var(--brand-ink));
+  border-radius: var(--radius-pill); padding: 10px 22px; }
+.btn--accent:hover { transform: translateY(-2px); box-shadow: var(--shadow-card); }
+.btn--accent:active { transform: translateY(0); box-shadow: none; }
+
+/* ---- Chips -------------------------------------------------------------- */
+.chip { font-size: var(--text-xs); font-weight: 700; padding: 4px 12px; border-radius: var(--radius-pill);
+  border: 1px solid currentColor; color: var(--fg-muted); background: transparent;
+  display: inline-flex; align-items: center; gap: 6px; line-height: 1.4; }
+.chip--ink { background: var(--brand-ink); color: var(--fg-on-ink); border-color: var(--brand-ink); }
+[data-theme="dark"] .chip--ink { background: var(--fg); color: #15110f; border-color: var(--fg); }
+
+/* status colours */
+.chip--ok   { color: var(--ok); }
+.chip--warn { color: var(--warn); }
+.chip--live { color: var(--danger); }
+.chip--live::before { content:""; width:7px; height:7px; border-radius:50%; background: currentColor; }
+
+/* ---- Scrapbook decor: tape, clip, polaroid ------------------------------ */
+.tape { position: absolute; top: -12px; left: 50%; transform: translateX(-50%) rotate(-2deg);
+  background: var(--tape-amber); color: var(--tape-ink);
+  font-family: var(--font-hand); font-size: var(--text-lg); line-height: 1;
+  padding: 4px 18px; box-shadow: var(--shadow-tape); }
+.clip { position: absolute; top: -10px; right: 24px; width: 20px; height: 46px;
+  border: 3px solid var(--fg); border-radius: 10px; border-bottom-color: transparent; }
+
+/* 배경이 제거된 캐릭터 컷아웃 — 데뷔 원화가 이미 쓰던 언어(종이에 붙인 다이컷
+   스티커)를 그대로 가져온다. 사각 액자(border/radius/box-shadow)를 두르면
+   캐릭터 주변의 빈 알파를 액자에 넣게 되므로 쓰지 않는다.
+
+   테두리를 filter 로 만드는 게 핵심이다: drop-shadow 는 알파 실루엣을 따라가고
+   box-shadow 는 요소의 사각 박스를 따라간다 — 여기선 box-shadow 로 대체 불가능.
+   0 blur 드롭섀도 4장을 상하좌우로 겹쳐 윤곽선을 근사한다(대각은 얇아지지만
+   2px 두께에선 눈에 띄지 않는다). 마지막 한 장만 실제 접지 그림자다. */
+/* 접지 그림자만 --sticker-lift-* 로 열어둔 이유: 광원 위치를 바꿀 수 있는 건
+   이 마지막 한 장뿐이다. 앞의 네 장은 테두리라 오프셋이 곧 선 두께이므로
+   움직이면 윤곽선이 한쪽만 굵어진다. 기본값은 고정 광원(위 12px)이라 이 변수를
+   건드리지 않는 화면은 이전과 픽셀 단위로 같다. */
+.sticker { display: block; width: 100%; height: auto; --sticker-w: 2px;
+  --sticker-lift-x: 0px;
+  --sticker-lift-y: 12px;
+  filter:
+    drop-shadow(var(--sticker-w) 0 0 var(--sticker-edge))
+    drop-shadow(calc(var(--sticker-w) * -1) 0 0 var(--sticker-edge))
+    drop-shadow(0 var(--sticker-w) 0 var(--sticker-edge))
+    drop-shadow(0 calc(var(--sticker-w) * -1) 0 var(--sticker-edge))
+    drop-shadow(var(--sticker-lift-x) var(--sticker-lift-y) 20px rgba(24,24,24,.26)); }
+
+/* ---- Photo paper — an always-light surface island ------------------------
+   Polaroids and game cards model physical photo paper, so they stay light in
+   both themes. In dark they must therefore re-declare the LIGHT token set
+   locally: anything nested (chips, muted labels, status colours, the clip)
+   reads var(--fg-muted) / var(--danger) and would otherwise inherit the
+   charcoal-tuned values and wash out on the cream. */
+.polaroid { background: #fff; border: 1px solid var(--border); box-shadow: var(--shadow-lift);
+  position: relative; }
+[data-theme="dark"] .polaroid {
+  background: #efe7df;
+  --fg: #181818;
+  --fg-muted: #6f5a5a;
+  --border: #18181814;
+  --ok: #47613f; --warn: #7a5c26; --danger: #9a453d;
+  /* 섬 안의 테이프는 크림 사진지에 붙으므로 라이트 한 쌍을 통째로 되돌린다 —
+     종이만 되돌리고 글자를 두면 밝은 글자가 밝은 테이프 위에 남는다. 5.50:1. */
+  --tape-amber: rgba(214,196,168,.72); --tape-ink: var(--brand-brown-deep);
+}
+/* 포커스 링은 위 토큰 재선언으로 못 고친다. 링은 요소 *밖에* 그려지므로 색을
+   고를 때 봐야 하는 건 요소가 아니라 그 뒤에 깔린 표면인데, 섬 안에서 그 표면이
+   두 가지다: 카드 자신의 링은 페이지(차콜) 위에 앉고, 카드 안 버튼의 링은 크림
+   사진지 위에 앉는다. 다크의 밝은 로즈는 차콜 위에선 10.63:1 이지만 크림 위에선
+   1.44:1 로 사라진다 — 삭제·되돌리기 버튼이 키보드에서 통째로 안 보였다.
+   그래서 안쪽만 라이트 값(:root 의 --focus)으로 되돌린다: 크림 위 3.77:1.
+   이걸 위 블록에 --focus 로 넣지 않는 이유가 여기 있다 — 그러면 카드 자신의
+   링까지 4.07:1 로 같이 떨어진다(통과하지만 이유 없이 나빠진다). */
+[data-theme="dark"] .polaroid :focus-visible { outline-color: #b25a68; }
+
+/* --fg is ink inside the island, so the dark chip swap would paint charcoal on
+   charcoal. Restore the light-surface treatment. */
+[data-theme="dark"] .polaroid .chip--ink {
+  background: var(--brand-ink); color: var(--fg-on-ink); border-color: var(--brand-ink);
+}
+.polaroid figcaption { text-align: center; font-family: var(--font-hand);
+  font-size: var(--text-xl); color: var(--brand-taupe); }
+/* The clip straddles the card edge: its lower half sits on the cream card, its
+   upper ~10px on the page. Ink reads on the cream but vanishes on the charcoal
+   page, so in dark it needs a LIGHT halo — a dark shadow separates nothing from
+   a near-black background. The halo is invisible against the cream half. */
+.polaroid > .clip { filter: drop-shadow(0 1px 1px rgba(0,0,0,.3)); }
+[data-theme="dark"] .polaroid > .clip { filter: drop-shadow(0 0 1.5px rgba(241,232,226,.9)); }
+
+/* ---- Cards -------------------------------------------------------------- */
+.paper { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card); position: relative; }
+
+/* ---- Section heads ------------------------------------------------------ */
+.eyebrow { font-family: var(--font-display); text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  font-size: var(--text-xs); color: var(--fg-muted); }
+
+/* ---- Footer — identical on every page ----------------------------------- */
+.foot { margin-top: auto; border-top: 1.5px solid var(--border-strong);
+  background: var(--surface-frame); color: var(--fg-on-brown); }
+.foot__inner { max-width: 1120px; margin: 0 auto; padding: var(--space-6) var(--space-5);
+  display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; justify-content: space-between; }
+.foot a { color: var(--fg-on-brown); }
+/* opacity 를 걸지 않는다. .8 을 주면 --fg-on-brown 이 브라운 푸터 위에서
+   #dbcec7 로 합성되어 대비가 4.31 로 떨어지는데, 이 줄은 11px 라 큰 텍스트가
+   아니어서 4.5 를 넘겨야 한다. 색 자체로는 5.67 이라 통과하므로, 흐리게 보이길
+   원하면 투명도가 아니라 대비를 계산할 수 있는 색을 쓴다 — 합성 결과를 재보지
+   않으면 미달인 걸 눈으로는 못 잡는다. */
+.foot small { font-family: var(--font-mono); font-size: var(--text-2xs); }
+.foot .brand__cat, .foot .brand__name { color: var(--fg-on-brown); }
+/* The footer mascot keeps its white artwork in both themes — it sits on the
+   footer's own dark-brown surface, which does not follow the page theme. */
+.foot__mascot { width: 50px; height: auto; flex: 0 0 auto; transform: rotate(-4deg); }
+
+/* ---- Entrance animation -------------------------------------------------
+   Pure CSS so there is no third-party runtime on the critical path and no
+   visible-then-hidden flash if a CDN is slow. Elements are only hidden when
+   the browser has committed to animating them.
+
+   fill-mode is `backwards`, never `forwards`/`both`: an animation's final
+   keyframe outranks normal declarations in the cascade, so a filled-forwards
+   rise would permanently pin `transform` and silently kill every :hover tilt
+   on the elements it touches. `backwards` applies the from-keyframe during the
+   delay and then hands the element back to its own CSS. */
+@media (prefers-reduced-motion: no-preference) {
+  .rise { animation: rise var(--dur-base) var(--ease-paper) backwards; animation-delay: var(--rise-delay, 0ms); }
+  .rise--photo { animation: rise-photo 420ms var(--ease-paper) backwards; animation-delay: var(--rise-delay, 0ms); }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes rise-photo {
+  from { opacity: 0; transform: translateY(14px) scale(.97) rotate(var(--rest-rot, 0deg)); }
+  to   { opacity: 1; transform: rotate(var(--rest-rot, 0deg)); }
+}
+
+/* ---- Reduced motion ----------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration:.001ms !important; transition-duration:.001ms !important; }
+  html { scroll-behavior: auto; }
+}
+
+/* ---- Responsive nav ----------------------------------------------------- */
+@media (max-width: 560px) {
+  .brand__tag { display: none; }
+  .nav__inner { gap: var(--space-2); }
+  .nav__link { padding: 6px 8px; }
+  /* 31px of handwriting was eating 40% of a 360px nav — and the mark growing
+     30px → 46px with the kaomoji left only ~1px of slack once the font landed.
+     Stepping the wordmark down is a small-screen type decision on its own
+     merits, and it buys the loaded state ~19px of real headroom. */
+  .brand__name { font-size: var(--text-xl); }
+}
