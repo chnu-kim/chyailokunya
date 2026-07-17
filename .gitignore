@@ -1,0 +1,31 @@
+# dependencies
+/node_modules
+
+# next / build output
+/.next/
+/out/
+
+# opennext + cloudflare
+/.open-next/
+/.wrangler/
+
+# env & secrets — 배포에는 Cloudflare secret / 1Password Environment 로만 들어간다
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# test artifacts
+/coverage
+/playwright-report
+/test-results
+/blob-report
+/playwright/.cache
+
+# misc
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# 참고: next-env.d.ts 와 cloudflare-env.d.ts 는 "생성물이지만 커밋한다".
+# 그래야 CI 의 typecheck 단계가 next build / cf-typegen 을 먼저 돌리지 않고도 성립한다.

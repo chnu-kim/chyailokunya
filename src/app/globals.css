@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+/* 이 사이트는 prefers-color-scheme 가 아니라 data-theme 로 테마를 전환한다 — 첫 페인트
+   전에 인라인 스크립트가 정한다(구 site.js 계약). Tailwind 기본 dark 변형을 그 계약에
+   맞춰, dark:… 유틸리티가 [data-theme="dark"] 아래에서만 켜지게 한다. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ── 원시 팔레트 + 테마별 시맨틱 (런타임 CSS 변수) ────────────────────────────
+   색의 정본. 생 hex 는 여기서만 존재하고, 나머지 코드는 아래 @theme 이 만든
+   var(--token) 유틸리티로만 참조한다. 라이트/다크가 둘 다 살아 있어서, 값을 한쪽에만
+   두면 반대 테마에서 조용히 깨진다. 구 site.css 의 :root / [data-theme="dark"] 를
+   충실 이식한 것. */
+:root {
+  color-scheme: light;
+
+  /* Brand — 테마 불변 앵커 */
+  --brand-paper: #ffffff;
+  --brand-brown: #76554b;
+  --brand-brown-deep: #604830;
+  --brand-ink: #181818;
+  --brand-pink-soft: #f0d8d8;
+  --brand-pink: #e0a8b0;
+  --brand-taupe: #907878;
+  --brand-line: #dfe3ea;
+
+  /* Semantic — light */
+  --bg: var(--brand-paper);
+  --bg-rule: var(--brand-line);
+  --surface: #ffffff;
+  --surface-2: #f6f3f0;
+  --surface-frame: var(--brand-brown);
+  --fg: var(--brand-ink);
+  /* 본문/캡션이 종이 위에서 AA(4.5:1)를 넘게 --brand-taupe 보다 어둡다. taupe 는
+     손글씨/figcaption 장식 전용. */
+  --fg-muted: #6f5a5a;
+  --fg-on-brown: #f4ece6;
+  --fg-on-ink: #f4ece6;
+  --border: #1818180f;
+  --border-strong: var(--brand-ink);
+  --accent: var(--brand-pink);
+  --accent-ink: var(--brand-brown);
+  /* 키보드 포커스가 흰 종이 위에서 3:1 을 넘게 더 진한 로즈. 밝은 --accent 는 채움/CTA
+     전용(대비는 그 위 글자가 책임진다). */
+  --focus: #b25a68;
+
+  /* Status — 12px 텍스트로 라이트 표면(#ffffff·크림 섬)에서 AA 를 넘게 튜닝 */
+  --ok: #47613f;
+  --warn: #7a5c26;
+  --danger: #9a453d;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #15110f;
+  --bg-rule: #2a2320;
+  --surface: #1f1a17;
+  --surface-2: #161210;
+  --surface-frame: #0d0b0a;
+  --fg: #f1e8e2;
+  --fg-muted: #b29d96;
+  --fg-on-brown: #f4ece6;
+  --fg-on-ink: #f4ece6;
+  --border: #f1e8e21a;
+  --border-strong: #f1e8e2;
+  --accent: #e9b6bd;
+  --accent-ink: #c79b86;
+  --focus: #e9b6bd;
+  --ok: #8fbf87;
+  --warn: #e0b567;
+  --danger: #e88b80;
+}
+
+/* ── 정적 스케일 토큰 → Tailwind 유틸리티 (테마 불변) ─────────────────────────
+   타입·간격·라운드·그림자·이징은 테마와 무관하므로 일반 @theme 로 전체 유틸리티를 만든다.
+   Gloock·Sacramento 는 한글 글리프가 없어 각 스택이 한글 페이스를 직접 뒤에 세운다 —
+   그래야 한글 제목이 OS 임의 폰트로 떨어지지 않는다(구 site.css 에서 실제로 겪은 버그). */
+@theme {
+  --font-display: "Gloock", "Nanum Myeongjo", Georgia, serif;
+  --font-script: "Sacramento", "Nanum Pen Script", "Apple Chancery", cursive;
+  --font-body:
+    "Gothic A1", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --font-hand: "Nanum Pen Script", "Gloria Hallelujah", var(--font-body);
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 25px;
+  --text-2xl: 31px;
+  --text-3xl: 39px;
+  --text-4xl: 49px;
+  --text-5xl: clamp(3.5rem, 8vw, 5.5rem);
+
+  --leading-tight: 1.15;
+  --leading-normal: 1.6;
+  --tracking-caps: 0.18em;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-pill: 999px;
+
+  --shadow-tape: 0 1px 2px rgba(96, 72, 48, 0.18);
+  --shadow-card: 0 6px 18px rgba(96, 72, 48, 0.16);
+  --shadow-lift: 0 18px 40px rgba(24, 24, 24, 0.22);
+  --shadow-cut: 2px 3px 0 rgba(24, 24, 24, 0.9);
+
+  --ease-paper: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* ── 테마 전환 색 → 유틸리티 ───────────────────────────────────────────────
+   inline 이라 유틸리티가 var(--bg) 를 "그대로" emit 한다. 그래야 :root →
+   [data-theme="dark"] 로 --bg 가 바뀔 때 bg-bg 도 같이 따라간다. inline 이 아니면
+   Tailwind 가 값을 자기 :root 에 한 번 굳혀버려서 플립이 죽는다. */
+@theme inline {
+  --color-brand-paper: var(--brand-paper);
+  --color-brand-brown: var(--brand-brown);
+  --color-brand-brown-deep: var(--brand-brown-deep);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-pink-soft: var(--brand-pink-soft);
+  --color-brand-pink: var(--brand-pink);
+  --color-brand-taupe: var(--brand-taupe);
+  --color-brand-line: var(--brand-line);
+
+  --color-bg: var(--bg);
+  --color-bg-rule: var(--bg-rule);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-frame: var(--surface-frame);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-on-brown: var(--fg-on-brown);
+  --color-fg-on-ink: var(--fg-on-ink);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-focus: var(--focus);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+}
+
+@layer base {
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+  }
+  /* 포커스 링은 항상 보이게. --accent 는 채움용이라 링으로 쓰면 대비가 안 나므로 --focus. */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}

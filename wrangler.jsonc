@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chyailokunya",
+  "main": ".open-next/worker.js",
+  // 2024-09-23 이후여야 OpenNext 어댑터가 요구하는 런타임 기능이 켜진다. 로컬 workerd
+  // (1.20260714)와 맞물리게 최근 날짜로 둔다. 올릴 땐 Workers Builds 런타임도 함께 확인.
+  "compatibility_date": "2026-07-14",
+  // nodejs_compat: Next 런타임이 node: 내장 모듈을 쓴다.
+  // global_fetch_strictly_public: 자기 도메인으로의 fetch 를 공용 인터넷 경로로 보내
+  //   Next 의 내부 라우팅 가정과 어긋나지 않게 한다(OpenNext 권장).
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+  },
+  // 동적 라우트·재검증이 자기 자신을 다시 부르는 경로. 이름은 위 name 과 반드시 일치.
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "chyailokunya",
+    },
+  ],
+  "observability": {
+    "enabled": true,
+  },
+}
