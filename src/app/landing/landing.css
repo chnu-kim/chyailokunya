@@ -1,0 +1,553 @@
+/* 소개(landing) 전용 스타일 — 구 landing.html <style> 충실 이식. 공유 크롬·토큰은
+   chrome.css·globals.css. 이미지 src 는 마크업에 있어 여기 에셋 경로는 없다(종이 결은
+   인라인 데이터 URI). */
+
+/* ---- Hero --------------------------------------------------------------- */
+.hero {
+  padding: var(--space-8) 0 var(--space-7);
+}
+.hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--space-8);
+  align-items: center;
+}
+.hero__kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+/* 라틴 이름 — 사이트에서 실제로 Sacramento 로 렌더되는 유일한 문자열. 얼굴+자간은
+   .t-script. */
+.hero__h1 {
+  font-size: var(--text-5xl);
+  line-height: 0.95;
+}
+.hero__sub {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  margin-top: var(--space-2);
+}
+.hero__lead {
+  font-size: var(--text-lg);
+  color: var(--fg-muted);
+  max-width: 48ch;
+  margin: var(--space-4) 0 var(--space-6);
+}
+.hero__cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.hero__note {
+  font-family: var(--font-hand);
+  font-size: var(--text-xl);
+  color: var(--brand-taupe);
+  margin-top: var(--space-5);
+  transform: rotate(-1.5deg);
+}
+/* 컷아웃의 다이컷 테두리·접지 그림자는 .sticker 가 filter 로 담당한다 — 여기선 카드
+   전체 각도와 호버만 얹는다. 클립·리본이 걸칠 사각 모서리는 아래 .kv 액자가 만든다. */
+.hero__photo {
+  position: relative;
+  margin: 0;
+  --rest-rot: -2deg;
+  transform: rotate(var(--rest-rot));
+  transition: transform var(--dur-base) var(--ease-paper);
+}
+.hero__photo:hover {
+  transform: rotate(0deg) translateY(-4px);
+}
+
+/* ---- Key visual — 액자에 끼운 줄노트 페이지 --------------------------------
+   컷아웃만 두면 페이지 줄무늬 위에 근거 없이 떠 있는다: 다이컷 테두리가 "어딘가에 붙은
+   스티커"라는데 붙을 종이가 없다. 그래서 붙일 바닥을 만든다 — 크라프트 액자 안에 줄노트
+   한 장, 그 위에 스티커. 여기서 나오는 클립·리본·발바닥·고양이는 전부 이미 사이트가 쓰는
+   어휘다. */
+.kv {
+  position: relative;
+  padding: 13px;
+  background: var(--surface-frame);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lift);
+}
+/* isolation 은 아래 ::after 의 mix-blend-mode 때문이다 — overflow:hidden 은 쌓임 맥락을
+   안 만들어 그대로 두면 그레인이 액자·페이지 밖 배경까지 물들인다. */
+.kv__page {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 2px;
+  padding: var(--space-5) var(--space-4) var(--space-6);
+  background-color: var(--surface);
+  background-image: repeating-linear-gradient(var(--surface) 0 25px, var(--bg-rule) 25px 26px);
+}
+
+/* 종이 결 — feTurbulence 한 장을 140px 타일로 반복. 인라인 데이터 URI(에셋 안 늘림),
+   saturate 0 필수(안 그러면 컬러 노이즈로 종이에 무지개), stitchTiles 로 타일 경계 격자
+   제거. ::after 라 마크·발바닥·고양이(z0)까지 덮고 스티커(z1)는 별개 종잇장이라 안 덮는다. */
+.kv__page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+  opacity: 0.34;
+}
+/* 다크에선 multiply 가 charcoal 을 검정으로 뭉갠다 — screen 으로 뒤집어 chalk 가루처럼
+   밝은 쪽으로 튀게 한다. */
+[data-theme="dark"] .kv__page::after {
+  mix-blend-mode: screen;
+  opacity: 0.15;
+}
+
+.kv__img {
+  position: relative;
+  z-index: 1;
+}
+
+/* 커서를 광원으로 삼는다 — 컷아웃이 페이지에서 몇 mm 떠 있다는 사실을 그림자 위치만으로
+   말한다. --kv-lx/ly 는 KeyVisual 컴포넌트가 -1..1 로 채우고, 없으면 0 이라 기본 광원(위)
+   으로 떨어진다. 커서가 오른쪽이면 그림자는 왼쪽 — 부호가 반대인 게 핵심. hover 쿼리로
+   감싼 이유: 터치에선 pointermove 가 탭 순간에만 와 그림자가 한 번 튀고 굳는다. */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .kv__img {
+    --sticker-lift-x: calc(var(--kv-lx, 0) * -9px);
+    --sticker-lift-y: calc(12px + var(--kv-ly, 0) * -5px);
+    transform: translate(calc(var(--kv-lx, 0) * 4px), calc(var(--kv-ly, 0) * 3px));
+  }
+}
+
+/* 클립은 액자 위(-10px)에서 시작해 아래 절반이 종이에 얹힌다(액자 padding 13px). 기본값이
+   오른쪽이므로 왼쪽으로. */
+.kv > .clip {
+  left: 26px;
+  right: auto;
+  z-index: 3;
+}
+
+/* 코너 리본. 잉크가 아니라 --border-strong 인 이유: 다크에서 액자가 거의 검정(#0d0b0a)이
+   되므로 잉크 리본은 액자에 먹혀 사라진다. */
+.kv__ribbon {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: 0;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 0 var(--radius-sm) 0 0;
+}
+.kv__ribbon::after {
+  content: "";
+  position: absolute;
+  top: 11px;
+  right: -26px;
+  width: 104px;
+  height: 19px;
+  background: var(--border-strong);
+  transform: rotate(45deg);
+  box-shadow: var(--shadow-tape);
+}
+
+/* 종이에 흐리게 남은 서명 — 캐릭터가 절반을 가려 "밑에 깔린 층"으로 읽힌다. z0 이라
+   스티커(z1) 뒤. */
+.kv__mark {
+  position: absolute;
+  z-index: 0;
+  top: 12%;
+  left: 50%;
+  white-space: nowrap;
+  transform: translateX(-50%) rotate(-5deg);
+  line-height: 0.9;
+  font-size: 4.25rem;
+  color: color-mix(in srgb, var(--fg-muted) 24%, transparent);
+}
+
+/* 발바닥 트레일·고양이 스티커도 z0 — 캐릭터 실루엣 뒤로 지나간다. 세로 위치는 실루엣이
+   좁아지는 다리 높이에 맞춘다. 48px 는 심볼이 정사각 상자로 바뀌며 붙은 여백을 감안해
+   잉크 기준으로 이전과 같은 크기를 내는 값이다. */
+.kv__paws {
+  position: absolute;
+  z-index: 0;
+  left: 6px;
+  bottom: 12%;
+  width: 48px;
+  height: auto;
+  color: var(--accent-ink);
+  opacity: 0.85;
+}
+.kv__cat {
+  position: absolute;
+  z-index: 0;
+  right: 10px;
+  bottom: 30%;
+  width: 34px;
+  height: auto;
+  color: var(--fg);
+}
+/* 얼굴색을 SVG 속성이 아니라 CSS 규칙으로 주는 이유: presentation 속성 안의 var() 는
+   지원이 갈려 실패하면 기본 fill(검정)으로 조용히 떨어진다 — 다크에서 눈·입이 사라지는
+   그 버그다. */
+.kv__cat-head {
+  fill: currentColor;
+}
+.kv__cat-eye {
+  fill: var(--surface);
+}
+.kv__cat-mouth {
+  fill: none;
+  stroke: var(--surface);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+/* ---- 손으로 붙였다는 감각 — 컨텐츠 카드 3장에만 -------------------------
+   기운 물건이 열 개를 넘으면 "손으로 붙였다"가 아니라 "정렬이 깨졌다"로 읽힌다. 그래서
+   각도를 갖는 건 컨텐츠 카드 셋뿐이다. --rest-rot/--nudge-y 를 변수로 두는 이유: 아래
+   좁은 화면 쿼리가 각도만 0 으로 덮어야 하는데 transform 에 박으면 hover 까지 삼킨다.
+   각도 규칙: ① 서로의 거울상이 아니다 ② 큰 종이일수록 평평하다 ③ 상한 2.2°. */
+.ccard {
+  --rest-rot: 0deg;
+  --nudge-y: 0px;
+  transform: rotate(var(--rest-rot)) translateY(var(--nudge-y));
+  transition:
+    transform var(--dur-base) var(--ease-paper),
+    box-shadow var(--dur-base);
+}
+/* 집으면 펴지면서 뜬다. z-index 는 뜬 카드가 옆 카드 밑에 깔리지 않게 한다. */
+.ccard:hover {
+  transform: rotate(0deg) translateY(calc(var(--nudge-y) - 3px));
+  box-shadow: var(--shadow-lift);
+  z-index: 1;
+}
+
+/* ---- Profile spec ----------------------------------------------------- */
+/* 밀도 교대 — 프로필은 조이고(space-6), 컨텐츠는 크게 숨 쉬고(space-9), 소셜은 다시
+   조인다. 이 리듬 하나가 "템플릿 세 번"을 "노트 한 권"으로 바꾼다. */
+.profile {
+  padding: var(--space-7) 0 var(--space-6);
+}
+.profile__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  flex-wrap: wrap;
+}
+.profile__head h2 {
+  font-size: var(--text-3xl);
+}
+.profile__grid {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: var(--space-7);
+  align-items: start;
+}
+/* 상반신 초상을 폴라로이드로 핀 — 섹션의 단 하나의 플로리시. .polaroid 가 사진지 표면 +
+   다크 토큰 섬을 담당한다. */
+.profile__photo {
+  margin: 0;
+  padding: 12px 12px 18px;
+  --rest-rot: -2deg;
+  transform: rotate(var(--rest-rot));
+  transition: transform var(--dur-base) var(--ease-paper);
+}
+.profile__photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+.profile__photo figcaption {
+  margin-top: 10px;
+}
+.profile__photo:hover {
+  transform: rotate(0deg) translateY(-3px);
+}
+.profile__photo .tape {
+  z-index: 2;
+}
+/* 폭을 grid 가 아니라 "내용"이 정하게 둔다. flex-wrap 위에서 "MBTI/INFP"는 저절로 좁고
+   "이름/챠이로 쿠냐"는 저절로 넓다 — span 숫자 하나 없이 크기 차이가 곧 정보량이다.
+   각도는 일부러 안 준다: 여긴 읽어야 하는 데이터라 기울이면 시선이 값이 아니라 각도를
+   먼저 읽는다. */
+.spec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.spec__item {
+  flex: 0 1 auto;
+  padding: var(--space-4) var(--space-5);
+}
+.spec__item dt {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.spec__item dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+}
+/* 한마디만 한 줄을 통째로 먹는다 — flex-basis 100% 가 강제 줄바꿈을 만들어, 위 너덜한
+   메모 더미와 아래 넓은 한 장이라는 대비가 생긴다. */
+.spec__item--wide {
+  flex: 1 1 100%;
+}
+.spec__item--wide dd {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: var(--text-base);
+  max-width: 62ch;
+}
+
+/* ---- Content / 컨텐츠 ------------------------------------------------- */
+.content {
+  padding: var(--space-9) 0 var(--space-7);
+}
+
+/* 균등 3열 대신: ① 크기가 의미를 갖는다(저챗·종합게임은 주력이라 넓고 노래는 좁다)
+   ② 아이콘을 위계에서 뺀다(30px 배지를 종이에 찍힌 큰 도장으로). flex-basis 가 최소 폭이자
+   줄바꿈 지점이다. */
+.content__grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+.ccard {
+  padding: var(--space-6);
+  overflow: hidden;
+}
+.ccard:nth-child(1) {
+  flex: 1 1 320px;
+  --rest-rot: -0.8deg;
+  --nudge-y: 0px;
+}
+.ccard:nth-child(2) {
+  flex: 1 1 300px;
+  --rest-rot: 0.9deg;
+  --nudge-y: 14px;
+}
+.ccard:nth-child(3) {
+  flex: 0 1 240px;
+  --rest-rot: -1.6deg;
+  --nudge-y: -6px;
+}
+
+/* 도장은 카드 밖으로 걸쳐 나가 잘린다(위 overflow:hidden). 온전히 보이면 그냥 큰 아이콘
+   으로 되돌아가고, 잘려야 "찍혔다"로 읽힌다. opacity 로 죽여 토큰(--fg)을 우회하지 않는다. */
+.ccard__ic {
+  position: absolute;
+  right: -14px;
+  bottom: -12px;
+  width: 92px;
+  height: 92px;
+  color: var(--fg);
+  opacity: 0.12;
+  transform: rotate(-8deg);
+  pointer-events: none;
+}
+/* h3·p 를 positioned 로 올려 도장(absolute) 위에 텍스트가 이기게 한다(DOM 순서상 도장이
+   먼저라 같은 레이어면 텍스트가 이긴다). */
+.ccard h3 {
+  font-size: var(--text-xl);
+  margin-bottom: var(--space-2);
+  position: relative;
+}
+.ccard p {
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+  position: relative;
+  max-width: 34ch;
+}
+
+/* ---- Social ----------------------------------------------------------- */
+.social {
+  padding: var(--space-6) 0 var(--space-8);
+}
+
+/* 가운데 정렬된 판은 아무리 꾸며도 "슬라이드"로 읽힌다 — 왼쪽으로 눕혀 읽는 눈이 한 줄기로
+   흐르게 하고, 대신 마스코트를 판 밖으로 밀어낸다. */
+.social__panel {
+  padding: var(--space-7);
+  text-align: left;
+  --mascot-lane: 120px;
+}
+/* 클립을 왼쪽으로 — 기본값이 오른쪽이라 아래 마스코트와 같은 모서리에서 겹친다. */
+.social__panel > .clip {
+  left: 28px;
+  right: auto;
+}
+.social__panel h2 {
+  font-size: var(--text-3xl);
+}
+.social__panel p {
+  color: var(--fg-muted);
+  margin: var(--space-2) 0 var(--space-6);
+}
+/* 마스코트가 차지한 오른쪽 차선을 글이 침범하지 못하게 폭으로 예약한다. 46ch 는 넓은
+   화면에서 한 줄이 너무 길지 않게 막는 상한 — min() 이라 둘 중 좁은 쪽이 이긴다. */
+.social__panel h2,
+.social__panel p {
+  max-width: min(46ch, calc(100% - var(--mascot-lane)));
+}
+
+/* 잉크 charcoal 마스코트 — 판 위 모서리에 걸터앉은 스티커. absolute 라 흐름에서 빠져 글은
+   왼쪽 끝에서 시작한다. -9deg 까지 여는 건 이게 카드가 아니라 캐릭터라서다. 테마별 src
+   스왑은 ThemedImg 가 맡는다. */
+.social__mascot {
+  position: absolute;
+  z-index: 2;
+  right: 18px;
+  top: -48px;
+  width: 116px;
+  height: auto;
+  margin: 0;
+  --rest-rot: -9deg;
+  transform: rotate(var(--rest-rot));
+  transition: transform var(--dur-base) var(--ease-paper);
+}
+.social__mascot:hover {
+  transform: rotate(0deg) translateY(-3px);
+}
+.social__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-start;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* min-height 44: 진짜 목적지라 다른 컨트롤과 같은 터치 타깃 하한을 따른다. */
+.slink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  min-height: 44px;
+  box-sizing: border-box;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: var(--text-sm);
+  color: var(--fg);
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  transition:
+    transform var(--dur-fast) var(--ease-paper),
+    box-shadow var(--dur-base);
+}
+/* 채널 태그는 기울이지 않는다 — 나란히 선 버튼 셋이 각자 다른 각도로 누우면 오작동으로
+   보인다. 남는 유일한 움직임은 눌리는 감각(translateY). */
+.slink:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card);
+}
+.slink:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+.slink svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.slink small {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+.slink__glyph {
+  fill: var(--surface);
+}
+
+/* 사진·마스코트는 링크가 아니라 탭해도 페이지가 안 넘어간다 — 터치에서 :hover 가 붙으면
+   기울기가 펴진 채 굳는다. 쉼 상태를 리터럴이 아니라 --rest-rot 으로 되돌리는 게 핵심이고,
+   이 블록이 :hover 규칙들보다 뒤에 있어야 이긴다(명시도 동일). */
+@media (hover: none) {
+  .hero__photo:hover {
+    transform: rotate(var(--rest-rot));
+  }
+  .profile__photo:hover {
+    transform: rotate(var(--rest-rot));
+  }
+  .social__mascot:hover {
+    transform: rotate(var(--rest-rot));
+  }
+  /* 컨텐츠 카드도 같은 함정 — 탭하면 각도가 펴진 채 굳는다. box-shadow 까지 되돌린다. */
+  .ccard:hover {
+    transform: rotate(var(--rest-rot)) translateY(var(--nudge-y));
+    box-shadow: var(--shadow-card);
+    z-index: auto;
+  }
+  /* .slink 는 target="_blank" 라 새 탭이 열려도 이 페이지가 남는다 — lift 가 굳으므로
+     여기서 되돌린다. */
+  .slink:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .hero__grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+  }
+  .hero__photo {
+    max-width: 320px;
+    order: -1;
+    margin: 0 auto;
+  }
+  .profile__grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+  }
+  .profile__photo {
+    max-width: 300px;
+    margin: 0 auto;
+  }
+}
+@media (max-width: 560px) {
+  .hero {
+    padding: var(--space-6) 0;
+  }
+  .hero__photo {
+    --rest-rot: 0deg;
+    margin: 0 auto;
+  }
+  /* 좁은 화면에선 남은 각도마저 편다 — 카드가 폭을 꽉 채우면 회전한 모서리가 옆 카드를
+     파고들고 가로 스크롤을 만든다. */
+  .ccard {
+    --rest-rot: 0deg;
+    --nudge-y: 0px;
+  }
+  .spec__item,
+  .ccard {
+    flex: 1 1 100%;
+  }
+  /* 마스코트도 같이 줄인다 — 좁은 판에서 116px 가 위로 48px 솟으면 윗 섹션을 덮는다.
+     차선 예약도 같은 비율로 줄인다. */
+  .social__mascot {
+    width: 78px;
+    top: -34px;
+    right: 10px;
+  }
+  .social__panel {
+    --mascot-lane: 64px;
+  }
+}

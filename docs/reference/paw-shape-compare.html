@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>챠이로 쿠냐 — 발바닥 세로 길이 비교 (tall / 기본 / flat)</title>
+<meta name="description" content="발바닥 심볼의 세로 길이 3안 비교 — 실제 렌더 크기, 확대본, 겹쳐보기, 실측 수치. 내부 검토용." />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#15110f" media="(prefers-color-scheme: dark)" />
+<meta name="robots" content="noindex" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&family=Gothic+A1:wght@400;500;700;900&family=Nanum+Myeongjo:wght@400;700;800&family=Nanum+Pen+Script&family=Sacramento&display=swap" />
+<link rel="stylesheet" href="css/site.css" />
+<script>/* apply saved/system theme before first paint — no light-mode flash */try{var t=localStorage.getItem('ck-theme');if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+<style>
+  /* ---- 검토 페이지 셸 ---------------------------------------------------- */
+  .cmp-head { padding: var(--space-8) 0 var(--space-6); }
+  .cmp-head h1 { font-size: var(--text-4xl); margin-top: var(--space-2); }
+  .cmp-head p { color: var(--fg-muted); max-width: 64ch; margin: var(--space-4) 0 0; }
+  .note { margin-top: var(--space-5); padding: var(--space-4) var(--space-5);
+    border-left: 3px solid var(--fg); background: var(--surface-2);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: var(--text-sm);
+    color: var(--fg-muted); max-width: 74ch; }
+  .note b { color: var(--fg); }
+
+  .sec { padding: var(--space-7) 0; border-top: 1.5px solid var(--border-strong); }
+  .sec__head { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+  .sec__head h2 { font-size: var(--text-2xl); margin: 0; }
+  .sec__why { color: var(--fg-muted); font-size: var(--text-sm); margin: var(--space-3) 0 var(--space-6);
+    max-width: 70ch; }
+
+  .toolbar { position: sticky; top: 0; z-index: 5; display: flex; justify-content: flex-end;
+    padding: var(--space-3) 0; background: var(--bg); }
+
+  /* ---- 발바닥 렌더 -------------------------------------------------------- */
+  /* 배포본은 심볼 자체에 fill 을 건다(참조부에서 color 만 바꾸면 다크에서 검은
+     자국이 남으므로). 이 페이지는 같은 도형을 채움과 윤곽 두 방식으로 보여줘야
+     해서, 심볼에 fill 을 박지 않고 CSS 로 준다 — fill 은 상속되는 속성이라
+     <use> 그림자 트리까지 내려간다. 검토용 예외이고 배포 규약이 아니다. */
+  .paw { fill: currentColor; flex-shrink: 0; }
+  .paw--ghost { fill: none; stroke: currentColor; stroke-width: 1.6; }
+
+  /* index.html 의 트레일을 그대로 재현 — 크기·간격·회전·페이드가 같아야
+     "실제로 이렇게 보인다"가 성립한다. */
+  .trail { display: flex; justify-content: center; align-items: center; gap: 18px;
+    color: var(--brand-taupe); pointer-events: none; user-select: none; }
+  .trail .paw { width: 22px; height: 22px; --paw-dim: 1; --paw-fade: .6;
+    opacity: calc(var(--paw-fade) * var(--paw-dim)); }
+  .trail .paw:nth-child(1) { --paw-fade: .40; transform: rotate(-10deg) translateY(6px) scale(.94); }
+  .trail .paw:nth-child(2) { --paw-fade: .58; transform: rotate(3deg) translateY(-5px); }
+  .trail .paw:nth-child(3) { --paw-fade: .78; transform: rotate(12deg) translateY(5px) scale(1.04); }
+  [data-theme="dark"] .trail .paw { --paw-dim: .85; }
+
+  /* landing.html 키비주얼 트레일의 실효 크기(잉크 폭 34.8px ≈ 상자 36px). */
+  .kvtrail { display: flex; flex-direction: column; align-items: center; gap: 6px;
+    color: var(--accent-ink); opacity: .85; }
+  .kvtrail .paw { width: 36px; height: 36px; }
+  .kvtrail .paw:nth-child(1) { transform: rotate(-14deg) translateX(4px); }
+  .kvtrail .paw:nth-child(2) { transform: rotate(6deg) translateX(-4px); }
+  .kvtrail .paw:nth-child(3) { transform: rotate(-8deg) translateX(2px); }
+
+  /* ---- 카드 그리드 -------------------------------------------------------- */
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); }
+  @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1.5px solid var(--border-strong);
+    border-radius: var(--radius-md); padding: var(--space-5); min-width: 0; }
+  .card__tag { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-4); }
+  .card__key { font-family: var(--font-display); font-size: var(--text-xl); line-height: 1; }
+  .card__name { font-size: var(--text-sm); color: var(--fg-muted); }
+  .card__stage { display: grid; place-items: center; min-height: 120px;
+    background: var(--bg); border-radius: var(--radius-sm); padding: var(--space-4); }
+  .card__foot { margin-top: var(--space-4); font-family: var(--font-mono); font-size: var(--text-2xs);
+    color: var(--fg-muted); line-height: 1.7; }
+  .card--now { border-color: var(--accent); }
+  .badge { font-family: var(--font-body); font-size: var(--text-2xs); font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px;
+    border-radius: var(--radius-pill); border: 1px solid var(--fg-muted); color: var(--fg-muted); }
+  .badge--now { border-color: var(--accent); color: var(--fg); }
+
+  .big { display: grid; place-items: center; min-height: 240px; }
+  .big .paw { width: 200px; height: 200px; color: var(--fg); }
+
+  /* 겹쳐보기 — A 를 채움으로 깔고 그 위에 후보 윤곽을 얹는다. */
+  .stack { position: relative; width: 200px; height: 200px; margin: 0 auto; }
+  .stack .paw { position: absolute; inset: 0; width: 200px; height: 200px; }
+  .stack .paw--base { color: color-mix(in srgb, var(--fg) 18%, transparent); }
+  .stack .paw--ghost { color: var(--accent); }
+
+  /* ---- 수치표 ------------------------------------------------------------ */
+  .tbl { width: 100%; border-collapse: collapse; margin-top: var(--space-4); }
+  .tbl th, .tbl td { text-align: left; padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
+  .tbl th { font-family: var(--font-display); font-weight: 400; }
+  .tbl td { font-family: var(--font-mono); font-size: var(--text-xs); }
+  .tbl td:first-child { font-family: var(--font-body); }
+  .tbl tr[data-now] { background: var(--surface-2); }
+  .warn { color: var(--danger); font-weight: 700; }
+  .ok { color: var(--ok); }
+</style>
+</head>
+<body>
+
+<!-- 세 안의 도형. 각각 assets/ 의 파일 하나와 좌표가 같다(파싱 대조로 확인):
+       paw-tall → deco-paw-tall.svg   paw-default → deco-paw.svg(기본)   paw-flat → deco-paw-flat.svg
+     발바닥만 꼭짓점 기준으로 세로를 누르고, 어깨가 올라와 바깥 발가락에 붙는 걸
+     막으려 바깥 발가락 y 를 함께 올린 것이다. 발가락 크기와 발바닥 폭은 세 안이
+     모두 같아서, 보이는 차이는 오로지 발바닥 세로 길이다. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="paw-tall" viewBox="0 0 64 64">
+    <ellipse cx="22.4" cy="14.6" rx="7.4" ry="9.1" transform="rotate(-7 22.4 14.6)"/>
+    <ellipse cx="41.6" cy="14.6" rx="7.4" ry="9.1" transform="rotate(7 41.6 14.6)"/>
+    <ellipse cx="9.2"  cy="30.3" rx="7.4" ry="9.1" transform="rotate(-34 9.2 30.3)"/>
+    <ellipse cx="54.8" cy="30.3" rx="7.4" ry="9.1" transform="rotate(34 54.8 30.3)"/>
+    <path d="M32 26.4C35.3 27.8 40.4 29.8 43.2 34.1C46.3 38.7 48.9 42.6 48.8 47.5C48.7 53.3 45.6 58 40.6 58.4C37.2 58.6 34.2 57.7 32 56.1C29.8 57.7 26.8 58.6 23.4 58.4C18.4 58 15.3 53.3 15.2 47.5C15.1 42.6 17.7 38.7 20.8 34.1C23.6 29.8 28.7 27.8 32 26.4Z"/>
+  </symbol>
+  <symbol id="paw-default" viewBox="0 0 64 64">
+    <ellipse cx="22.4" cy="17.6" rx="7.4" ry="9.1" transform="rotate(-7 22.4 17.6)"/>
+    <ellipse cx="41.6" cy="17.6" rx="7.4" ry="9.1" transform="rotate(7 41.6 17.6)"/>
+    <ellipse cx="9.2"  cy="30"   rx="7.4" ry="9.1" transform="rotate(-34 9.2 30)"/>
+    <ellipse cx="54.8" cy="30"   rx="7.4" ry="9.1" transform="rotate(34 54.8 30)"/>
+    <path d="M32 29.4C35.3 30.6 40.4 32.2 43.2 35.7C46.3 39.4 48.9 42.6 48.8 46.6C48.7 51.3 45.6 55.1 40.6 55.4C37.2 55.6 34.2 54.9 32 53.6C29.8 54.9 26.8 55.6 23.4 55.4C18.4 55.1 15.3 51.3 15.2 46.6C15.1 42.6 17.7 39.4 20.8 35.7C23.6 32.2 28.7 30.6 32 29.4Z"/>
+  </symbol>
+  <symbol id="paw-flat" viewBox="0 0 64 64">
+    <ellipse cx="22.4" cy="19.1" rx="7.4" ry="9.1" transform="rotate(-7 22.4 19.1)"/>
+    <ellipse cx="41.6" cy="19.1" rx="7.4" ry="9.1" transform="rotate(7 41.6 19.1)"/>
+    <ellipse cx="9.2"  cy="31.5" rx="7.4" ry="9.1" transform="rotate(-34 9.2 31.5)"/>
+    <ellipse cx="54.8" cy="31.5" rx="7.4" ry="9.1" transform="rotate(34 54.8 31.5)"/>
+    <path d="M32 30.9C35.3 31.9 40.4 33.4 43.2 36.5C46.3 39.8 48.9 42.6 48.8 46.1C48.7 50.3 45.6 53.7 40.6 53.9C37.2 54.1 34.2 53.4 32 52.3C29.8 53.4 26.8 54.1 23.4 53.9C18.4 53.7 15.3 50.3 15.2 46.1C15.1 42.6 17.7 39.8 20.8 36.5C23.6 33.4 28.7 31.9 32 30.9Z"/>
+  </symbol>
+</svg>
+
+<div class="page">
+  <div class="wrap">
+
+    <div class="toolbar">
+      <button class="theme-toggle" type="button" data-od-id="theme-toggle" data-theme-toggle aria-pressed="false" aria-label="다크 모드">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M19.4 4.6l-1.8 1.8M6.4 17.6l-1.8 1.8"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5z"/></svg>
+      </button>
+    </div>
+
+    <header class="cmp-head" data-od-id="compare-head">
+      <span class="chip chip--ink t-caps">내부 검토용 · 사이트에서 링크하지 않음</span>
+      <h1>발바닥 세로 길이 — 3안 비교</h1>
+      <p>발바닥 세로 길이만 다른 세 안을 함께 관리합니다. 발가락 크기와 발바닥 폭은
+        셋이 모두 같으니 <b>보이는 차이는 오직 발바닥 세로 길이</b>입니다. 지금
+        기본값은 가운데(비 1.29)이고, 나머지 둘은 <code>assets/</code> 에 파일로
+        남아 있어 언제든 바꿔 끼울 수 있습니다.</p>
+      <div class="note">
+        <b>결정은 맨 위 "실제 크기" 칸에서 하세요.</b> 이 발바닥이 쓰이는 곳은 22px 과
+        35px 두 군데뿐입니다. 확대본에서 좋아 보이는 게 그 크기에서도 좋다는 보장이
+        없고, 실제로 지난번 3엽 발바닥이 그렇게 실패했습니다. 아래 확대·겹쳐보기는
+        "왜 다른지"를 설명할 뿐 판단 근거가 아닙니다.
+      </div>
+    </header>
+
+    <!-- ① 실제 크기 — 판단은 여기서 -->
+    <section class="sec" data-od-id="compare-actual-size">
+      <div class="sec__head">
+        <h2>① 실제 크기</h2>
+        <span class="badge">이 칸에서 고르세요</span>
+      </div>
+      <p class="sec__why">위는 홈의 발바닥 트레일(22px, 종이 위 taupe), 아래는 소개
+        페이지 키비주얼 트레일(잉크 폭 약 35px, 브라운)입니다. 회전·간격·페이드까지
+        배포본과 같게 재현했습니다. 테마 토글로 다크도 확인하세요.</p>
+
+      <div class="cards">
+        <div class="card">
+          <div class="card__tag"><span class="card__key">tall</span><span class="card__name">deco-paw-tall.svg</span></div>
+          <div class="card__stage">
+            <div class="trail" aria-hidden="true">
+              <svg class="paw"><use href="#paw-tall"/></svg>
+              <svg class="paw"><use href="#paw-tall"/></svg>
+              <svg class="paw"><use href="#paw-tall"/></svg>
+            </div>
+          </div>
+          <div class="card__stage" style="margin-top:var(--space-3)">
+            <div class="kvtrail" aria-hidden="true">
+              <svg class="paw"><use href="#paw-tall"/></svg>
+              <svg class="paw"><use href="#paw-tall"/></svg>
+              <svg class="paw"><use href="#paw-tall"/></svg>
+            </div>
+          </div>
+          <div class="card__foot">발바닥 33.6 × 32.0 · 비 1.05</div>
+        </div>
+
+        <div class="card card--now">
+          <div class="card__tag"><span class="card__key">기본</span><span class="card__name">deco-paw.svg</span><span class="badge badge--now">지금</span></div>
+          <div class="card__stage">
+            <div class="trail" aria-hidden="true">
+              <svg class="paw"><use href="#paw-default"/></svg>
+              <svg class="paw"><use href="#paw-default"/></svg>
+              <svg class="paw"><use href="#paw-default"/></svg>
+            </div>
+          </div>
+          <div class="card__stage" style="margin-top:var(--space-3)">
+            <div class="kvtrail" aria-hidden="true">
+              <svg class="paw"><use href="#paw-default"/></svg>
+              <svg class="paw"><use href="#paw-default"/></svg>
+              <svg class="paw"><use href="#paw-default"/></svg>
+            </div>
+          </div>
+          <div class="card__foot">발바닥 33.6 × 26.0 · 비 1.29</div>
+        </div>
+
+        <div class="card">
+          <div class="card__tag"><span class="card__key">flat</span><span class="card__name">deco-paw-flat.svg</span></div>
+          <div class="card__stage">
+            <div class="trail" aria-hidden="true">
+              <svg class="paw"><use href="#paw-flat"/></svg>
+              <svg class="paw"><use href="#paw-flat"/></svg>
+              <svg class="paw"><use href="#paw-flat"/></svg>
+            </div>
+          </div>
+          <div class="card__stage" style="margin-top:var(--space-3)">
+            <div class="kvtrail" aria-hidden="true">
+              <svg class="paw"><use href="#paw-flat"/></svg>
+              <svg class="paw"><use href="#paw-flat"/></svg>
+              <svg class="paw"><use href="#paw-flat"/></svg>
+            </div>
+          </div>
+          <div class="card__foot">발바닥 33.6 × 23.1 · 비 1.46</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ② 확대 -->
+    <section class="sec" data-od-id="compare-zoom">
+      <div class="sec__head"><h2>② 확대 (200px)</h2></div>
+      <p class="sec__why">형태 차이를 눈으로 확인하는 칸입니다. 발가락은 셋 다 같은
+        크기이고, 발바닥만 위아래로 눌립니다. 누르면 발바닥 어깨가 올라오기 때문에
+        바깥 발가락도 함께 올려야 붙지 않습니다 — B·C 는 그 보정이 들어간 상태입니다.</p>
+      <div class="cards">
+        <div class="card">
+          <div class="card__tag"><span class="card__key">tall</span><span class="card__name">deco-paw-tall.svg</span></div>
+          <div class="big"><svg class="paw" aria-hidden="true"><use href="#paw-tall"/></svg></div>
+        </div>
+        <div class="card card--now">
+          <div class="card__tag"><span class="card__key">기본</span><span class="card__name">deco-paw.svg</span><span class="badge badge--now">지금</span></div>
+          <div class="big"><svg class="paw" aria-hidden="true"><use href="#paw-default"/></svg></div>
+        </div>
+        <div class="card">
+          <div class="card__tag"><span class="card__key">flat</span><span class="card__name">deco-paw-flat.svg</span></div>
+          <div class="big"><svg class="paw" aria-hidden="true"><use href="#paw-flat"/></svg></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ 겹쳐보기 -->
+    <section class="sec" data-od-id="compare-overlay">
+      <div class="sec__head"><h2>③ 겹쳐보기</h2></div>
+      <p class="sec__why">회색 채움이 지금 쓰는 기본값, 그 위 분홍 윤곽이 대안입니다.
+        발바닥 아래쪽이 얼마나 내려가고 올라오는지, 발가락이 얼마나 따라 움직이는지가
+        한눈에 보입니다.</p>
+      <div class="cards" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+        <div class="card">
+          <div class="card__tag"><span class="card__key">기본 + tall</span><span class="card__name">회색 = 기본 · 분홍 = tall</span></div>
+          <div class="stack" aria-hidden="true">
+            <svg class="paw paw--base"><use href="#paw-default"/></svg>
+            <svg class="paw paw--ghost"><use href="#paw-tall"/></svg>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card__tag"><span class="card__key">기본 + flat</span><span class="card__name">회색 = 기본 · 분홍 = flat</span></div>
+          <div class="stack" aria-hidden="true">
+            <svg class="paw paw--base"><use href="#paw-default"/></svg>
+            <svg class="paw paw--ghost"><use href="#paw-flat"/></svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ④ 수치 -->
+    <section class="sec" data-od-id="compare-metrics">
+      <div class="sec__head"><h2>④ 실측 수치</h2></div>
+      <p class="sec__why">전부 좌표에서 계산한 값입니다. 눈으로 판단할 수 없는 두 가지가
+        여기 있습니다 — 발가락이 발바닥에 붙는지, 그리고 그 간격이 22px 에서 몇
+        픽셀로 남는지.</p>
+      <table class="tbl">
+        <thead>
+          <tr><th>항목</th><th>tall</th><th>기본 · 지금</th><th>flat</th></tr>
+        </thead>
+        <tbody>
+          <tr data-now><td>발바닥 크기</td><td>33.6 × 32.0</td><td>33.6 × 26.0</td><td>33.6 × 23.1</td></tr>
+          <tr><td>발바닥 가로세로비</td><td>1.05</td><td class="ok">1.29</td><td>1.46</td></tr>
+          <tr><td>발가락폭 / 발바닥폭</td><td class="ok">0.440</td><td class="ok">0.440</td><td class="ok">0.440</td></tr>
+          <tr><td>발가락–발바닥 간격</td><td>2.92</td><td>3.62</td><td>2.95</td></tr>
+          <tr><td>↳ 22px 렌더 시</td><td>1.00px</td><td>1.24px</td><td>1.01px</td></tr>
+          <tr><td>발 전체 높이</td><td>52.9</td><td>46.9</td><td>43.9</td></tr>
+          <tr><td>바깥 발가락 cy</td><td>30.3</td><td>30.0</td><td>31.5</td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <b>고양이 해부 기준.</b> 발가락폭 ÷ 발바닥폭은 세 안 모두 0.440 으로 고양이
+        범위(0.42~0.48)를 지킵니다 — 이번에 바꾸는 축이 아닙니다. 메인 패드의
+        가로세로비는 실제 고양이가 대략 1.2~1.4 라 <b>기본값(1.29)이 그 한가운데</b>,
+        flat(1.46)은 살짝 넘어가고 tall(1.05)은 못 미칩니다. 다만 이건 참고일 뿐,
+        22px 에서 어떻게 보이냐가 이깁니다.
+      </div>
+    </section>
+
+    <section class="sec" data-od-id="compare-next">
+      <div class="sec__head"><h2>바꿔 끼우려면</h2></div>
+      <p class="sec__why">기본값을 tall 이나 flat 으로 바꾸려면, 해당 파일의 좌표를
+        <b>다섯 곳</b>에 복제해야 합니다 — <code>assets/deco-paw.svg</code> 와
+        <code>index.html</code> · <code>games.html</code> · <code>landing.html</code> ·
+        <code>og-cover.html</code> 의 인라인 mk-paw 심볼.
+        컴포넌트 시스템이 없어서 심볼이 페이지마다 복제되는 구조라 그렇습니다. 바꾼
+        뒤에는 뭉침·대칭·상자 검증을 다시 돌리고, <code>landing.html</code> 의 트레일
+        viewBox 주석에 적힌 실측 잉크 범위도 같이 갱신해야 합니다 — 세로 길이가
+        달라지면 그 수치가 조용히 틀려집니다.</p>
+    </section>
+
+    <footer class="foot">
+      <p>© <span data-year>2026</span> 챠이로 쿠냐 팬 사이트 · 내부 검토 문서</p>
+    </footer>
+
+  </div>
+</div>
+
+<script src="js/site.js" defer></script>
+</body>
+</html>

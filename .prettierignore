@@ -5,3 +5,6 @@ node_modules
 next-env.d.ts
 cloudflare-env.d.ts
 package-lock.json
+
+# 구 정적 사이트의 frozen 스냅샷(내부 참고 페이지) — 원본 포맷 그대로 보존한다.
+docs/reference

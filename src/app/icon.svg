@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="6 6 52 52" role="img" aria-label="챠이로 쿠냐">
+  <!-- Brand mark · A 잉크 도장. 고양이는 그리는 게 아니라 잉크 블록에서 파낸다
+       (fill-rule evenodd), 눈만 위에 다시 찍는다. C 카오모지(mk-kao 심볼, nav·푸터
+       담당)와 한 쌍 — 스펙은 logo-identity-directions.html.
+
+       채움을 그룹의 presentation 속성(fill=…)으로 직접 준다. 스타일 블록으로만
+       걸면, SVG 를 샌드박스로 렌더하며 스타일을 벗기는 뷰어(파일 프리뷰 등)에서
+       채움이 사라져 빈 아이콘으로 보인다 — favicon 은 스타일시트 생존에 기대면
+       안 된다. 아래 스타일 블록은 그 위에 다크 크롬 대응만 얹는다: favicon 은
+       페이지 밖이라 상속받을 색이 없고, charcoal 탭에선 잉크 블록이 안 보이기
+       때문이다. 라이트 채움은 css/site.css 의 brand-ink 토큰이고, 다크 채움은
+       그 fg 토큰(chalk) 대신 순백 #ffffff 를 쓴다 — chalk 는 파비콘 크기에서
+       애매한 베이지로 흐려 어두운 탭에서 덜 보였다.
+
+       viewBox 는 도장 외곽에 딱 맞춰 여백을 없앴다 — 좌표는 그대로 두고 잘라내기만
+       했다. 작은 파비콘에서 마크가 최대한 크게 보이게 하려는 것이다. 도형 크기를
+       바꾸면 viewBox 도 외곽에 다시 맞춘다. -->
+  <style>
+    @media (prefers-color-scheme: dark) { .ink { fill: #ffffff } }
+  </style>
+  <g class="ink" fill="#181818">
+    <path fill-rule="evenodd" d="M6 15C6 10 10 6 15 6h34c5 0 9 4 9 9v34c0 5-4 9-9 9H15c-5 0-9-4-9-9z
+      M16 13l6.5 12.5c3-1.5 16-1.5 19 0L48 13l1.5 18c1 10-6.5 18-17.5 18s-19-8-17.5-18z"/>
+    <circle cx="25" cy="33" r="2.6"/>
+    <circle cx="39" cy="33" r="2.6"/>
+  </g>
+</svg>
