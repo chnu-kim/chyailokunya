@@ -1,0 +1,2 @@
+# components/ui 레이어: Radix/shadcn 프리미티브. features 를 쓰되 db·core 를 직접 건드리지 않는다.
+# Phase 2(정적 이식)에서 채운다.
