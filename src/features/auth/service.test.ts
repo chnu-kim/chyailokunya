@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import { makeDb, roleAuditLogs } from "@/db";
 import {
   ensureSuperadmin,
+  getIdentity,
   grantRole,
+  grantRoleWithAudit,
   listRolesForChannel,
   resolveUserIdByChannel,
   revokeRole,
+  revokeRoleWithAudit,
   upsertChzzkAccount,
   writeRoleAudit,
 } from "./service";
@@ -32,6 +35,51 @@ describe("upsertChzzkAccount", () => {
 
   it("로그인 이력 없는 channelId 는 resolve 가 null", async () => {
     expect(await resolveUserIdByChannel(db(), "nope")).toBeNull();
+  });
+
+  it("channelName 을 저장하고 재로그인 시 갱신한다(access 재구성용 스냅샷)", async () => {
+    const { userId } = await upsertChzzkAccount(db(), "chan-a", "쿠냐");
+    expect(await getIdentity(db(), userId)).toEqual({ channelId: "chan-a", channelName: "쿠냐" });
+    await upsertChzzkAccount(db(), "chan-a", "쿠냐냥"); // 재로그인, 표시명 변경
+    expect(await getIdentity(db(), userId)).toEqual({ channelId: "chan-a", channelName: "쿠냐냥" });
+  });
+
+  it("getIdentity 는 로그인 이력 없는 userId 에 null", async () => {
+    expect(await getIdentity(db(), 9999)).toBeNull();
+  });
+});
+
+describe("grantRoleWithAudit / revokeRoleWithAudit (원자적 batch)", () => {
+  it("grant 는 역할과 감사를 함께 쓴다", async () => {
+    const actor = await upsertChzzkAccount(db(), "chan-super");
+    const target = await upsertChzzkAccount(db(), "chan-t");
+    await grantRoleWithAudit(db(), {
+      actorUserId: actor.userId,
+      targetUserId: target.userId,
+      action: "grant",
+      role: "admin",
+    });
+    expect(await listRolesForChannel(db(), "chan-t")).toEqual(["admin"]);
+    expect(await db().select().from(roleAuditLogs)).toHaveLength(1);
+  });
+
+  it("revoke 는 역할 제거와 감사를 함께 쓴다", async () => {
+    const actor = await upsertChzzkAccount(db(), "chan-super");
+    const target = await upsertChzzkAccount(db(), "chan-t");
+    await grantRoleWithAudit(db(), {
+      actorUserId: actor.userId,
+      targetUserId: target.userId,
+      action: "grant",
+      role: "admin",
+    });
+    await revokeRoleWithAudit(db(), {
+      actorUserId: actor.userId,
+      targetUserId: target.userId,
+      action: "revoke",
+      role: "admin",
+    });
+    expect(await listRolesForChannel(db(), "chan-t")).toEqual([]);
+    expect(await db().select().from(roleAuditLogs)).toHaveLength(2);
   });
 });
 

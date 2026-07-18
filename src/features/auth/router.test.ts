@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { authoritiesFor } from "@/core/authorities";
+import { authoritiesFor, type Authority } from "@/core/authorities";
 import { makeDb, roleAuditLogs } from "@/db";
 import { createCallerFactory, type Context, type SessionActor } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
@@ -13,12 +13,12 @@ const createCaller = createCallerFactory(appRouter);
 const superadmin = authoritiesFor(["superadmin"]); // role:manage 포함
 const admin = authoritiesFor(["admin"]); // role:manage 없음
 
-function makeCtx(authorities: ReadonlySet<string>, actor: SessionActor | null): Context {
+function makeCtx(authorities: ReadonlySet<Authority>, actor: SessionActor | null): Context {
   return {
     db: makeDb(env.DB),
-    authorities: authorities as Context["authorities"],
-    chzzk: null,
     actor,
+    chzzk: null,
+    authoritiesOf: async () => authorities,
   };
 }
 

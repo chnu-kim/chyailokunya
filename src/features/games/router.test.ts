@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { authoritiesFor } from "@/core/authorities";
+import { authoritiesFor, type Authority } from "@/core/authorities";
 import { makeDb } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
@@ -13,8 +13,9 @@ import type { Context } from "@/features/trpc/init";
 const createCaller = createCallerFactory(appRouter);
 const admin = authoritiesFor(["admin"]); // game:write + game:delete
 
-function makeCtx(over: Partial<Context> = {}): Context {
-  return { db: makeDb(env.DB), authorities: new Set(), chzzk: null, actor: null, ...over };
+function makeCtx(over: { authorities?: ReadonlySet<Authority> } = {}): Context {
+  const authorities = over.authorities ?? new Set<Authority>();
+  return { db: makeDb(env.DB), actor: null, chzzk: null, authoritiesOf: async () => authorities };
 }
 
 const eldenring = { categoryId: "c1", categoryType: "GAME", categoryValue: "엘든링" } as const;

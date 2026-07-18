@@ -24,16 +24,31 @@ async function findUserIdByChannel(db: Db, channelId: string): Promise<number | 
    UNIQUE(provider, provider_user_id)가 동시 최초 로그인 경합에서 중복 oauth 를 막는다: 삽입이
    충돌하면 우리가 진 것이라 재조회로 먼저 넣은 쪽 userId 에 수렴한다(우리가 만든 고아 users
    행은 v1 에서 무해). 트랜잭션 대신 UNIQUE + 재조회로 원자성 없이 정합을 얻는다. */
-export async function upsertChzzkAccount(db: Db, channelId: string): Promise<{ userId: number }> {
+export async function upsertChzzkAccount(
+  db: Db,
+  channelId: string,
+  channelName?: string,
+): Promise<{ userId: number }> {
   const existing = await findUserIdByChannel(db, channelId);
-  if (existing !== null) return { userId: existing };
+  if (existing !== null) {
+    // 재로그인: 표시명 스냅샷 갱신(치지직에서 바뀔 수 있다). channelName 미지정이면 그대로 둔다.
+    if (channelName !== undefined) {
+      await db
+        .update(oauthAccounts)
+        .set({ channelName })
+        .where(
+          and(eq(oauthAccounts.provider, PROVIDER), eq(oauthAccounts.providerUserId, channelId)),
+        );
+    }
+    return { userId: existing };
+  }
 
   const [u] = await db.insert(users).values({}).returning({ id: users.id });
   const userId = u!.id;
   try {
     await db
       .insert(oauthAccounts)
-      .values({ userId, provider: PROVIDER, providerUserId: channelId });
+      .values({ userId, provider: PROVIDER, providerUserId: channelId, channelName });
   } catch (e) {
     const raced = await findUserIdByChannel(db, channelId);
     if (raced !== null) return { userId: raced };
@@ -45,6 +60,21 @@ export async function upsertChzzkAccount(db: Db, channelId: string): Promise<{ u
 // 역할 뮤테이션 타깃 해석. 로그인 이력 없는 channelId 는 null → 라우터가 NOT_FOUND 로 맵.
 export function resolveUserIdByChannel(db: Db, channelId: string): Promise<number | null> {
   return findUserIdByChannel(db, channelId);
+}
+
+/* userId → 신원(channelId·channelName). proxy 가 refresh 로 새 access 를 서명할 때 표시명이
+   필요한데 치지직 토큰이 없어 재조회 불가하므로 로그인 시 저장한 스냅샷을 읽는다(ADR-0017).
+   channelName 미저장(구 데이터)이면 빈 문자열. */
+export async function getIdentity(
+  db: Db,
+  userId: number,
+): Promise<{ channelId: string; channelName: string } | null> {
+  const [row] = await db
+    .select({ channelId: oauthAccounts.providerUserId, channelName: oauthAccounts.channelName })
+    .from(oauthAccounts)
+    .where(and(eq(oauthAccounts.provider, PROVIDER), eq(oauthAccounts.userId, userId)))
+    .limit(1);
+  return row ? { channelId: row.channelId, channelName: row.channelName ?? "" } : null;
 }
 
 /* channelId 의 부여 역할. oauth_accounts→users_roles 조인. DB 문자열은 스키마 CHECK 로 이미
@@ -86,4 +116,27 @@ export type RoleAuditEntry = {
 // 함께 부른다(같은 요청). created_at 은 스키마가 자동으로 채운다(epoch ms).
 export async function writeRoleAudit(db: Db, entry: RoleAuditEntry): Promise<void> {
   await db.insert(roleAuditLogs).values(entry);
+}
+
+/* 역할 변경 + 감사를 **원자적으로**(ADR-0018). D1 은 interactive transaction 이 없어 db.batch 가
+   유일한 all-or-nothing 수단이다 — 감사 INSERT 가 실패하면 역할 변경도 롤백돼 "역할은 바뀌었는데
+   흔적이 없는" 상태가 생기지 않는다(Codex 리뷰 반영). targetUserId 는 라우터가 미리 해석해
+   넘기므로 batch 안 상호참조가 없다. */
+export async function grantRoleWithAudit(db: Db, entry: RoleAuditEntry): Promise<void> {
+  await db.batch([
+    db
+      .insert(usersRoles)
+      .values({ userId: entry.targetUserId, role: entry.role })
+      .onConflictDoNothing(),
+    db.insert(roleAuditLogs).values(entry),
+  ]);
+}
+
+export async function revokeRoleWithAudit(db: Db, entry: RoleAuditEntry): Promise<void> {
+  await db.batch([
+    db
+      .delete(usersRoles)
+      .where(and(eq(usersRoles.userId, entry.targetUserId), eq(usersRoles.role, entry.role))),
+    db.insert(roleAuditLogs).values(entry),
+  ]);
 }

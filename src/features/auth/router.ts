@@ -8,7 +8,7 @@ import { z } from "zod";
 import { ROLES } from "@/core/authorities";
 import { authorizeRoleChange } from "@/core/roles";
 import { authorizedProcedure, router, type Context } from "../trpc/init";
-import { grantRole, resolveUserIdByChannel, revokeRole, writeRoleAudit } from "./service";
+import { grantRoleWithAudit, resolveUserIdByChannel, revokeRoleWithAudit } from "./service";
 
 // 입력은 신뢰하지 않는다: channelId trim·비어있음 거절, role 은 저장되는 역할(admin·superadmin)만.
 // superadmin 입력은 Zod 를 통과하지만 authorizeRoleChange 가 부트스트랩 전용이라 막는다.
@@ -27,7 +27,7 @@ async function applyRoleChange(
     throw new TRPCError({ code: "UNAUTHORIZED", message: "로그인이 필요해요" });
   }
   const decision = authorizeRoleChange({
-    actorAuthorities: ctx.authorities,
+    actorAuthorities: await ctx.authoritiesOf(),
     actorChannelId: ctx.actor.channelId,
     targetChannelId: input.channelId,
     role: input.role,
@@ -43,15 +43,10 @@ async function applyRoleChange(
     throw new TRPCError({ code: "NOT_FOUND", message: "로그인 이력이 없는 사용자예요" });
   }
 
-  if (action === "grant") await grantRole(ctx.db, targetUserId, input.role);
-  else await revokeRole(ctx.db, targetUserId, input.role);
-
-  await writeRoleAudit(ctx.db, {
-    actorUserId: ctx.actor.userId,
-    targetUserId,
-    action,
-    role: input.role,
-  });
+  // 역할 변경과 감사를 원자적으로(batch) — 감사 없이 역할만 바뀌는 상태를 막는다(ADR-0018).
+  const entry = { actorUserId: ctx.actor.userId, targetUserId, action, role: input.role };
+  if (action === "grant") await grantRoleWithAudit(ctx.db, entry);
+  else await revokeRoleWithAudit(ctx.db, entry);
   return { ok: true as const };
 }
 

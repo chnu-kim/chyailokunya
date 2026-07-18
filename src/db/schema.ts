@@ -4,7 +4,15 @@
    성능 인덱스는 v1(<100행)에서 측정 불가라 검색 feature 이슈로 미룬다(ADR-0014). */
 
 import { sql } from "drizzle-orm";
-import { check, integer, primaryKey, sqliteTable, text, unique } from "drizzle-orm/sqlite-core";
+import {
+  check,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  unique,
+} from "drizzle-orm/sqlite-core";
 import { ROLES } from "@/core/authorities";
 import { STATUS_KEYS } from "@/core/games";
 
@@ -32,19 +40,22 @@ export const users = sqliteTable("users", {
   lastUpdatedAt: lastUpdatedAt(),
 });
 
-/* 로그인 수단 1개 = 1행. users 1 : N. 토큰(access/refresh)은 저장하지 않는다(ADR-0006):
+/* 로그인 수단 1개 = 1행. users 1 : N. 치지직 토큰(access/refresh)은 저장하지 않는다(ADR-0006):
    로그인 1회 신원확인 후 자체 JWT 로 넘어간다. provider_user_id 는 치지직 channelId(안정
    식별자)이자 자연키 — UNIQUE(provider, provider_user_id)로 재연결·중복 로그인을 막고
-   로그인 조회 핫패스를 인덱스 없이도 커버한다. */
+   로그인 조회 핫패스를 인덱스 없이도 커버한다. channel_name 은 표시명 스냅샷(로그인 시 갱신):
+   access(15분)가 만료돼 proxy 가 refresh 로 새 access 를 서명할 때 표시명이 필요한데, 치지직
+   토큰이 없어 재조회가 불가하므로 여기 캐시한다(rotation 이 신원을 재구성할 수 있게). */
 export const oauthAccounts = sqliteTable(
   "oauth_accounts",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     userId: integer("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     provider: text("provider", { enum: ["chzzk"] }).notNull(),
     providerUserId: text("provider_user_id").notNull(),
+    channelName: text("channel_name"),
     createdAt: createdAt(),
     lastUpdatedAt: lastUpdatedAt(),
   },
@@ -123,10 +134,59 @@ export const games = sqliteTable(
   ],
 );
 
+/* 자체 세션 refresh 토큰(ADR-0017). access 는 stateless(EdDSA JWT, DB 무관)라 여기 없다 —
+   refresh 만 서버가 정본으로 들고 rotation·재사용 감지·revoke 를 한다. 원본은 저장하지 않고
+   sha256 해시만(DB 유출 시 재사용 방지). family_id 는 로그인 1회(디바이스) 단위 rotation 체인,
+   family_expires_at 은 sliding 위의 절대 상한(첫 로그인 + 90일, rotation 시 승계).
+   무효화가 두 종류다: superseded_at = 회전으로 대체됨(후계 있음 — grace 내 재사용은 정상 동시 탭),
+   revoked_at = 세션 폐기(로그아웃·도난 — 재사용 절대 불가). 둘을 하나로 합치면 로그아웃 직후
+   grace 창에서 폐기된 토큰이 되살아난다. 유효 = 둘 다 NULL.
+   replaced_by_token = 회전 시 발급한 후계 refresh 의 원본(평문). grace 내 재사용에 이걸 멱등
+   반환해 모든 동시 탭이 같은 토큰으로 "수렴"하게 한다(새로 찍으면 도둑이 무제한 증식해 도난
+   탐지가 무력화된다). 평문이지만 grace 창(30초) 동안만 유효하고 cleanup 이 즉시 지운다 — access
+   가 15분인 것과 견줘 노출면이 작다. append/무효화만이라 last_updated_at 없음.
+   인덱스는 rotation 조회 핫패스(family_id·user_id)에 필요하다. */
+export const refreshTokens = sqliteTable(
+  "refresh_tokens",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    familyId: text("family_id").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: integer("expires_at").notNull(),
+    familyExpiresAt: integer("family_expires_at").notNull(),
+    supersededAt: integer("superseded_at"),
+    revokedAt: integer("revoked_at"),
+    replacedByToken: text("replaced_by_token"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("refresh_tokens_family_id").on(t.familyId),
+    index("refresh_tokens_user_id").on(t.userId),
+  ],
+);
+
+/* 보안 이벤트 감사(ADR-0017). 지금은 refresh 도난 감지(reuse-theft)만 남긴다 — 도난은 유일한
+   침해 신호라 console.warn 휘발 로그로 흘리지 않고 지속 저장한다(누가·언제 당했나 사후 질의).
+   role_audit_logs 는 action IN('grant','revoke')·actor/target NOT NULL 구조라 재사용 불가해
+   별도 테이블을 둔다. append-only. */
+export const securityEvents = sqliteTable("security_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+  familyId: text("family_id"),
+  eventType: text("event_type", { enum: ["refresh_reuse"] }).notNull(),
+  createdAt: createdAt(),
+});
+
 // 스키마가 타입의 정본이다(ADR-0004): 여기서 흐른 타입이 features·tRPC·Zod 로 이어진다.
 export type User = typeof users.$inferSelect;
 export type OauthAccount = typeof oauthAccounts.$inferSelect;
 export type UserRole = typeof usersRoles.$inferSelect;
 export type RoleAuditLog = typeof roleAuditLogs.$inferSelect;
+export type RefreshToken = typeof refreshTokens.$inferSelect;
+export type NewRefreshToken = typeof refreshTokens.$inferInsert;
+export type SecurityEvent = typeof securityEvents.$inferSelect;
 export type GameRow = typeof games.$inferSelect;
 export type NewGameRow = typeof games.$inferInsert;
