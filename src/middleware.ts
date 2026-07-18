@@ -1,5 +1,16 @@
-/* 자동 access 갱신(ADR-0017). Next16 proxy(구 middleware — Node 런타임. OpenNext 는 엣지
-   미지원이라 D1·jose 가 여기서 돈다). access 가 유효하면 서명 검증만 하고 통과(DB 0). 만료·부재면
+/* 자동 access 갱신(ADR-0017).
+
+   **파일명이 `middleware.ts` 인 이유 — Next 16 이 권하는 `proxy.ts` 를 쓸 수 없다.**
+   Next 16 은 이 규약을 proxy 로 이름을 바꾸며 Node 런타임 전용으로 만들었는데,
+   `@opennextjs/cloudflare` 는 Node 미들웨어를 거부한다("Node.js middleware is not currently
+   supported"). 그렇다고 proxy 를 엣지로 돌릴 수도 없다("Proxy does not support Edge runtime").
+   구 규약 `middleware.ts` 는 엣지로 번들돼 OpenNext 가 받는다 — deprecation 경고를 감수하고
+   이걸 쓴다. OpenNext 가 Node proxy 를 지원하면 그때 옮긴다.
+
+   **이 함정은 로컬 `next build` 가 못 잡는다** — `npm run build` 는 통과시키고 실제 배포
+   빌드(`opennextjs-cloudflare build`)에서만 터진다. 실제로 배포에서 그렇게 터졌다.
+
+   access 가 유효하면 서명 검증만 하고 통과(DB 0). 만료·부재면
    refresh 로 rotation 해 새 access·refresh 를 세팅하고, 같은 요청의 다운스트림(RSC·route·tRPC)이
    갱신된 access 를 읽도록 request.cookies 를 덮어 forward 한다(안 그러면 이번 요청은 옛 쿠키를
    본다). refresh 실패(도난·만료)면 세션 쿠키를 걷고 비로그인으로 통과(공개 읽기는 계속). matcher
@@ -22,7 +33,7 @@ export const config = {
   matcher: ["/((?!_next/|api/auth/|assets/|favicon|icon).*)"],
 };
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { env } = await getCloudflareContext({ async: true });
   // 키는 쌍으로만 의미가 있다. public 만 빠지면 access 검증이 **영원히 실패**해 모든 요청이
   // 회전 분기로 떨어진다 — 요청마다 refresh 행이 늘고 세션이 안착하지 못한다. 한쪽만 있는

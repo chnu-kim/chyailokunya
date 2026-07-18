@@ -45,6 +45,11 @@ jobs:
       - name: build (next build)
         run: npm run build
 
+      # next build 가 통과해도 실제 배포 번들러는 거부할 수 있다 — Node 미들웨어가 그랬다
+      # (게이트 전부 초록, 배포에서만 실패). 배포와 같은 빌드를 게이트에서 돌려 미리 잡는다.
+      - name: 배포 빌드 (opennextjs-cloudflare build)
+        run: npx opennextjs-cloudflare build
+
   e2e:
     name: e2e 스모크 · Playwright
     runs-on: ubuntu-latest

@@ -64,12 +64,12 @@ src/components/ui  →  src/features  →  src/db  →  src/core
 | `src/db`            | Drizzle 스키마·D1 클라이언트.         | `core`                   |
 | `src/features`      | 유즈케이스·tRPC 라우터·서비스.        | `db`, `core`             |
 | `src/components/ui` | Radix/shadcn 프리미티브.              | `features`               |
-| `src/proxy.ts`      | 요청 진입점(세션 갱신). 위치 고정.    | `db`, `core`, `features` |
+| `src/middleware.ts` | 요청 진입점(세션 갱신). 위치 고정.    | `db`, `core`, `features` |
 | `src/app`           | 라우트·레이아웃·조립.                 | 전부                     |
 
 위로 새는 import 는 `npm run boundaries` 가 error 로 죽인다. 경로 규칙이 "이 코드가 어디
-속하나"의 정본이다. `src/proxy.ts` 는 Next 16 이 위치를 루트로 못박아 레이어 디렉터리 밖에
-있지만 규칙은 따로 명시해 뒀다(`proxy-below-ui`) — 매 요청 도는 코드라 컴포넌트·app 을 끌어오면
+속하나"의 정본이다. `src/middleware.ts` 는 위치가 루트로 고정돼 레이어 디렉터리 밖에 있지만
+규칙은 따로 명시해 뒀다(`middleware-below-ui`) — 매 요청 도는 코드라 컴포넌트·app 을 끌어오면
 안 된다.
 
 ## 스타일 구성 (Phase 2 이식)
@@ -201,6 +201,17 @@ Phase 3(DB·도메인 코어)에서 밟은 것들:
 - `prefers-reduced-motion` 가드 안에 새 애니메이션을 넣는다.
 - 라틴 전용 폰트(Gloock·Sacramento)에는 한글 페이스를 폴백으로 — 없으면 한글 제목이 OS
   임의 폰트로 떨어진다(토큰에 이미 반영).
+
+Phase 4(인증)에서 밟은 것:
+
+- **`npm run build` 가 통과해도 배포는 깨질 수 있다 — 게이트가 `next build` 만 돌린다.**
+  Next 16 이 `middleware.ts` 를 `proxy.ts` 로 바꾸며 Node 런타임 전용으로 만들었는데
+  `@opennextjs/cloudflare` 는 Node 미들웨어를 거부한다("Node.js middleware is not currently
+  supported"). proxy 를 엣지로 돌릴 수도 없다("Proxy does not support Edge runtime").
+  **로컬·CI 게이트는 전부 초록인데 배포에서만 터졌다.** 그래서 이 저장소는 구 규약
+  `src/middleware.ts` 를 쓴다(deprecation 경고 감수). OpenNext 가 Node proxy 를 지원하면 옮긴다.
+  일반화하면: **런타임·번들러 계약을 건드리는 변경은 `npx opennextjs-cloudflare build` 로
+  확인한다.** CI 게이트에 이 빌드가 들어 있다(`배포 빌드` 스텝).
 
 ## 코드 컨벤션
 
