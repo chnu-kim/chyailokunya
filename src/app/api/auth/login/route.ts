@@ -15,7 +15,11 @@ export async function GET() {
   const state = crypto.randomUUID();
   const authUrl = new URL("https://chzzk.naver.com/account-interlock");
   authUrl.searchParams.set("clientId", env.CHZZK_CLIENT_ID);
-  authUrl.searchParams.set("redirectUri", `${env.AUTH_URL}/api/auth/callback`);
+  /* 경로 끝의 `/chzzk` 는 치지직 콘솔에 **등록된 redirect URI 와 완전 일치**해야 하는 값이다 —
+     다르면 동의 화면에서 403 이 난다(실제로 그렇게 막혔다). provider 를 경로에 새기는 형태라
+     oauth_accounts.provider 로 다중 로그인 수단을 대비한 스키마(ADR-0014)와도 맞다. 바꾸려면
+     콘솔 등록값을 먼저 바꿔야 한다. */
+  authUrl.searchParams.set("redirectUri", `${env.AUTH_URL}/api/auth/callback/chzzk`);
   authUrl.searchParams.set("state", state);
 
   const res = NextResponse.redirect(authUrl);

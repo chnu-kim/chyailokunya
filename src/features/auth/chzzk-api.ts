@@ -1,7 +1,7 @@
 /* 치지직 사용자 OAuth: authorization_code 토큰 교환 + 신원 조회(ADR-0006). category
    API(features/chzzk/client.ts)와 같은 envelope({code,message,content})·fetchImpl 주입 패턴을
    따르되, 이쪽은 로그인 순간에만 쓴다 — 토큰은 저장하지 않고(ADR-0006) 자체 JWT 로 넘어간다.
-   순수 함수라 콜백 라우트(app/api/auth/callback)가 호출하고, 네트워크 없이 매핑·
+   순수 함수라 콜백 라우트(app/api/auth/callback/chzzk)가 호출하고, 네트워크 없이 매핑·
    에러 경로를 단위테스트한다. 치지직 계약의 비표준(camelCase body·state 재전송)이 여기 갇힌다. */
 
 import type { ChzzkCreds } from "@/features/chzzk/client";
