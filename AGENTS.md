@@ -11,7 +11,9 @@
 버추얼 스트리머 **챠이로 쿠냐** 팬사이트. 정적 사이트(`chnu-kim/chyaro-kunya`)를
 **Next.js 풀스택(Cloudflare Workers)** 으로 옮기는 마이그레이션의 결과물이다.
 
-- 배포: Cloudflare Workers, 도메인 `chyailokunya.com` (Phase 5 컷오버까지 구 사이트가 라이브)
+- 배포: Cloudflare Workers. **`https://chyailokunya.com` 라이브**(2026-07-19 apex 연결).
+  workers.dev 도 살아 있다: `chyailokunya.chanwoos-account.workers.dev`. 구 정적 사이트
+  (`chnu-kim/chyaro-kunya`)는 Phase 5 정리까지 별도로 유지.
 - 스택 요약: Next.js App Router · OpenNext(Workers) · D1+Drizzle · tRPC+Zod · Tailwind v4 ·
   치지직 커스텀 OAuth → 자체 JWT 세션. 각 선택의 근거는 [ADR-0001~0013](./docs/adr/).
 - **v1 정박점:** 공용 게임 보드 + 역할 기반 쓰기(전원 치지직 로그인, allowlist channelId 만 쓰기).
@@ -34,13 +36,21 @@ npm run e2e:visual:update  # 시각 베이스라인 재생성
 
 npm run preview        # opennextjs-cloudflare build + workerd 로 배포 런타임 재현
 npm run cf-typegen     # wrangler.jsonc 변경 후 cloudflare-env.d.ts 재생성
+
+npm run gen-jwt-keys   # 세션 서명용 EdDSA JWK 쌍 생성(ADR-0017)
+npm run db:generate    # 스키마 변경 → drizzle 마이그레이션 생성
+npm run db:migrate:local     # 로컬 D1 에 마이그레이션 적용
+npm run db:migrate:remote    # 원격 D1 에 적용(배포 워크플로가 자동으로도 돌린다)
+npm run db:seed        # 게임 시드(`-- --remote` 로 원격)
 ```
 
 3000 이 남의 dev 서버로 막혀 있으면 `PORT=3100 npm run e2e` — playwright.config 가 env PORT
 를 읽는다(기본 3000, CI 는 그대로).
 
-CI(`.github/workflows/ci.yml`)가 PR·main 에서 `format · lint · typecheck · boundaries ·
-unit · build` 게이트와 **e2e 스모크**(별도 job)를 돌린다. **시각 스냅샷은 CI 에 없다** —
+CI(`.github/workflows/ci.yml`)가 PR·main 에서 `format · lint · typecheck · boundaries · unit ·
+drizzle-kit check · build · **배포 빌드(opennextjs-cloudflare)**` 게이트와 **e2e 스모크**(별도
+job)를 돌린다. 배포 빌드가 게이트에 있는 이유는 아래 Phase 4 지뢰를 보라 — `next build` 만으론
+배포 실패를 못 잡는다. **시각 스냅샷은 CI 에 없다** —
 베이스라인이 OS 별 파일이라(`-darwin`/`-linux`) macOS 에서 만든 게 리눅스 CI 와 안 맞기
 때문이다. `npm run e2e`(=`--project=smoke`)는 크로스플랫폼 동작 검증만 하고, 시각 회귀
 (`--project=visual`)는 로컬 dev 회귀 + 사람의 육안 패리티 판단용이다. 배포는 CI 게이트가 아니라
