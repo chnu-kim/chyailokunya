@@ -22,8 +22,10 @@ OIDC 가 아니라 자체 OAuth 흐름을 쓴다. 신원의 안정 식별자는 
 ## 결정
 
 치지직 OAuth 를 **커스텀 프로바이더**로 붙이고, 로그인 순간에만 치지직 토큰으로 신원을
-확인한 뒤 **자체 JWT 세션 `{channelId, role}`** 을 발급한다. 이후 요청은 치지직 토큰이
-아니라 이 세션이 담당한다.
+확인한 뒤 ~~**자체 JWT 세션 `{channelId, role}`**~~ **자체 JWT 세션**을 발급한다. 이후 요청은
+치지직 토큰이 아니라 이 세션이 담당한다.
+(**[ADR-0017](./0017-self-session-eddsa-refresh-rotation.md) 이 세션 페이로드를 뒤집었다** — 세션은
+신원만(`userId`·`channelId`·`channelName`) 싣고, authorities 는 인가 순간 DB 에서 조회한다.)
 
 검증된 계약:
 
@@ -37,7 +39,10 @@ OIDC 가 아니라 자체 OAuth 흐름을 쓴다. 신원의 안정 식별자는 
   매핑을 직접 짠다.
 - 세션을 자체 JWT 로 들면 치지직 토큰을 장기 보관·갱신할 필요가 없다(로그인 시 1회 신원
   확인이면 충분). 저장하는 비밀이 줄어 유출면이 작아진다.
-- `role` 을 세션에 담아 매 요청 인가를 서버에서 값싸게 판단한다([ADR-0012](./0012-role-based-writes-allowlist.md)).
+- ~~`role` 을 세션에 담아 매 요청 인가를 서버에서 값싸게 판단한다([ADR-0012](./0012-role-based-writes-allowlist.md)).~~
+  (**[ADR-0017](./0017-self-session-eddsa-refresh-rotation.md) 이 뒤집었다** — 세션은 신원만, authorities 는
+  인가 순간 DB 조회. 인가 판단을 토큰에 캐시하면 역할 회수가 토큰 만료까지 지연돼
+  [ADR-0012](./0012-role-based-writes-allowlist.md) 의 전제가 무너진다.)
 
 ## 기각한 대안
 
