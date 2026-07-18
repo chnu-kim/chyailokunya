@@ -38,3 +38,9 @@ export function hasAuthority(authorities: ReadonlySet<Authority>, needed: Author
 export function isRole(v: unknown): v is Role {
   return typeof v === "string" && (ROLES as readonly string[]).includes(v);
 }
+
+// JWT 세션 클레임처럼 신뢰하지 않는 문자열을 Authority 로 좁힐 때. isRole 과 같은 명시 포함
+// 검사 — 서명된 세션이라도 미지 권한 문자열이 인가를 통과하지 못하게 한다(불변식 2).
+export function isAuthority(v: unknown): v is Authority {
+  return typeof v === "string" && (AUTHORITIES as readonly string[]).includes(v);
+}

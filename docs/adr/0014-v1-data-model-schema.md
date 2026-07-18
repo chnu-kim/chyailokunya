@@ -3,6 +3,9 @@
 - 상태: Accepted
 - 날짜: 2026-07-18
 
+> **보완:** 여기서 Phase 4 로 미룬 **역할 변경 감사 로그**는 [ADR-0018](./0018-role-audit-and-elevation-guard.md)
+> 이 `role_audit_logs` 테이블로 실현했다.
+
 ## 맥락
 
 Phase 3 는 D1+Drizzle([ADR-0003](./0003-d1-drizzle.md)) 위에 실제 스키마를 세운다. v1 정박점

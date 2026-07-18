@@ -7,6 +7,10 @@
 > 스칼라를 `users_roles`(M:N grant) + authorities 코드 상수 + `admin`/`superadmin` 2단계로 옮겼다
 > (superadmin 만 `role:manage` → 상승 가드가 구조적). 이 ADR 의 핵심(읽기 공개 · 쓰기 allowlist ·
 > 서버 인가가 정본 · 역할 변경 감사)은 그대로 유효하다.
+>
+> **보완:** [ADR-0018](./0018-role-audit-and-elevation-guard.md) 이 감사 로그·상승 가드를 실현했다 —
+> `role_audit_logs` 테이블 + 순수 규칙 `authorizeRoleChange`(self·superadmin-API 거절), 서버 뮤테이션만
+> (관리 UI 없음).
 
 ## 맥락
 

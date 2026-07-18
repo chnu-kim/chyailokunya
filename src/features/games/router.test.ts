@@ -14,7 +14,7 @@ const createCaller = createCallerFactory(appRouter);
 const admin = authoritiesFor(["admin"]); // game:write + game:delete
 
 function makeCtx(over: Partial<Context> = {}): Context {
-  return { db: makeDb(env.DB), authorities: new Set(), chzzk: null, ...over };
+  return { db: makeDb(env.DB), authorities: new Set(), chzzk: null, actor: null, ...over };
 }
 
 const eldenring = { categoryId: "c1", categoryType: "GAME", categoryValue: "엘든링" } as const;

@@ -59,7 +59,7 @@ const createCaller = createCallerFactory(appRouter);
 const write = authoritiesFor(["admin"]); // game:write
 
 function makeCtx(over: Partial<Context> = {}): Context {
-  return { db: makeDb(env.DB), authorities: new Set(), chzzk: null, ...over };
+  return { db: makeDb(env.DB), authorities: new Set(), chzzk: null, actor: null, ...over };
 }
 
 describe("chzzk.categorySearch (라우터)", () => {

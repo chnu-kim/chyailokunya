@@ -7,6 +7,10 @@
 > `users` 가 아니라 `oauth_accounts.provider_user_id` 로 내려가고(users ↔ OAuth 분리, 다중 로그인
 > 수단 대비), 세션엔 `role` 대신 **effective authorities** 를 싣는다. 이 ADR 의 핵심(치지직 커스텀
 > OAuth → 자체 JWT, 치지직 토큰 미저장)은 그대로 유효하다.
+>
+> **보완:** [ADR-0017](./0017-authjs-chzzk-provider-edge-env.md) 가 _무엇으로_ 구현할지를 정했다 —
+> Auth.js(next-auth v5) 커스텀 provider + lazy config 로 Workers 요청 스코프 env 주입 + JWT 세션 전략
+> (DB adapter 미사용). 이 ADR 의 핵심은 그대로다.
 
 ## 맥락
 

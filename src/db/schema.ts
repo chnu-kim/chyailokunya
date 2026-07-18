@@ -73,6 +73,31 @@ export const usersRoles = sqliteTable(
   ],
 );
 
+/* 역할 변경 감사(ADR-0012·0014·0018). 사람 주도 역할 부여·회수를 남긴다 — 누가(actor)
+   누구에게(target) 무슨 역할을 grant/revoke 했나. 부트스트랩(SUPERADMIN_CHANNEL_ID)은 env
+   로부터 재구성 가능해 기록하지 않는다(ADR-0014). append-only 로그라 수정·삭제가 없어
+   last_updated_at 이 없다(created_at 만). surrogate PK·epoch ms·enum CHECK 겹침은 다른
+   테이블과 같은 컨벤션. action 은 로컬 리터럴, role 은 core ROLES 를 단일 원천으로 끌어온다. */
+export const roleAuditLogs = sqliteTable(
+  "role_audit_logs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    actorUserId: integer("actor_user_id")
+      .notNull()
+      .references(() => users.id),
+    targetUserId: integer("target_user_id")
+      .notNull()
+      .references(() => users.id),
+    action: text("action", { enum: ["grant", "revoke"] }).notNull(),
+    role: text("role", { enum: ROLES }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("role_audit_logs_action", sql`${t.action} IN ('grant', 'revoke')`),
+    check("role_audit_logs_role", sql`${t.role} IN ('admin', 'superadmin')`),
+  ],
+);
+
 /* 치지직 카테고리 스냅샷 보드(ADR-0015). category API 4필드를 denormalize 해 공개 읽기가
    외부 API·인증에 무관하게 한다. status·played_at·cleared_at 은 치지직이 주지 않는 우리
    도메인(플레이 상태·이력): 둘 다 null=예정 / played_at만=플레이중·플레이함 / cleared_at
@@ -102,5 +127,6 @@ export const games = sqliteTable(
 export type User = typeof users.$inferSelect;
 export type OauthAccount = typeof oauthAccounts.$inferSelect;
 export type UserRole = typeof usersRoles.$inferSelect;
+export type RoleAuditLog = typeof roleAuditLogs.$inferSelect;
 export type GameRow = typeof games.$inferSelect;
 export type NewGameRow = typeof games.$inferInsert;

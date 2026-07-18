@@ -7,13 +7,17 @@ import type { Authority } from "@/core/authorities";
 import type { Db } from "@/db";
 import type { ChzzkCreds } from "../chzzk/client";
 
-/* tRPC 컨텍스트. authorities 는 세션의 effective 권한 집합이다(ADR-0014) — Phase 3 엔 인증이
-   없어 route 가 빈 집합을 넣고, #6(인증)이 JWT 세션에서 채운다. 이 seam 덕에 쓰기 인가를
-   HTTP·세션 없이 주입 컨텍스트로 단위테스트한다. chzzk 는 client_credentials(없으면 null). */
+/* tRPC 컨텍스트. authorities 는 세션의 effective 권한 집합이다(ADR-0014) — route 가 JWT 세션
+   에서 채운다(#6). 이 seam 덕에 쓰기 인가를 HTTP·세션 없이 주입 컨텍스트로 단위테스트한다.
+   actor 는 로그인 주체(channelId·userId) — 역할 뮤테이션의 상승 가드가 self 판정에 쓴다(비로그인
+   이면 null). chzzk 는 client_credentials(없으면 null). */
+export type SessionActor = { channelId: string; userId: number };
+
 export type Context = {
   db: Db;
   authorities: ReadonlySet<Authority>;
   chzzk: ChzzkCreds | null;
+  actor: SessionActor | null;
 };
 
 const t = initTRPC.context<Context>().create();
