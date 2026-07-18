@@ -13,6 +13,17 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS",
   },
+  /* 커스텀 도메인(Phase 5 컷오버). custom_domain 이면 Cloudflare 가 zone 에 레코드를 직접
+     만들고 인증서를 붙인다 — 별도 DNS 작업이 필요 없다. apex 하나만 둔다: 앱이 절대 URL 을
+     여기 하나로 고정하기 때문이다(layout 의 metadataBase, og:image/og:url, 그리고 AUTH_URL —
+     Origin 검증이 이 값과 정확히 일치해야 쓰기가 통과한다, ADR-0017). www 를 붙이려면 리다이렉트
+     규칙으로 apex 에 모아야지, 두 origin 을 동시에 열면 세션 쿠키·Origin 검증이 갈린다. */
+  "routes": [
+    {
+      "pattern": "chyailokunya.com",
+      "custom_domain": true,
+    },
+  ],
   // 동적 라우트·재검증이 자기 자신을 다시 부르는 경로. 이름은 위 name 과 반드시 일치.
   "services": [
     {
