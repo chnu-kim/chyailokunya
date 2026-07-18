@@ -3,6 +3,10 @@
 - 상태: Accepted
 - 날짜: 2026-07-18
 
+> **변경:** [ADR-0016](./0016-deploy-github-actions-opennext.md) 이 배포 주체를 Workers Builds 에서
+> **GitHub Actions(OpenNext deploy)** 로 바꿨다 — 워커가 실제로 안 올라왔고, 배포에 D1 마이그레이션
+> 선적용을 코드로 게이트하려. 이 ADR 의 **게이트 = GitHub Actions** 는 그대로 유효하다.
+
 ## 맥락
 
 "검증 가능성 우선"을 코드로 붙박으려면 나쁜 머지를 막는 게이트가 필요하다. 배포는
