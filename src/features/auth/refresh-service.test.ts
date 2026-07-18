@@ -131,6 +131,23 @@ describe("rotateRefreshToken — 재사용·무효", () => {
     expect(await aliveIn(familyId)).toHaveLength(1);
   });
 
+  /* claim(superseded 표시)과 후계 INSERT 는 D1 에 트랜잭션이 없어 별개 문장이다. 그 틈에 진
+     요청이 들어오면 후계 행이 아직 안 보인다 — 여기서 invalid 를 주면 proxy 가 쿠키를 걷어
+     **멀쩡한 세션이 로그아웃**된다(access 만료 직후 병렬 로드에서 흔하다). 낙관적으로 후계를
+     돌려준다: 정말 고아였다면 다음 회전에서 조용히 끊긴다(즉시 로그아웃보다 낫다). */
+  it("승자의 INSERT 가 아직 안 보여도 grace 재사용이 세션을 끊지 않는다(claim↔insert 틈)", async () => {
+    const userId = await seedUser();
+    const { token, familyId } = await createSession(db(), userId, NOW);
+    // claim 만 일어난 순간을 재현: superseded 표시는 됐지만 후계 행은 아직 없다.
+    await db()
+      .update(refreshTokens)
+      .set({ supersededAt: NOW + 1000 })
+      .where(eq(refreshTokens.familyId, familyId));
+
+    const res = await rotateRefreshToken(db(), token, NOW + 1500, TEST_JWK);
+    expect(res.ok).toBe(true); // 쿠키를 걷지 않는다
+  });
+
   it("grace 밖 재사용은 도난 — family 전체 revoke", async () => {
     const userId = await seedUser();
     const { token, familyId } = await createSession(db(), userId, NOW);

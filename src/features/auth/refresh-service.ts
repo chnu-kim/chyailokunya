@@ -132,14 +132,8 @@ export async function rotateRefreshToken(
   if (verdict === "invalid") return { ok: false, reason: "invalid" };
 
   if (verdict === "reuse-grace") {
-    /* 정상 동시 탭: 후계는 저장돼 있지 않고 위에서 같은 값으로 재계산됐다(successor). 다만
-       **살아있는 후계일 때만** 돌려준다 — 세 상태를 가른다:
-       - 행 없음 = claim 성공 후 INSERT 전에 죽은 고아 → 세션 손상.
-       - revoked = family 가 폐기됨(로그아웃·도난) → 되살리지 않는다.
-       - superseded = 그 사이 체인이 더 굴렀다(T1→T2→T3). 늦게 도착한 T1 에 이미 회전된 T2 를
-         주면 브라우저가 죽은 refresh 를 쿠키에 물고, 다음 회전에서 T2 가 grace 밖 재사용으로
-         분류돼 **멀쩡한 세션의 family 전체가 도난으로 폐기**된다. 그래서 여기서 끊는다.
-       셋 다 재인증으로 보내는 게 안전한 방향이다(fail-closed). */
+    /* 정상 동시 탭: 후계는 저장돼 있지 않고 위에서 같은 값으로 재계산됐다(successor).
+       후계 행의 상태로 갈린다. */
     const [successorRow] = await db
       .select({
         supersededAt: refreshTokens.supersededAt,
@@ -148,11 +142,22 @@ export async function rotateRefreshToken(
       .from(refreshTokens)
       .where(eq(refreshTokens.tokenHash, await hashToken(successor)))
       .limit(1);
-    const successorIsAlive =
-      successorRow !== undefined &&
-      successorRow.supersededAt === null &&
-      successorRow.revokedAt === null;
-    if (successorIsAlive) {
+
+    /* 행이 아직 안 보인다 = 승자가 claim 은 했는데 INSERT 가 아직 커밋 전. D1 엔 트랜잭션이
+       없어 그 둘이 별개 문장이라 생기는 틈이고, access 만료 직후 병렬 로드에서 흔히 밟는다.
+       여기서 invalid 를 주면 proxy 가 쿠키를 걷어 **멀쩡한 세션이 로그아웃**된다. 후계는 claim
+       이 원자적으로 확정한 결정적 값이므로 낙관적으로 돌려준다 — 정말 고아(claim 후 크래시)
+       였다면 다음 회전에서 조용히 fail-closed 로 끊긴다. 즉시 로그아웃보다 그쪽이 낫다. */
+    if (successorRow === undefined) {
+      return { ok: true, token: successor, userId: row!.userId, familyId: row!.familyId };
+    }
+
+    /* 행이 있으면 살아있을 때만 준다:
+       - revoked = family 가 폐기됨(로그아웃·도난) → 되살리지 않는다.
+       - superseded = 그 사이 체인이 더 굴렀다(T1→T2→T3). 늦게 도착한 T1 에 이미 회전된 T2 를
+         주면 브라우저가 죽은 refresh 를 쿠키에 물고, 다음 회전에서 T2 가 grace 밖 재사용으로
+         분류돼 **멀쩡한 세션의 family 전체가 도난으로 폐기**된다. */
+    if (successorRow.supersededAt === null && successorRow.revokedAt === null) {
       return { ok: true, token: successor, userId: row!.userId, familyId: row!.familyId };
     }
     return { ok: false, reason: "invalid" };
