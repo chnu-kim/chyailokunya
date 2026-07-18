@@ -20,6 +20,18 @@
       "service": "chyailokunya",
     },
   ],
+  // D1(ADR-0003). migrations_dir 는 drizzle-kit 의 out 과 같은 'drizzle' 로 둔다 —
+  // wrangler d1 migrations apply 가 drizzle 이 생성한 NNNN_*.sql 을 적용하고 meta/ 는 무시한다.
+  // database_id 는 `wrangler d1 create chyailokunya` 로 발급된 실제 원격 DB. 로컬(next dev·
+  // vitest·--local)은 Miniflare 가 바인딩 이름으로 별도 로컬 저장소를 쓴다.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "chyailokunya",
+      "database_id": "ad0d04da-4628-44f3-bd8c-1b0ae79c6423",
+      "migrations_dir": "drizzle",
+    },
+  ],
   "observability": {
     "enabled": true,
   },

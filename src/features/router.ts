@@ -1,0 +1,12 @@
+/* 앱 루트 라우터. AppRouter 타입이 클라이언트로 흘러 end-to-end 타입을 만든다(ADR-0004). */
+
+import { router } from "./trpc/init";
+import { chzzkRouter } from "./chzzk/router";
+import { gamesRouter } from "./games/router";
+
+export const appRouter = router({
+  games: gamesRouter,
+  chzzk: chzzkRouter,
+});
+
+export type AppRouter = typeof appRouter;

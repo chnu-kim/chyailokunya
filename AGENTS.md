@@ -158,6 +158,29 @@ Phase 2(정적 콘텐츠 이식)에서 밟은 것들:
   구 `css/site.css`·`js/site.js` 사본과 함께 얼려 자체 완결적으로 열린다(`og-cover.html` 캡처 용도).
   prettier·eslint 대상에서 제외한다.
 
+Phase 3(DB·도메인 코어)에서 밟은 것들:
+
+- **vitest 워커 풀은 tsconfig 의 `paths`(`@/*`)를 안 읽는다.** `@/core`·`@/db` 를 import 하는
+  모듈이 테스트에서 "Cannot find package" 로 죽는다 — `vitest.config` 의 `resolve.alias` 로 `@`
+  를 `./src` 에 직접 매핑한다. (drizzle-kit 은 tsx 라 `@/` 를 읽지만 워커 풀은 아니다.)
+- **`@cloudflare/vitest-pool-workers@0.18` 엔 `isolatedStorage` 옵션이 없다.** 테스트 간 D1
+  쓰기가 자동으로 안 되돌려져 데이터가 누적된다(UNIQUE 충돌·개수 어긋남). setupFiles 의 전역
+  `beforeEach` 로 테이블 데이터만 비운다(스키마는 `applyD1Migrations` 가 세운 채 유지, FK 순서로
+  자식부터 삭제). 마이그레이션은 `readD1Migrations`(설정 사이드)→`TEST_MIGRATIONS` 바인딩→setup 의
+  `applyD1Migrations` 로 각 파일에 적용한다.
+- **drizzle 은 D1 에러를 `DrizzleQueryError` 로 감싼다.** "UNIQUE constraint failed" 는 최상위
+  `e.message` 가 아니라 `e.cause` 에 있다 — cause 체인을 끝까지 훑어야 CONFLICT 로 맵된다.
+- **치지직 category API 는 client_credentials 를 `Client-Id`/`Client-Secret` 헤더로 받는다**(별도
+  토큰 교환 없음, 실측). `BASE_URL=https://openapi.chzzk.naver.com`, 응답은
+  `{code:200, message, content:{data:[...]}}`. `POST /auth/v1/token` 은 이거 말고 사용자
+  OAuth(authorization_code, Phase 4)용이다.
+- **`getCloudflareContext()`(RSC·dev)와 `wrangler d1 … --local` 은 `.wrangler/state` 를 공유한다.**
+  그래서 `db:migrate:local` + `db:seed -- --local` 로 심으면 `next dev` 가 그대로 읽는다. 반대로
+  로컬 D1 에 스키마가 없으면 games 페이지가 500 난다 — e2e 는 `globalSetup` 이 `--local` 로
+  마이그레이트 + 결정적 픽스처(`e2e/fixtures/games.sql`, poster null)를 심는다.
+- **e2e 포트 3000 이 남의 dev 서버로 막히면 `reuseExistingServer` 가 그걸 재사용해 멈춘다.** 이
+  머신은 다른 프로젝트가 3000 을 쓴다 — `PORT=3333 npm run e2e` 로 빈 포트에 우리 서버를 띄운다.
+
 ## 접근성 기준 (협상 대상 아님)
 
 구 사이트에서 검증된 기준을 그대로 잇는다.

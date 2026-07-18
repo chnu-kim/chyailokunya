@@ -3,6 +3,11 @@
 - 상태: Accepted
 - 날짜: 2026-07-18
 
+> **보완:** [ADR-0014](./0014-v1-data-model-schema.md) 가 이 결정을 정교화했다 — `channelId` 는
+> `users` 가 아니라 `oauth_accounts.provider_user_id` 로 내려가고(users ↔ OAuth 분리, 다중 로그인
+> 수단 대비), 세션엔 `role` 대신 **effective authorities** 를 싣는다. 이 ADR 의 핵심(치지직 커스텀
+> OAuth → 자체 JWT, 치지직 토큰 미저장)은 그대로 유효하다.
+
 ## 맥락
 
 v1 은 전원 치지직 로그인, allowlist(channelId) 계정만 쓰기. 치지직 Open API 는 표준

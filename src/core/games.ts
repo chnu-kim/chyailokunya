@@ -1,22 +1,13 @@
-/* 게임 보드 도메인 — 순수 로직(HTTP·DB·React·localStorage 무관). 구 games.js 의
-   신뢰하지 않는 입력 처리를 이 레이어로 옮겨 workerd 안에서 단위 테스트로 못박는다.
-   localStorage 접근(부수효과)은 UI(game-board.tsx)에 남고, 여기선 "받은 문자열을
-   렌더 가능한 배열로 강제 변환"만 한다.
+/* 게임 보드 도메인 — 순수 로직(HTTP·DB·React 무관). 표시용 상태 메타·카드 회전/패턴 해시,
+   그리고 치지직 category → games 매핑을 담는다.
 
-   v1 은 아직 클라이언트 전용 localStorage 보드다(D1 은 Phase 3+). 그래서 검증은 Zod
-   대신 이 이식된 coerce/parseGames 로 한다 — 경계 케이스(프로토타입 체인·비배열 JSON·
-   빈 배열 대 전부-걸러짐)가 이미 값비싸게 튜닝돼 있어 그 의미를 그대로 보존한다. Zod 는
-   서버 쓰기 경계(tRPC)가 생기는 Phase 3/4 에서 제자리를 얻는다. */
+   localStorage 시대의 coerce/parseGames/seeds 는 제거됐다 — D1(서버 권위)이 목록의 정본이
+   되면서(ADR-0014·이슈 #5) "신뢰하지 않는 문자열을 배열로 강제 변환"하던 경계가 서버 입력
+   검증(Zod, features/games/schema)으로 옮겨갔다. 이 파일엔 UI 가 쓰는 순수 표시 로직만 남는다. */
 
-export type Status = "playing" | "cleared" | "planned" | "played";
-
-export type Game = {
-  id: string;
-  name: string;
-  genre: string;
-  platform: string;
-  status: Status;
-};
+// 상태 키 — 이 배열이 타입·DB enum·CHECK 의 단일 원천이다(db/schema.ts 가 import 한다).
+export const STATUS_KEYS = ["playing", "cleared", "planned", "played"] as const;
+export type Status = (typeof STATUS_KEYS)[number];
 
 export type StatusMeta = { label: string; cls: string };
 
@@ -34,66 +25,10 @@ export function statusOf(key: string): StatusMeta {
   return Object.prototype.hasOwnProperty.call(STATUS, key) ? STATUS[key as Status] : STATUS.played;
 }
 
-// 사용자 제공 예시 8종. 널리 알려진 게임만 장르를 채우고, 불확실하면 '—'.
-const SEED: ReadonlyArray<Omit<Game, "id">> = [
-  { name: "마이 보이스 주", genre: "—", platform: "—", status: "played" },
-  { name: "마인크래프트", genre: "샌드박스", platform: "PC", status: "playing" },
-  { name: "겟 투 워크", genre: "—", platform: "—", status: "played" },
-  { name: "레이튼 교수와 이상한 마을", genre: "퍼즐 어드벤처", platform: "—", status: "cleared" },
-  { name: "레이튼 교수와 악마의 상자", genre: "퍼즐 어드벤처", platform: "—", status: "played" },
-  { name: "리그 오브 레전드", genre: "AOS", platform: "PC", status: "playing" },
-  { name: "리틀 나이트메어", genre: "호러 퍼즐", platform: "—", status: "cleared" },
-  { name: "엘든링", genre: "액션 RPG", platform: "PC", status: "played" },
-];
-
-export function seeds(): Game[] {
-  return SEED.map((g, i) => ({ id: "seed-" + i, ...g }));
-}
-
-/* 어떤 레코드든 렌더 가능한 형태로 강제 변환한다. 문자열이 아닌 name 하나가 map() 안에서
-   던지면 카드가 통째로 사라지므로 경계에서 막는다. name 이 비면 카드가 아니라 null. */
-export function coerce(g: unknown, i: number): Game | null {
-  if (!g || typeof g !== "object") return null;
-  const rec = g as Record<string, unknown>;
-  const name = String(rec.name == null ? "" : rec.name).trim();
-  if (!name) return null;
-  return {
-    id: String(rec.id == null ? "" : rec.id) || "g-" + i + "-" + name.length,
-    name,
-    genre: String(rec.genre == null ? "" : rec.genre).trim() || "—",
-    platform: String(rec.platform == null ? "" : rec.platform).trim() || "—",
-    status:
-      typeof rec.status === "string" && Object.prototype.hasOwnProperty.call(STATUS, rec.status)
-        ? (rec.status as Status)
-        : "played",
-  };
-}
-
-export type ParseResult = {
-  games: Game[];
-  // 저장소를 지워야 하는가 — 손상(비배열·전부 걸러짐)일 때만 true. 호출측이 removeItem 한다.
-  clear: boolean;
-};
-
-/* localStorage 문자열(또는 null)을 게임 배열로 강제 변환한다. 구 games.js load() 의
-   판단을 그대로 옮겼다:
-   - 비어 있음 → 시드(지울 것 없음)
-   - JSON.parse 실패 또는 배열 아님 → 시드 + 저장소 클리어 (예: '{"a":1}'·'null'·'0' 도 파싱 통과)
-   - 빈 배열 → 빈 배열 그대로. "저장소가 깨졌다"가 아니라 "사용자가 다 지웠다"이므로 시드로
-     되살리면 삭제가 새로고침마다 취소되고 빈 상태 화면에 영영 닿지 못한다.
-   - 레코드가 있었는데 전부 걸러짐 → 손상으로 보고 시드 + 클리어. */
-export function parseGames(raw: string | null): ParseResult {
-  if (!raw) return { games: seeds(), clear: false };
-  let parsed: unknown = null;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    parsed = null;
-  }
-  if (!Array.isArray(parsed)) return { games: seeds(), clear: true };
-  const clean = parsed.map((g, i) => coerce(g, i)).filter((g): g is Game => g !== null);
-  if (parsed.length > 0 && clean.length === 0) return { games: seeds(), clear: true };
-  return { games: clean, clear: false };
+// Zod 밖에서도 상태를 좁힐 때(서버 입력·매핑 경계). statusOf 와 같은 자기속성 검사라
+// 프로토타입 체인 키('constructor' 등)를 상태로 오인하지 않는다.
+export function isStatus(v: unknown): v is Status {
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(STATUS, v);
 }
 
 /* 기울기·종이결·썸네일 패턴은 카드의 정체성이지 목록 위치가 아니다. 인덱스로 고르면
@@ -109,8 +44,44 @@ export function hash(s: string): number {
 }
 
 /* 축마다 해시를 새로 돌린다(소금을 다르게 준다). 한 해시를 >>3, >>6 으로 나눠 쓰면 안
-   된다 — id 가 'seed-0'..'seed-7' 처럼 끝 한 글자만 다를 때 상위 비트가 전부 같아 축이
-   통째로 붕괴한다(실측: 시드 8장이 패턴 1종·각도 2종). 소금을 주면 고르게 퍼진다. */
+   된다 — id 가 '1'..'8' 처럼 끝 한 글자만 다를 때 상위 비트가 전부 같아 축이 통째로
+   붕괴한다(실측: 끝자리만 다른 8개가 패턴 1종·각도 2종). 소금을 주면 고르게 퍼진다. */
 export function axis(id: string, salt: string, n: number): number {
   return hash(id + "/" + salt) % n;
+}
+
+/* ── 치지직 category API 매핑 (ADR-0015) ─────────────────────────────────────
+   게임 정보원은 치지직 category API 하나다. 반환 4필드만 쓰고 보드는 GAME 만 담는다.
+   여기선 순수 변환·필터만 한다 — 네트워크·인증은 features/chzzk 가, 저장은 db 가 맡는다. */
+
+export type ChzzkCategory = {
+  categoryType: string;
+  categoryId: string;
+  categoryValue: string;
+  posterImageUrl: string | null;
+};
+
+// games 테이블에 스냅샷으로 박히는 4필드(denormalize). status·날짜는 우리 도메인이라 별도.
+export type GameSnapshot = {
+  categoryId: string;
+  categoryType: "GAME";
+  categoryValue: string;
+  posterImageUrl: string | null;
+};
+
+// 보드는 GAME 카테고리만 담는다(ADR-0015). SPORTS·ETC 는 걸러낸다.
+export function isGameCategory(c: ChzzkCategory): boolean {
+  return c.categoryType === "GAME";
+}
+
+/* category → games 스냅샷. GAME 이 아니거나 식별자·이름이 비면 null(호출측이 거른다).
+   poster 의 빈 문자열은 null 로 정규화한다 — DB 는 "없음"을 null 로 표현하고, 카드
+   렌더가 poster 유무로 이니셜 폴백을 가른다. */
+export function toGameSnapshot(c: ChzzkCategory): GameSnapshot | null {
+  if (!isGameCategory(c)) return null;
+  const categoryId = c.categoryId.trim();
+  const categoryValue = c.categoryValue.trim();
+  if (!categoryId || !categoryValue) return null;
+  const poster = (c.posterImageUrl ?? "").trim();
+  return { categoryId, categoryType: "GAME", categoryValue, posterImageUrl: poster || null };
 }

@@ -8,3 +8,7 @@ package-lock.json
 
 # 구 정적 사이트의 frozen 스냅샷(내부 참고 페이지) — 원본 포맷 그대로 보존한다.
 docs/reference
+
+# drizzle-kit 이 생성하는 마이그레이션 메타(스냅샷·저널). 산출물이라 손대지 않는다 —
+# .sql 은 prettier 파서가 없어 어차피 대상이 아니고, 정본은 스키마와 SQL 이다.
+drizzle/meta

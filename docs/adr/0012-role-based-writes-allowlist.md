@@ -3,6 +3,11 @@
 - 상태: Accepted
 - 날짜: 2026-07-18
 
+> **보완:** [ADR-0014](./0014-v1-data-model-schema.md) 가 이 결정을 정교화했다 — 단일 `role`
+> 스칼라를 `users_roles`(M:N grant) + authorities 코드 상수 + `admin`/`superadmin` 2단계로 옮겼다
+> (superadmin 만 `role:manage` → 상승 가드가 구조적). 이 ADR 의 핵심(읽기 공개 · 쓰기 allowlist ·
+> 서버 인가가 정본 · 역할 변경 감사)은 그대로 유효하다.
+
 ## 맥락
 
 v1 정박점은 **공용 게임 보드 + 역할 기반 쓰기**다. 전원 치지직 로그인
