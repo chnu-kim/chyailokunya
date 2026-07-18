@@ -82,6 +82,11 @@ httpOnly·10분) · **로그아웃 = 현재 기기의 family 폐기**(다중 기
 > `AUTH_URL` 과 대조해 일치할 때만 처리한다(fail-closed: Origin 이 없거나 AUTH_URL 을 모르면 거절).
 > 로그아웃도 같은 검사를 받는다 — POST+SameSite 만으로는 강제 로그아웃이 막히지 않기 때문이다:
 > 쿠키가 안 실려 DB 폐기는 건너뛰지만 응답의 삭제 Set-Cookie 는 그대로 적용돼 피해자가 로그아웃된다.
+>
+> **GET 표면은 `Sec-Fetch-Site` 로 닫는다.** Origin 은 쓰기에만 쓸 수 있다 — 브라우저가
+> same-origin GET 엔 Origin 을 안 실어 주기 때문이다. 그런데 인가된 _쿼리_(치지직 카테고리 검색)
+> 는 쿠키를 업고 크로스사이트에서 트리거될 수 있고, 응답을 SOP 로 못 읽어도 부수효과와 외부 API
+> 쿼터는 남는다. 그래서 tRPC 경계가 `Sec-Fetch-Site: cross-site` 를 먼저 거절한다.
 
 ## 근거
 

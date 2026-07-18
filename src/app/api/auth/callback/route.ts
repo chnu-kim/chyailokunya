@@ -16,7 +16,7 @@ import {
   refreshCookieOptions,
 } from "@/features/auth/cookies";
 import { parseJwk } from "@/features/auth/keys";
-import { ensureSuperadmin, upsertChzzkAccount } from "@/features/auth/service";
+import { ensureSuperadmin, superadminExists, upsertChzzkAccount } from "@/features/auth/service";
 import { issueSession, type SessionTokens } from "@/features/auth/session";
 
 export async function GET(req: Request) {
@@ -54,7 +54,12 @@ export async function GET(req: Request) {
 
     const db = makeDb(env.DB);
     const { userId } = await upsertChzzkAccount(db, user.channelId, user.channelName);
-    if (shouldBootstrapSuperadmin(user.channelId, env.SUPERADMIN_CHANNEL_ID)) {
+    // 부트스트랩은 **아무도 superadmin 이 아닐 때만** — env 가 DB 를 매 로그인 덮으면 회수가
+    // 무의미해지고(감사 없이 부활) 최고 권한만 "즉시 회수" 계약 밖에 놓인다(service 주석 참고).
+    if (
+      shouldBootstrapSuperadmin(user.channelId, env.SUPERADMIN_CHANNEL_ID) &&
+      !(await superadminExists(db))
+    ) {
       await ensureSuperadmin(db, userId);
     }
     const privateJwk = parseJwk(env.JWT_SIGNING_JWK, "JWT_SIGNING_JWK");

@@ -7,6 +7,7 @@ import {
   grantRoleWithAudit,
   listRolesForChannel,
   resolveUserIdByChannel,
+  superadminExists,
   revokeRoleWithAudit,
   upsertChzzkAccount,
 } from "./service";
@@ -91,6 +92,25 @@ describe("역할 부여·회수·조회", () => {
     await ensureSuperadmin(db(), userId);
     await ensureSuperadmin(db(), userId);
     expect(await listRolesForChannel(db(), "chan-super")).toEqual(["superadmin"]);
+  });
+
+  /* 부트스트랩 가드. 콜백은 shouldBootstrapSuperadmin && !superadminExists 일 때만 승격한다 —
+     이 가드가 없으면 회수된 superadmin 이 다음 로그인에 감사 없이 부활해, "회수는 즉시·지속"
+     (ADR-0017)이 최고 권한에서만 거짓이 된다. */
+  it("superadminExists 가 부트스트랩을 한 번으로 묶는다 — 회수 후엔 재승격되지 않는다", async () => {
+    const { userId } = await upsertChzzkAccount(db(), "chan-super");
+    expect(await superadminExists(db())).toBe(false); // 최초 실행: 부트스트랩이 돈다
+    await ensureSuperadmin(db(), userId);
+    expect(await superadminExists(db())).toBe(true); // 이후 로그인은 가드에 막힌다
+
+    await revokeRoleWithAudit(db(), {
+      actorUserId: userId,
+      targetUserId: userId,
+      action: "revoke",
+      role: "superadmin",
+    });
+    // 회수됐으면 가드가 다시 열린다 — 마지막 superadmin 이 사라진 경우의 자력 복구.
+    expect(await superadminExists(db())).toBe(false);
   });
 
   it("부여 후 조회되고(멱등), 회수하면 사라진다", async () => {

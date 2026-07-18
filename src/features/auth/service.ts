@@ -95,6 +95,23 @@ export async function ensureSuperadmin(db: Db, userId: number): Promise<void> {
   await db.insert(usersRoles).values({ userId, role: "superadmin" }).onConflictDoNothing();
 }
 
+/* 이미 superadmin 이 하나라도 있는가. 부트스트랩의 **가드**다.
+
+   왜 필요한가: 로그인마다 SUPERADMIN_CHANNEL_ID 를 무조건 재승격하면 env 가 DB 를 덮는
+   상시 권한이 된다 — role:manage 로 회수해도 그 사람의 다음 로그인에 **감사 행 없이** 되살아나,
+   ADR-0017 이 약속한 "회수는 즉시·지속"과 ADR-0018 의 감사가 최고 권한에서만 거짓이 된다.
+
+   그래서 **아무도 superadmin 이 아닐 때만** 부트스트랩한다: 최초 실행은 그대로 되고, 그 뒤엔
+   DB 가 정본이라 회수가 유지되며, 마지막 superadmin 이 사라지면 다시 자력 복구된다. */
+export async function superadminExists(db: Db): Promise<boolean> {
+  const [row] = await db
+    .select({ userId: usersRoles.userId })
+    .from(usersRoles)
+    .where(eq(usersRoles.role, "superadmin"))
+    .limit(1);
+  return row !== undefined;
+}
+
 export type RoleAuditEntry = {
   actorUserId: number;
   targetUserId: number;

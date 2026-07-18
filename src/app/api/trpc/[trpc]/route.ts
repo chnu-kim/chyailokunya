@@ -39,8 +39,17 @@ async function createContext(): Promise<Context> {
 }
 
 function handler(req: Request): Promise<Response> {
-  // 상태를 바꾸는 요청은 Origin 이 우리 것일 때만 받는다(CSRF). GET 은 tRPC v11 기본값상
-  // 뮤테이션을 태우지 못하므로(allowMethodOverride=false) 검사 대상이 아니다.
+  /* 크로스사이트 요청은 **GET(쿼리)도** 막는다. GET 은 뮤테이션을 태우지 못하지만
+     (tRPC v11 allowMethodOverride=false) 쿠키를 업고 인가된 쿼리를 크로스사이트에서 트리거할 수
+     있다 — 응답은 SOP 로 못 읽어도 부수효과와 외부 API 쿼터(chzzk 카테고리 검색)는 남는다.
+     Origin 으로는 못 막는다: 브라우저가 same-origin GET 엔 Origin 을 안 실어 준다. 그래서 GET
+     표면은 Sec-Fetch-Site 로 닫는다(모던 브라우저가 항상 보낸다). 헤더가 없는 옛 브라우저는
+     이 겹을 못 받지만, 쓰기는 아래 Origin 검사와 SameSite 가 계속 막는다. */
+  if (req.headers.get("sec-fetch-site") === "cross-site") {
+    return Promise.resolve(new Response("forbidden origin", { status: 403 }));
+  }
+
+  // 상태를 바꾸는 요청은 Origin 이 우리 것일 때만 받는다(CSRF).
   if (req.method !== "GET") {
     const { env } = getCloudflareContext();
     if (!isAllowedOrigin(req.headers.get("origin"), env.AUTH_URL)) {
