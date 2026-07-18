@@ -13,7 +13,9 @@ NEXTJS_ENV=development
 #   JWT_PUBLIC_JWK        같은 키쌍의 public JWK(JSON) — access 검증. 위 스크립트가 함께 출력한다.
 #   SUPERADMIN_CHANNEL_ID 최초 로그인 시 superadmin 으로 부트스트랩할 치지직 channelId.
 #   AUTH_URL              콜백 origin. 로컬은 http://localhost:3000, 프로덕션은 배포 도메인.
-#                         치지직 앱에 {AUTH_URL}/api/auth/callback 을 redirect URI 로 등록한다.
+#                         치지직 앱에 {AUTH_URL}/api/auth/callback/chzzk 를 redirect URI 로
+#                         등록한다. 실제 라우트(src/app/api/auth/callback/chzzk)와 한 글자라도
+#                         다르면 동의 화면에서 403 이 난다 — /chzzk 세그먼트를 빠뜨리지 말 것.
 # JWT_SIGNING_JWK=
 # JWT_PUBLIC_JWK=
 # SUPERADMIN_CHANNEL_ID=

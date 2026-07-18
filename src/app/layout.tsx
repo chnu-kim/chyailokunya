@@ -8,8 +8,9 @@ import { getServerActor } from "./server-session";
 import { OG_IMAGE, OG_LOCALE, OG_SITE_NAME } from "./site-meta";
 
 // og:image·og:url 은 절대 URL 이어야 한다 — X·Slack 은 상대 경로를 무시해 이미지 없는
-// 카드가 나간다. metadataBase 가 페이지별 상대 경로를 이 도메인으로 절대화한다. 컷오버
-// (Phase 5)까지 구 사이트가 라이브지만, 새 카드는 처음부터 chyailokunya.com 을 가리킨다.
+// 카드가 나간다. metadataBase 가 페이지별 상대 경로를 이 도메인으로 절대화한다. 컷오버는
+// 끝났고 구 정적 사이트는 은퇴했다 — chyailokunya.com 이 정본 origin 이다. apex 만 열려
+// 있으므로(www 는 DNS 에 없다) 이 URL 의 호스트를 바꾸면 공유 카드가 조용히 어긋난다.
 export const metadata: Metadata = {
   metadataBase: new URL("https://chyailokunya.com"),
   title: "챠이로 쿠냐 — 팬 사이트",
@@ -40,7 +41,8 @@ document.documentElement.setAttribute("data-theme",t);
 }catch(e){}})();`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // proxy 가 진입점에서 access 를 갱신해 두므로 여기선 세션을 읽어 nav 로그인 상태만 그린다.
+  // middleware 가 진입점에서 access 를 갱신해 두므로 여기선 세션을 읽어 nav 로그인 상태만
+  // 그린다. (proxy.ts 가 아니라 middleware.ts 인 이유는 ADR-0017 — OpenNext 가 거부한다.)
   const actor = await getServerActor();
   return (
     <html lang="ko" suppressHydrationWarning>

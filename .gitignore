@@ -25,6 +25,24 @@
 /blob-report
 /playwright/.cache
 
+# Open Design 내부 — 사이트와 무관한 도구 상태
+.od-skills/
+*.artifact.json
+
+# 루트의 이미지는 정의상 전부 스크래치 업로드다 — 앱이 쓰는 이미지는 public/assets/ ·
+# docs/reference/assets/ · e2e/*-snapshots/ · src/app/ 안에 있고 루트를 참조하는 코드는 0건이다.
+# 이름 하나씩 막는 건 두더지잡기라 통째로 막는다: 구 저장소에서 실제로 image.png 라는 이름으로
+# 금지된 데뷔 카드가 루트에 다시 올라와 mq*-image.png 패턴을 그대로 통과했다.
+# 루트 앵커(/)는 필수다 — 빼면 위 정상 디렉터리의 이미지까지 같이 사라진다.
+# 이름 기반 패턴(*debut* 류)도 쓰지 않는다: 이 저장소는 core.ignorecase=true 라
+# DebutBadge.tsx 같은 TS 소스가 조용히 untracked 된다. 확장자·경로 한정으로만 막는다.
+# 루트에 이미지를 새로 참조해야 하면 public/assets/ 로 옮겨라 — 이 규칙을 풀지 말고.
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
+
 # misc
 *.log
 *.tsbuildinfo

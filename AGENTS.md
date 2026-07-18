@@ -1,7 +1,7 @@
 # AGENTS.md
 
 `chyailokunya` 에서 작업하는 코딩 에이전트를 위한 플레이북. **이 파일이 규칙의 정본이고**
-`CLAUDE.md`·`GEMINI.md` 는 이걸 import 한다. 규칙이 바뀌면 여기만 고친다.
+`CLAUDE.md` 가 이걸 import 한다. 규칙이 바뀌면 여기만 고친다.
 
 결정의 **"왜"** 는 [`docs/adr/`](./docs/adr/) 에 있다. 규칙(불변식·경계·플레이북)은 여기,
 근거는 ADR — 둘을 섞지 않는다([ADR-0013](./docs/adr/0013-docs-adr-and-agents.md)).
@@ -12,11 +12,24 @@
 **Next.js 풀스택(Cloudflare Workers)** 으로 옮기는 마이그레이션의 결과물이다.
 
 - 배포: Cloudflare Workers. **`https://chyailokunya.com` 라이브**(2026-07-19 apex 연결).
-  workers.dev 도 살아 있다: `chyailokunya.chanwoos-account.workers.dev`. 구 정적 사이트
-  (`chnu-kim/chyaro-kunya`)는 Phase 5 정리까지 별도로 유지.
+  **서빙하는 origin 은 이 apex 하나뿐이다** — `wrangler.jsonc` 의 `routes` 에 custom_domain
+  `chyailokunya.com` 만 있다. **`www` 는 열지 않았다(의도된 설계).** 앱이 절대 URL 을 한 origin
+  에 고정하기 때문이다: layout 의 metadataBase·og:image/og:url, 그리고 `AUTH_URL` Origin 검증
+  ([ADR-0017](./docs/adr/0017-self-session-eddsa-refresh-rotation.md)). 그래서 `www.` 링크는
+  라우트가 없어 죽고, 설령 열더라도 두 origin 이 세션 쿠키·Origin 검증을 갈라 인증까지 물린다 —
+  문서·공유 링크엔 apex 만 쓴다. 필요해지면 리다이렉트 규칙으로 apex 에 모은다(근거 주석은
+  `wrangler.jsonc` 의 routes 위). 구 정적 사이트(`chnu-kim/chyaro-kunya`)는 **은퇴했다** —
+  정본은 `chyailokunya.com` 이다.
 - 스택 요약: Next.js App Router · OpenNext(Workers) · D1+Drizzle · tRPC+Zod · Tailwind v4 ·
-  치지직 커스텀 OAuth → 자체 JWT 세션. 각 선택의 근거는 [ADR-0001~0013](./docs/adr/).
-- **v1 정박점:** 공용 게임 보드 + 역할 기반 쓰기(전원 치지직 로그인, allowlist channelId 만 쓰기).
+  치지직 커스텀 OAuth → **자체 발급 세션**(EdDSA access 15분 + DB refresh 회전·재사용 감지,
+  authorities 는 세션에 안 싣고 인가 순간 DB 조회 —
+  [ADR-0017](./docs/adr/0017-self-session-eddsa-refresh-rotation.md)).
+  각 선택의 근거는 [ADR-0001~0018](./docs/adr/).
+- **v1 정박점:** 공용 게임 보드 + 역할 기반 쓰기. 읽기는 공개, 쓰기는 전원 치지직 로그인 위에
+  **`users_roles` M:N grant + authority 검사**다 — 역할 행이 없으면 member(빈 권한)라 로그인만으로는
+  못 쓰고, 상승 역할 `admin`/`superadmin` 이 `game:write`·`game:delete`(superadmin 은 `role:manage`
+  까지)를 갖는다. 최초 superadmin 은 `SUPERADMIN_CHANNEL_ID` 부트스트랩으로만 생긴다
+  ([ADR-0012](./docs/adr/0012-role-based-writes-allowlist.md)·[ADR-0014](./docs/adr/0014-v1-data-model-schema.md)·[ADR-0018](./docs/adr/0018-role-audit-and-elevation-guard.md)).
 
 ## 검증 (빌드·테스트·린트가 대신 잡아준다)
 
@@ -129,6 +142,12 @@ inline`). 그 위 스크랩북 크롬·페이지 CSS 는 손으로 튜닝한 값
 7. **index/landing 분리 유지.** 병합은 사용자가 기각했다 — 에이전트가 뒤집지 않는다.
 8. **장식은 인라인 SVG.** 이모지 아이콘(✨🚀🎯) 금지. 미니멀 블랙 모티프 SVG.
 9. **이미지는 사용자가 제공한다.** 생성하지 말고 필요 목록을 정리해 요청한다.
+10. **콜백 경로는 `/api/auth/callback/chzzk` 로 고정.** `AUTH_URL` 은 **origin 만** 담고
+    (`https://chyailokunya.com`) 콜백 URL 은 코드가 `${AUTH_URL}/api/auth/callback/chzzk` 로
+    조립한다 — 시크릿에 경로가 섞여 들어가면 조립이 깨진다. 이 경로는 **치지직 콘솔에 등록된
+    redirect URI 와 완전히 일치해야 한다 — 다르면 403** 이다. 라우트를 옮기거나 origin 을
+    바꿀 땐 치지직 콘솔 등록값을 같이 옮긴다
+    ([ADR-0017](./docs/adr/0017-self-session-eddsa-refresh-rotation.md)).
 
 ## 이 스택에서 실제로 밟은 지뢰
 
@@ -197,7 +216,19 @@ Phase 3(DB·도메인 코어)에서 밟은 것들:
   로컬 D1 에 스키마가 없으면 games 페이지가 500 난다 — e2e 는 `globalSetup` 이 `--local` 로
   마이그레이트 + 결정적 픽스처(`e2e/fixtures/games.sql`, poster null)를 심는다.
 - **e2e 포트 3000 이 남의 dev 서버로 막히면 `reuseExistingServer` 가 그걸 재사용해 멈춘다.** 이
-  머신은 다른 프로젝트가 3000 을 쓴다 — `PORT=3333 npm run e2e` 로 빈 포트에 우리 서버를 띄운다.
+  머신은 다른 프로젝트가 3000 을 쓴다 — `PORT=3100 npm run e2e` 로 빈 포트에 우리 서버를 띄운다
+  (기본값 3000 은 `playwright.config.ts` 가 정본이고, 그 파일 주석도 3100 을 가리킨다).
+
+Phase 4(인증)에서 밟은 것:
+
+- **`npm run build` 가 통과해도 배포는 깨질 수 있다 — 게이트가 `next build` 만 돌린다.**
+  Next 16 이 `middleware.ts` 를 `proxy.ts` 로 바꾸며 Node 런타임 전용으로 만들었는데
+  `@opennextjs/cloudflare` 는 Node 미들웨어를 거부한다("Node.js middleware is not currently
+  supported"). proxy 를 엣지로 돌릴 수도 없다("Proxy does not support Edge runtime").
+  **로컬·CI 게이트는 전부 초록인데 배포에서만 터졌다.** 그래서 이 저장소는 구 규약
+  `src/middleware.ts` 를 쓴다(deprecation 경고 감수). OpenNext 가 Node proxy 를 지원하면 옮긴다.
+  일반화하면: **런타임·번들러 계약을 건드리는 변경은 `npx opennextjs-cloudflare build` 로
+  확인한다.** CI 게이트에 이 빌드가 들어 있다(`배포 빌드` 스텝).
 
 ## 접근성 기준 (협상 대상 아님)
 
@@ -211,17 +242,6 @@ Phase 3(DB·도메인 코어)에서 밟은 것들:
 - `prefers-reduced-motion` 가드 안에 새 애니메이션을 넣는다.
 - 라틴 전용 폰트(Gloock·Sacramento)에는 한글 페이스를 폴백으로 — 없으면 한글 제목이 OS
   임의 폰트로 떨어진다(토큰에 이미 반영).
-
-Phase 4(인증)에서 밟은 것:
-
-- **`npm run build` 가 통과해도 배포는 깨질 수 있다 — 게이트가 `next build` 만 돌린다.**
-  Next 16 이 `middleware.ts` 를 `proxy.ts` 로 바꾸며 Node 런타임 전용으로 만들었는데
-  `@opennextjs/cloudflare` 는 Node 미들웨어를 거부한다("Node.js middleware is not currently
-  supported"). proxy 를 엣지로 돌릴 수도 없다("Proxy does not support Edge runtime").
-  **로컬·CI 게이트는 전부 초록인데 배포에서만 터졌다.** 그래서 이 저장소는 구 규약
-  `src/middleware.ts` 를 쓴다(deprecation 경고 감수). OpenNext 가 Node proxy 를 지원하면 옮긴다.
-  일반화하면: **런타임·번들러 계약을 건드리는 변경은 `npx opennextjs-cloudflare build` 로
-  확인한다.** CI 게이트에 이 빌드가 들어 있다(`배포 빌드` 스텝).
 
 ## 코드 컨벤션
 

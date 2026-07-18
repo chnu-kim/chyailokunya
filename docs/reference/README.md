@@ -8,7 +8,7 @@ Phase 2 에서 **앱 라우트로 이식하지 않았다**(에픽 #1 · 이슈 #
 | 파일 | 무엇 |
 |---|---|
 | `logo-identity-directions.html` | 로고 아이덴티티 확정 스펙 — C 카오모지(`#mk-kao`)와 A 잉크 도장(favicon) 한 쌍의 근거 |
-| `og-cover.html` | OG 커버(1200×630) 렌더 타깃 — 조판·도장 워터마크 포함 |
+| `og-cover.html` | OG 커버(1200×630) 렌더 타깃 — `public/assets/og-cover.jpg` 의 소스 |
 | `paw-shape-compare.html` | 발바닥 세로 길이 3안(`deco-paw` / `-tall` / `-flat`) 비교 |
 
 ## 어떻게 여나
@@ -29,7 +29,8 @@ python3 -m http.server -d docs/reference   # → http://localhost:8000/og-cover.
 
 ## `og-cover.html` 이 아직 쓸모 있는 이유
 
-`public/assets/og-cover.jpg` 는 `og-cover.html` 을 렌더한 결과가 **아니다**(데뷔 사진을
-1200×630 에 패딩한 것이라 조판·도장 워터마크가 빠져 있다). 이 런타임엔 HTML→이미지 렌더
-경로가 없어, 조판까지 반영한 커버가 필요하면 이 페이지를 브라우저로 열어 1200×630 으로
-캡처한 뒤 `public/assets/og-cover.jpg` 를 교체한다.
+`public/assets/og-cover.jpg` 의 정의는 하나뿐이다 — **`og-cover.html` 을 1200×630 으로 렌더한
+것.** 이미지가 무엇처럼 보이는지로 이 파일을 설명하지 않는다(그렇게 적었다가 세 번 틀렸다).
+
+이 런타임엔 HTML→이미지 렌더 경로가 없다. 커버를 갱신할 땐 이 페이지를 브라우저로 열어
+1200×630 으로 캡처한 뒤 `public/assets/og-cover.jpg` 를 교체한다.
