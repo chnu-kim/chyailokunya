@@ -40,7 +40,7 @@ export default function Home() {
                   alt="눈을 감고 미소 짓는 쿠냐 — 검은 오프숄더 스웨터 차림으로 밤 조명이 든 방에서"
                 />
               </div>
-              <figcaption>굿나잇</figcaption>
+              <figcaption>움뫄</figcaption>
             </figure>
             <figure className="polaroid snap" data-od-id="home-snap-2">
               <span className="clip" aria-hidden="true" />
@@ -67,7 +67,7 @@ export default function Home() {
                   alt="트윈테일을 묶고 마이크 앞에서 이야기하며 웃는 쿠냐"
                 />
               </div>
-              <figcaption>방송 중</figcaption>
+              <figcaption>엥?</figcaption>
             </figure>
           </div>
           {/* 이름은 바로 아래 h1 이 말한다. 이 칩이 더할 게 있다면 "공식이 아니다" 뿐이다. */}
@@ -78,9 +78,8 @@ export default function Home() {
             챠이로 쿠냐
           </h1>
           <p className="rise" style={rise("300ms")}>
-            갈색 고양이 버추얼 스트리머의 작은 다꾸 노트.{" "}
             <span className="t-hand" style={{ fontSize: "var(--text-xl)" }}>
-              어서오냥, 쿠냥이 ♡
+              엉뚱한 매력있는 챠이로 쿠냐 등장!
             </span>
           </p>
           <span className="quokka-doodle" aria-hidden="true" />
