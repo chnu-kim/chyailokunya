@@ -22,8 +22,17 @@ import { issueSession, type SessionTokens } from "@/features/auth/session";
 export async function GET(req: Request) {
   const { env } = getCloudflareContext();
   const url = new URL(req.url);
-  const origin = env.AUTH_URL ?? url.origin;
-  const fail = () => NextResponse.redirect(new URL("/?login=failed", origin));
+  // AUTH_URL 부재 시 url.origin(=Host 헤더)으로 폴백하면 리다이렉트 대상이 요청자에게 좌우된다.
+  // login 이 이미 503 으로 막으므로 여기도 fail-closed 로 맞춘다.
+  if (!env.AUTH_URL) return new NextResponse("AUTH_URL 미설정", { status: 503 });
+  const origin = env.AUTH_URL;
+  // 실패해도 state 쿠키를 걷는다 — 남겨 두면 같은 nonce 로 TTL(10분) 내내 콜백을 재시도할 수
+  // 있어 "state = 일회용" 속성이 코드로 지켜지지 않는다.
+  const fail = () => {
+    const res = NextResponse.redirect(new URL("/?login=failed", origin));
+    res.cookies.set(COOKIE_NAME.state, "", clearedCookieOptions());
+    return res;
+  };
 
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");

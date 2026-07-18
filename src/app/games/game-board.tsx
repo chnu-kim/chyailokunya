@@ -49,6 +49,9 @@ export function GameBoard({
   const [composing, setComposing] = useState(false);
   // 지연 커밋 대기 중인 카드(자국으로 렌더). 행 자체는 games 에 남아 있어야 되돌릴 수 있다.
   const [ghosts, setGhosts] = useState<ReadonlySet<number>>(new Set());
+  // 커밋 뮤테이션이 이미 나간 카드. 왕복(수백 ms~수초) 동안 되돌리기가 눌리면 "되돌렸어요"라
+  // 알린 행이 서버에서 사라진다 — 하드 삭제라 복구 경로가 없다. 그 창에서 버튼을 잠근다.
+  const [committing, setCommitting] = useState<ReadonlySet<number>>(new Set());
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   // 포커스를 문 버튼이 사라지는 전환(삭제→자국, 자국→복원)에서 포커스가 body 로 떨어지지
   // 않게 다음 버튼으로 옮긴다. key 는 "undo:<id>" · "del:<id>".
@@ -77,6 +80,15 @@ export function GameBoard({
     });
   }
 
+  function setCommitting_(id: number, on: boolean) {
+    setCommitting((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
   function registerBtn(key: string, el: HTMLButtonElement | null) {
     if (!el) {
       btnRefs.current.delete(key);
@@ -92,9 +104,13 @@ export function GameBoard({
 
   function onFilter(f: Filter, label: string) {
     setFilter(f);
-    const shown = games.filter((g) => f === "all" || g.status === f).length;
+    // 아직 안 소비된 포커스 예약을 버린다 — 안 그러면 나중에 그 카드가 다시 렌더될 때
+    // 방금 누른 필터 칩에서 포커스를 낚아챈다.
+    pendingFocus.current = null;
+    const live = games.filter((g) => !ghosts.has(g.id));
+    const shown = live.filter((g) => f === "all" || g.status === f).length;
     setAnnouncement(
-      f === "all" ? "전체 " + games.length + "개 표시" : label + " " + shown + "개 표시",
+      f === "all" ? "전체 " + live.length + "개 표시" : label + " " + shown + "개 표시",
     );
   }
 
@@ -102,6 +118,9 @@ export function GameBoard({
     // 최신 추가가 위로(구 보드의 prepend). 서버 정본과 같은 정렬.
     setGames((prev) => [row, ...prev]);
     setComposing(false);
+    // 필터가 걸려 있으면 방금 붙인 카드가 화면에 안 나타난다 — "추가됨"이라 알려 놓고 그리드는
+    // 그대로인 모순을 피하려고, 새 행이 현재 필터에 안 걸리면 전체로 되돌린다.
+    setFilter((f) => (f === "all" || f === row.status ? f : "all"));
     setAnnouncement(row.categoryValue + " 추가됨");
   }
 
@@ -118,8 +137,10 @@ export function GameBoard({
 
   function onUndo(id: number, name: string) {
     const t = timers.current.get(id);
+    // 타이머가 이미 없으면 커밋이 나간 뒤다 — 되돌릴 수 없는데 되돌린 척하면 안 된다.
+    // (Map.delete 의 반환값으로 "내가 취소한 게 맞다"를 원자적으로 확인한다.)
+    if (!timers.current.delete(id)) return;
     if (t) clearTimeout(t);
-    timers.current.delete(id);
     setGhost(id, false);
     setAnnouncement(name + " 되돌렸어요");
     pendingFocus.current = "del:" + id;
@@ -127,6 +148,7 @@ export function GameBoard({
 
   async function commitRemove(id: number, name: string) {
     timers.current.delete(id);
+    setCommitting_(id, true);
     // 자국의 되돌리기 버튼에 포커스가 있었으면 그 버튼이 사라지므로 포커스를 옮겨 줘야 한다.
     const undoEl = btnRefs.current.get("undo:" + id);
     const hadFocus = !!undoEl && document.activeElement === undoEl;
@@ -134,19 +156,27 @@ export function GameBoard({
       await trpc.games.remove.mutate({ id });
       setGames((prev) => prev.filter((g) => g.id !== id));
       setGhost(id, false);
+      setCommitting_(id, false);
       setAnnouncement(name + " 삭제됨");
       if (hadFocus) addSlotRef.current?.focus();
     } catch {
       // 서버가 거부하면 자국을 걷고 카드를 되살린다 — 지워진 것처럼 보이게 두지 않는다.
       setGhost(id, false);
+      setCommitting_(id, false);
       setAnnouncement(name + " 삭제에 실패했어요");
       if (hadFocus) pendingFocus.current = "del:" + id;
     }
   }
 
-  const list = games.filter((g) => filter === "all" || g.status === filter);
+  // 자국(삭제 대기)은 아직 지워지지 않았지만 사용자에겐 "뗀 것"이라 세지 않는다 — 안 그러면
+  // 6초 뒤 아무것도 안 눌렀는데 총계가 혼자 줄어든다.
+  const live = games.filter((g) => !ghosts.has(g.id));
+  const shown = live.filter((g) => filter === "all" || g.status === filter);
+  // 자국은 필터와 무관하게 계속 렌더한다 — 필터를 바꿨다고 되돌릴 UI 가 사라지면 타이머만
+  // 남아 되돌릴 수 없는 하드 삭제가 된다(ADR-0014 의 되돌림 창 계약이 깨진다).
+  const list = games.filter((g) => ghosts.has(g.id) || filter === "all" || g.status === filter);
   const showEmpty = list.length === 0;
-  const boardEmpty = games.length === 0;
+  const boardEmpty = live.length === 0;
 
   return (
     <>
@@ -158,11 +188,11 @@ export function GameBoard({
             <span className="head__count">
               {filter === "all" ? (
                 <>
-                  총 <b>{games.length}</b>개
+                  총 <b>{live.length}</b>개
                 </>
               ) : (
                 <>
-                  <b>{list.length}</b> / {games.length}개 표시
+                  <b>{shown.length}</b> / {live.length}개 표시
                 </>
               )}
             </span>
@@ -240,11 +270,12 @@ export function GameBoard({
                         className="game__undo"
                         type="button"
                         ref={(el) => registerBtn("undo:" + g.id, el)}
+                        disabled={committing.has(g.id)}
                         data-od-id={"game-undo-" + g.id}
                         onClick={() => onUndo(g.id, g.categoryValue)}
                       >
+                        <span className="sr-only">{g.categoryValue + " "}</span>
                         되돌리기
-                        <span className="sr-only">{" " + g.categoryValue}</span>
                       </button>
                     </div>
                   </div>
@@ -302,8 +333,8 @@ export function GameBoard({
                         data-od-id={"game-del-" + g.id}
                         onClick={() => onRemove(g.id, g.categoryValue)}
                       >
+                        <span className="sr-only">{g.categoryValue + " "}</span>
                         삭제
-                        <span className="sr-only">{" " + g.categoryValue}</span>
                       </button>
                     )}
                   </div>

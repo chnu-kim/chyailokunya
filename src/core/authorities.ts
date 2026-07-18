@@ -9,7 +9,8 @@
 export const ROLES = ["admin", "superadmin"] as const;
 export type Role = (typeof ROLES)[number];
 
-// 인가는 role 이 아니라 이 권한 단위로 검사한다 — 세션엔 role 대신 effective authorities 를 싣는다.
+// 인가는 role 이 아니라 이 권한 단위로 검사한다. 세션엔 어떤 권한도 안 싣고 인가 순간 DB 에서
+// 역할을 읽어 파생한다(ADR-0017) — 그래야 역할 회수가 즉시 반영된다.
 export const AUTHORITIES = ["game:write", "game:delete", "role:manage"] as const;
 export type Authority = (typeof AUTHORITIES)[number];
 

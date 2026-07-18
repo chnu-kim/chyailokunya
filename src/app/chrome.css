@@ -317,7 +317,9 @@ h2.t-script {
    씻긴다 — btn--primary 와 같은 패턴으로 다크 hover 만 어두운 잉크로 뒤집는다(#15110f on
    #c79b86 = 7.56:1). 라이트는 브라운 #76554b 위 5.67:1 이라 그대로 둔다. */
 [data-theme="dark"] .btn--secondary:hover {
-  color: #15110f;
+  /* 다크 페이지 배경색을 글자로 되쓴다 — 생 hex 를 새로 두면 배경 토큰이 바뀔 때 이 값만
+     안 따라온다(불변식 6). 이 규칙 안에서 --bg 는 #15110f 라 #c79b86 위 7.56:1. */
+  color: var(--bg);
 }
 .btn--accent {
   background: var(--accent);
@@ -583,10 +585,20 @@ h2.t-script {
   .nav__link {
     padding: 6px 8px;
   }
-  /* 좁은 nav 에선 채널명을 접는다 — 로그아웃 버튼만 남겨 가로 넘침을 막는다(폰트 늦으면
-     한글이 전각 폴백으로 먼저 그려져 더 넓다). title 속성이 이름을 여전히 제공한다. */
+  /* 좁은 nav 에선 채널명을 **시각적으로만** 접는다 — 로그아웃 버튼만 남겨 가로 넘침을 막되
+     (폰트 늦으면 한글이 전각 폴백으로 먼저 그려져 더 넓다), display:none 은 쓰지 않는다:
+     접근성 트리에서도 지워져 "누구로 로그인했는지"를 알 방법이 사라진다(title 툴팁은 정확히
+     이 폭대의 터치 기기에서 띄울 수 없다). clip 기법으로 스크린리더엔 계속 읽히게 둔다. */
   .nav__user {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
   /* 31px 손글씨가 360px nav 의 40% 를 먹었다 — 마크가 46px 로 커진 뒤엔 폰트가
      오면 ~1px 만 남았다. 작은 화면에서 워드마크를 한 단계 줄이면 로드 상태에

@@ -39,6 +39,7 @@ export async function createSession(
   const familyId = crypto.randomUUID();
   const familyExpiresAt = computeFamilyExpiry(now, ABSOLUTE_CAP_MS);
   await insertRefresh(db, { userId, familyId, familyExpiresAt, token, now });
+  await cleanupRefreshTokens(db, now, GRACE_MS);
   return { token, familyId };
 }
 
@@ -103,6 +104,9 @@ export async function rotateRefreshToken(
       await revokeFamily(db, won.familyId, now);
       return { ok: false, reason: "invalid" };
     }
+    // 노출 창을 닫는 곁다리 청소(cleanupRefreshTokens 주석의 계약). 방금 심은 행은 대상이
+    // 아니다 — supersededAt=now 라 grace 밖이 아니고, 후계는 만료가 미래다.
+    await cleanupRefreshTokens(db, now, GRACE_MS);
     return { ok: true, token: successor, userId: won.userId, familyId: won.familyId };
   }
 
@@ -128,12 +132,23 @@ export async function rotateRefreshToken(
     // 정상 동시 탭: 최초 회전자가 심어둔 후계 원본을 그대로 멱등 반환한다 — 새로 찍지 않아야
     // 도둑이 grace 창에서 유효 토큰을 무제한 증식하지 못한다(alive head 1 유지).
     if (row!.replacedByToken) {
-      return {
-        ok: true,
-        token: row!.replacedByToken,
-        userId: row!.userId,
-        familyId: row!.familyId,
-      };
+      // 후계 "원본은 심겼는데 행이 없는" 반대 방향 고아도 있다(claim 성공 후 INSERT 전 크래시).
+      // 그대로 돌려주면 호출자는 access 를 받지만 다음 회전에서 invalid 로 죽는다 — 행 존재를
+      // 확인하고 없으면 손상으로 끊어 재로그인시킨다.
+      const [alive] = await db
+        .select({ id: refreshTokens.id })
+        .from(refreshTokens)
+        .where(eq(refreshTokens.tokenHash, await hashToken(row!.replacedByToken)))
+        .limit(1);
+      if (alive) {
+        return {
+          ok: true,
+          token: row!.replacedByToken,
+          userId: row!.userId,
+          familyId: row!.familyId,
+        };
+      }
+      return { ok: false, reason: "invalid" };
     }
     // 후계 원본이 없다 = claim 뒤 발급이 실패한 고아 superseded. 재사용이 아니라 세션 손상이니 무효.
     return { ok: false, reason: "invalid" };

@@ -10,6 +10,7 @@ import { cookies } from "next/headers";
 import { authoritiesFor, type Authority } from "@/core/authorities";
 import { makeDb } from "@/db";
 import { COOKIE_NAME } from "@/features/auth/config";
+import { isAllowedOrigin } from "@/features/auth/csrf";
 import { parseJwk } from "@/features/auth/keys";
 import { listRolesForChannel } from "@/features/auth/service";
 import { verifyAccessToken } from "@/features/auth/tokens";
@@ -47,6 +48,14 @@ async function createContext(): Promise<Context> {
 }
 
 function handler(req: Request): Promise<Response> {
+  // 상태를 바꾸는 요청은 Origin 이 우리 것일 때만 받는다(CSRF). GET 은 tRPC v11 기본값상
+  // 뮤테이션을 태우지 못하므로(allowMethodOverride=false) 검사 대상이 아니다.
+  if (req.method !== "GET") {
+    const { env } = getCloudflareContext();
+    if (!isAllowedOrigin(req.headers.get("origin"), env.AUTH_URL)) {
+      return Promise.resolve(new Response("forbidden origin", { status: 403 }));
+    }
+  }
   return fetchRequestHandler({
     endpoint: "/api/trpc",
     req,

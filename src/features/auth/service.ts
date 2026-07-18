@@ -1,6 +1,6 @@
-/* 인증·인가 데이터 유즈케이스(tRPC 무관 순수 db 연산 — games/service.ts 와 같은 결). next-auth
-   콜백(src/auth.ts)과 역할 라우터(router.ts)가 재사용한다. 신원 upsert·역할 조회는 로그인
-   콜백이, grant/revoke·감사는 role 뮤테이션이 부른다. 상승 가드 판정은 여기가 아니라 순수
+/* 인증·인가 데이터 유즈케이스(tRPC 무관 순수 db 연산 — games/service.ts 와 같은 결). OAuth 콜백
+   라우트(app/api/auth/callback)와 역할 라우터(router.ts)가 재사용한다. 신원 upsert·역할 조회는
+   로그인 콜백이, grant/revoke·감사는 role 뮤테이션이 부른다. 상승 가드 판정은 여기가 아니라 순수
    core(roles.ts)가 한다 — 이 파일은 그 판정을 통과한 뒤의 DB 쓰기만 맡는다. */
 
 import { and, eq } from "drizzle-orm";
@@ -78,8 +78,8 @@ export async function getIdentity(
 }
 
 /* channelId 의 부여 역할. oauth_accounts→users_roles 조인. DB 문자열은 스키마 CHECK 로 이미
-   보증되지만 타입 경계를 코드로도 지켜 isRole 로 좁힌다(신뢰하지 않는 입력 원칙). jwt 콜백이
-   이 역할들을 authoritiesFor 에 넣어 세션의 effective authorities 를 만든다. */
+   보증되지만 타입 경계를 코드로도 지켜 isRole 로 좁힌다(신뢰하지 않는 입력 원칙). 인가 순간
+   trpc/init 의 authoritiesOf() 가 이 역할들을 authoritiesFor 에 넣는다 — 세션엔 안 싣는다(ADR-0017). */
 export async function listRolesForChannel(db: Db, channelId: string): Promise<Role[]> {
   const rows = await db
     .select({ role: usersRoles.role })

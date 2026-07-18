@@ -16,6 +16,16 @@ import { trpc } from "@/features/trpc/client";
    바텀시트는 games.css 의 dialog.composer 가 이미 그린다. 표면은 .paper — .polaroid 는
    --border-strong 을 안 되돌려 다크에서 입력 테두리가 1.01:1 로 사라진다(그 자리 주석 참고). */
 
+/* tRPC 에러 **코드**로 분기한다 — 서버 문구 매칭(msg.includes("이미"))은 문구를 다듬는 순간
+   조용히 죽는다. 세션 만료·권한 없음은 재시도로 안 풀리므로 실행 가능한 조치를 안내한다. */
+function messageFor(e: unknown, fallback: string): string {
+  const code = (e as { data?: { code?: string } } | null)?.data?.code;
+  if (code === "CONFLICT") return "이미 보드에 있는 게임이에요.";
+  if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
+    return "로그인이 만료됐거나 권한이 없어요. 다시 로그인해 주세요.";
+  return fallback;
+}
+
 export function GameComposer({
   onAdded,
   onClose,
@@ -24,6 +34,7 @@ export function GameComposer({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ChzzkCategory[]>([]);
   const [error, setError] = useState("");
@@ -35,6 +46,10 @@ export function GameComposer({
   // @starting-style 를 모르는 브라우저에서도 즉시 뜨는 것과 같은 "없어지는 실패 모드"라 무해하다.
   useEffect(() => {
     dialogRef.current?.showModal();
+    // autoFocus 속성은 여기서 무효다 — React 는 커밋 시점에 .focus() 를 대신 부르는데 그땐
+    // dialog 가 아직 닫혀 있어(UA 의 display:none) no-op 이고, 이후 showModal 의 포커스 단계는
+    // autofocus "속성"을 찾다 못 찾아 첫 포커서블(닫기 버튼)로 떨어진다. 열고 나서 직접 맞춘다.
+    inputRef.current?.focus();
   }, []);
 
   function onSearch(e: React.FormEvent) {
@@ -47,8 +62,10 @@ export function GameComposer({
         const found = await trpc.chzzk.categorySearch.query({ query: q, size: 12 });
         setResults(found);
         if (found.length === 0) setError("검색 결과가 없어요. 다른 이름으로 찾아보세요.");
-      } catch {
-        setError("검색에 실패했어요. 잠시 후 다시 시도해 주세요.");
+      } catch (e) {
+        // 실패한 검색의 이전 결과를 남기면 방금 검색어와 무관한 게임을 붙이게 된다 — 비운다.
+        setResults([]);
+        setError(messageFor(e, "검색에 실패했어요. 잠시 후 다시 시도해 주세요."));
       }
     });
   }
@@ -68,8 +85,7 @@ export function GameComposer({
         dialogRef.current?.close();
         onAdded(row);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "";
-        setError(msg.includes("이미") ? "이미 보드에 있는 게임이에요." : "추가에 실패했어요.");
+        setError(messageFor(e, "추가에 실패했어요."));
       }
     });
   }
@@ -137,9 +153,9 @@ export function GameComposer({
             type="search"
             placeholder="게임 이름으로 검색"
             value={query}
+            ref={inputRef}
             onChange={(e) => setQuery(e.target.value)}
             data-od-id="composer-input"
-            autoFocus
           />
           <button className="btn btn--secondary composer__btn" type="submit" disabled={searching}>
             {searching ? "검색 중…" : "검색"}

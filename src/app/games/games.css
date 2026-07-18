@@ -162,9 +162,8 @@
    쓰는 이유: .polaroid 는 --border-strong 을 안 되돌려 다크에서 입력 테두리가 1.01:1 로
    사라진다. .paper 위에선 14.3:1. */
 /* .paper 가 position:relative 를 주므로 여기서 fixed 로 되돌린다. 스크롤은 이 요소가 아니라
-   폼(.composer__body)이 맡는다 — 테이프가 위 모서리 밖으로 걸쳐야(top:-12px) 붙어 보이는데,
-   여기가 스크롤 컨테이너면 그 부분이 잘린다. 좌우·아래 패딩을 폼으로 내린 것도 overflow-y:auto
-   가 overflow-x 를 visible 로 못 둬 포커스 링이 잘리기 때문이다. */
+   본문(.composer__body)이 맡고 좌우·아래 패딩도 그쪽에 있다 — overflow-y:auto 는 overflow-x 를
+   visible 로 못 두므로, 이 요소가 스크롤 컨테이너가 되면 안쪽 컨트롤의 포커스 링이 잘린다. */
 dialog.composer {
   position: fixed;
   inset: 0;

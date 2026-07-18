@@ -32,8 +32,9 @@ const lastUpdatedAt = () =>
     .$onUpdate(() => Date.now());
 
 /* 내부 신원 앵커. OAuth 결합도 0 — 다른 로그인 수단이 붙어도 이 테이블은 안 바뀐다.
-   표시명(치지직 channelName)은 DB 가 아니라 JWT 세션에만 둔다: 다른 유저를 화면에
-   노출하지 않는 v1 에선 이름을 DB 에서 조회할 일이 없다. */
+   표시명은 여기가 아니라 oauth_accounts.channel_name 에 있다(제공자가 준 값이라 그쪽이 제자리).
+   ADR-0014 는 "표시명은 DB 아님 → 세션에만"이었지만 ADR-0017 이 뒤집었다: refresh 회전 때
+   access 를 재서명하려면 표시명이 필요한데 치지직 토큰을 안 들고 있어 재조회가 불가능하다. */
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   createdAt: createdAt(),

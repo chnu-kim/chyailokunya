@@ -24,17 +24,21 @@ export const config = {
 
 export async function proxy(request: NextRequest) {
   const { env } = await getCloudflareContext({ async: true });
-  const publicJwks = env.JWT_PUBLIC_JWK ? [parseJwk(env.JWT_PUBLIC_JWK, "JWT_PUBLIC_JWK")] : [];
+  // 키는 쌍으로만 의미가 있다. public 만 빠지면 access 검증이 **영원히 실패**해 모든 요청이
+  // 회전 분기로 떨어진다 — 요청마다 refresh 행이 늘고 세션이 안착하지 못한다. 한쪽만 있는
+  // 설정은 오설정이므로 세션 기능 자체를 끈 비로그인으로 통과시킨다(fail-closed, 조용한 폭주 금지).
+  if (!env.JWT_PUBLIC_JWK || !env.JWT_SIGNING_JWK) return NextResponse.next();
+  const publicJwks = [parseJwk(env.JWT_PUBLIC_JWK, "JWT_PUBLIC_JWK")];
 
   // access 유효 → 서명 검증만(DB 0) → 통과.
   const access = request.cookies.get(COOKIE_NAME.access)?.value;
-  if (access && publicJwks.length && (await verifyAccessToken(publicJwks, access))) {
+  if (access && (await verifyAccessToken(publicJwks, access))) {
     return NextResponse.next();
   }
 
-  // access 만료·부재. refresh 나 서명키가 없으면 비로그인으로 통과(공개 읽기는 무관).
+  // access 만료·부재. refresh 가 없으면 비로그인으로 통과(공개 읽기는 무관).
   const refresh = request.cookies.get(COOKIE_NAME.refresh)?.value;
-  if (!refresh || !env.JWT_SIGNING_JWK) return NextResponse.next();
+  if (!refresh) return NextResponse.next();
 
   const db = makeDb(env.DB);
   const privateJwk = parseJwk(env.JWT_SIGNING_JWK, "JWT_SIGNING_JWK");

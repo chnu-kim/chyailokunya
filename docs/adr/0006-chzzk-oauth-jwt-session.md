@@ -50,5 +50,7 @@ OIDC 가 아니라 자체 OAuth 흐름을 쓴다. 신원의 안정 식별자는 
 - (+) 세션 수명·역할을 우리가 통제. 외부 토큰 갱신 부담 없음.
 - (−) 커스텀 프로바이더는 손이 많이 간다(콜백·state·CSRF·매핑). Phase 4 의 핵심 리스크.
 - (−) redirect URI 는 안정 배포 URL 이 필요해 Phase 0(앱 등록)·Phase 5(도메인)가 상호 의존.
-- 비밀(`CHZZK_CLIENT_SECRET`·`AUTH_SECRET`·`SUPERADMIN_CHANNEL_ID`)은 저장소가 아니라
-  Cloudflare secret / 1Password Environment 로만 주입한다.
+- 비밀(`CHZZK_CLIENT_SECRET`·세션 서명 키·`SUPERADMIN_CHANNEL_ID`)은 저장소가 아니라
+  Cloudflare secret / 1Password Environment 로만 주입한다. (세션 서명 키는 초안의 HMAC
+  `AUTH_SECRET` 이 아니라 EdDSA JWK 쌍 `JWT_SIGNING_JWK`/`JWT_PUBLIC_JWK` 다 —
+  [ADR-0017](./0017-self-session-eddsa-refresh-rotation.md).)

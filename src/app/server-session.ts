@@ -13,14 +13,18 @@ import { listRolesForChannel } from "@/features/auth/service";
 import { verifyAccessToken, type AccessClaims } from "@/features/auth/tokens";
 
 export async function getServerActor(): Promise<AccessClaims | null> {
+  // cookies() 를 **가장 먼저** 부른다. 이게 Next 에 "이 라우트는 동적"이라고 알리는 신호다 —
+  // try 안에서 getCloudflareContext() 뒤에 두면 빌드 때 그쪽이 먼저 던지고 catch 가 삼켜,
+  // / 와 /landing 이 비로그인 상태로 정적 프리렌더된다. 그러면 로그인해도 그 두 페이지의 nav 가
+  // 영원히 "치지직 로그인"으로 굳는다(정적 HTML 이라 하이드레이션도 못 고친다).
+  const access = (await cookies()).get(COOKIE_NAME.access)?.value;
+  if (!access) return null;
   try {
     const { env } = getCloudflareContext();
-    const access = (await cookies()).get(COOKIE_NAME.access)?.value;
-    if (!access || !env.JWT_PUBLIC_JWK) return null;
+    if (!env.JWT_PUBLIC_JWK) return null;
     return await verifyAccessToken([parseJwk(env.JWT_PUBLIC_JWK, "JWT_PUBLIC_JWK")], access);
   } catch {
-    // build 의 static prerender(예: /_not-found)엔 런타임 컨텍스트(getCloudflareContext)가 없다 —
-    // 비로그인으로 렌더한다. 실제 요청에선 컨텍스트가 있어 세션을 정상적으로 읽는다.
+    // 런타임 컨텍스트가 없는 경로(빌드 중 예외 등)에선 비로그인으로 렌더한다.
     return null;
   }
 }
