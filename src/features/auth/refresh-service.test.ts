@@ -113,6 +113,24 @@ describe("rotateRefreshToken — 재사용·무효", () => {
     expect(await aliveIn(familyId)).toHaveLength(1); // 새 토큰 다발 안 생김
   });
 
+  /* 연쇄 회전(T1→T2→T3) 뒤 T1 이 grace 안에 늦게 도착하면, 후계 T2 는 이미 회전된 상태다.
+     그걸 돌려주면 브라우저가 죽은 refresh 를 쿠키에 물고, 다음 회전에서 T2 가 grace 밖 재사용
+     으로 분류돼 **멀쩡한 세션의 family 전체가 도난으로 폐기**된다. 살아있는 후계만 돌려준다. */
+  it("연쇄 회전 뒤 늦게 온 구 토큰에 이미 회전된 후계를 주지 않는다(쿠키 오염 방지)", async () => {
+    const userId = await seedUser();
+    const { token: t1, familyId } = await createSession(db(), userId, NOW);
+    const r1 = await rotateRefreshToken(db(), t1, NOW + 1000, TEST_JWK); // T1 → T2
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) return;
+    expect((await rotateRefreshToken(db(), r1.token, NOW + 2000, TEST_JWK)).ok).toBe(true); // T2 → T3
+
+    // T1 의 grace 창 안이지만 후계 T2 는 이미 회전됐다 → 돌려주면 안 된다.
+    const late = await rotateRefreshToken(db(), t1, NOW + 1000 + GRACE_MS - 1, TEST_JWK);
+    expect(late.ok).toBe(false);
+    // 멀쩡한 세션이므로 family 는 살아 있어야 한다(도난으로 몰지 않는다).
+    expect(await aliveIn(familyId)).toHaveLength(1);
+  });
+
   it("grace 밖 재사용은 도난 — family 전체 revoke", async () => {
     const userId = await seedUser();
     const { token, familyId } = await createSession(db(), userId, NOW);

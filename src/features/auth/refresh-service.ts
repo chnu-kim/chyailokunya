@@ -132,15 +132,27 @@ export async function rotateRefreshToken(
   if (verdict === "invalid") return { ok: false, reason: "invalid" };
 
   if (verdict === "reuse-grace") {
-    // 정상 동시 탭: 후계는 저장돼 있지 않고 위에서 같은 값으로 재계산됐다(successor). 실제로
-    // 발급됐는지는 그 해시로 행을 찾아 확인한다 — claim 성공 후 INSERT 전에 죽은 고아면 행이
-    // 없으므로, 다음 회전에서 죽을 토큰을 주는 대신 세션 손상으로 끊어 재로그인시킨다.
-    const [alive] = await db
-      .select({ revokedAt: refreshTokens.revokedAt })
+    /* 정상 동시 탭: 후계는 저장돼 있지 않고 위에서 같은 값으로 재계산됐다(successor). 다만
+       **살아있는 후계일 때만** 돌려준다 — 세 상태를 가른다:
+       - 행 없음 = claim 성공 후 INSERT 전에 죽은 고아 → 세션 손상.
+       - revoked = family 가 폐기됨(로그아웃·도난) → 되살리지 않는다.
+       - superseded = 그 사이 체인이 더 굴렀다(T1→T2→T3). 늦게 도착한 T1 에 이미 회전된 T2 를
+         주면 브라우저가 죽은 refresh 를 쿠키에 물고, 다음 회전에서 T2 가 grace 밖 재사용으로
+         분류돼 **멀쩡한 세션의 family 전체가 도난으로 폐기**된다. 그래서 여기서 끊는다.
+       셋 다 재인증으로 보내는 게 안전한 방향이다(fail-closed). */
+    const [successorRow] = await db
+      .select({
+        supersededAt: refreshTokens.supersededAt,
+        revokedAt: refreshTokens.revokedAt,
+      })
       .from(refreshTokens)
       .where(eq(refreshTokens.tokenHash, await hashToken(successor)))
       .limit(1);
-    if (alive && alive.revokedAt === null) {
+    const successorIsAlive =
+      successorRow !== undefined &&
+      successorRow.supersededAt === null &&
+      successorRow.revokedAt === null;
+    if (successorIsAlive) {
       return { ok: true, token: successor, userId: row!.userId, familyId: row!.familyId };
     }
     return { ok: false, reason: "invalid" };
