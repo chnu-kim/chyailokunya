@@ -25,7 +25,12 @@ export const getServerActor = cache(async (): Promise<AccessClaims | null> => {
   // try 안에서 getCloudflareContext() 뒤에 두면 빌드 때 그쪽이 먼저 던지고 catch 가 삼켜,
   // / 와 /landing 이 비로그인 상태로 정적 프리렌더된다. 그러면 로그인해도 그 두 페이지의 nav 가
   // 영원히 "치지직 로그인"으로 굳는다(정적 HTML 이라 하이드레이션도 못 고친다).
-  const access = (await cookies()).get(COOKIE_NAME.access)?.value;
+  const jar = await cookies();
+  // 로그아웃 마커가 있으면 access 를 믿지 않는다 — 늦게 도착한 refresh 응답이 되심은 토큰일 수
+  // 있다(proxy 주석 참고). proxy 가 대부분 걸러 주지만, 세션 판단의 정본이 여기이므로 여기서도
+  // 막아야 경로에 따라 결과가 갈리지 않는다.
+  if (jar.get(COOKIE_NAME.loggedOut)) return null;
+  const access = jar.get(COOKIE_NAME.access)?.value;
   if (!access) return null;
   try {
     const { env } = getCloudflareContext();

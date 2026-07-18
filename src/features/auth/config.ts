@@ -16,6 +16,12 @@ export const COOKIE_NAME = {
   access: "ck_at",
   refresh: "ck_rt",
   state: "ck_oauth_state",
+  /* 로그아웃 마커. 쿠키 삭제만으로는 로그아웃이 확정되지 않는다 — 로그아웃 직전에 proxy 가
+     회전 중이던 요청의 응답이 **나중에 도착하면** 방금 서명한 access 를 다시 심는다. refresh 는
+     DB 에서 폐기됐지만 access 는 무상태라 최대 ACCESS_TTL 동안 통과한다(공용 브라우저에서
+     "로그아웃했는데 로그인 상태"). 이 마커가 있으면 세션 쿠키를 무시·삭제해 그 창을 닫는다.
+     수명은 access TTL 과 같다 — 되살아날 수 있는 access 의 최대 수명이 딱 그만큼이다. */
+  loggedOut: "ck_lo",
 } as const;
 
 // jose EdDSA(Ed25519) 서명(ADR-0017). algorithms 를 이 값으로 못박아 alg confusion 을 막는다.

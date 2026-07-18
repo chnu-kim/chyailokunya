@@ -34,6 +34,19 @@ export async function proxy(request: NextRequest) {
   const refresh = request.cookies.get(COOKIE_NAME.refresh)?.value;
   if (!access && !refresh) return NextResponse.next();
 
+  /* 로그아웃 마커가 있으면 세션 쿠키를 믿지 않는다. 로그아웃 직전에 회전 중이던 요청의 응답이
+     나중에 도착해 access 를 되심을 수 있는데, access 는 무상태라 그대로면 최대 ACCESS_TTL 동안
+     통과한다 — 공용 브라우저에서 "로그아웃했는데 로그인 상태"가 된다. 되심긴 쿠키를 걷고
+     이번 요청에서도 다운스트림에 안 넘겨, 로그아웃이 확정되게 한다. 로그인이 마커를 지운다. */
+  if (request.cookies.get(COOKIE_NAME.loggedOut)) {
+    request.cookies.delete(COOKIE_NAME.access);
+    request.cookies.delete(COOKIE_NAME.refresh);
+    const res = NextResponse.next({ request });
+    res.cookies.set(COOKIE_NAME.access, "", clearedCookieOptions());
+    res.cookies.set(COOKIE_NAME.refresh, "", clearedCookieOptions());
+    return res;
+  }
+
   // access 유효 → 서명 검증만(DB 0) → 통과.
   if (
     access &&

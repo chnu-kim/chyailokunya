@@ -27,5 +27,12 @@ export const stateCookieOptions = (): CookieOptions => ({
   ...BASE,
   maxAge: Math.floor(STATE_TTL_MS / 1000),
 });
+/* 로그아웃 마커(config.COOKIE_NAME.loggedOut 주석 참고). 늦게 도착한 refresh 응답이 access 를
+   되심는 창을 덮어야 하므로 수명을 access TTL 과 맞춘다 — 그보다 짧으면 창이 열린 채 남고,
+   길면 이미 죽은 access 를 계속 막느라 재로그인을 방해할 이유가 없다(로그인이 마커를 지운다). */
+export const loggedOutCookieOptions = (): CookieOptions => ({
+  ...BASE,
+  maxAge: Math.floor(ACCESS_TTL_MS / 1000),
+});
 // 쿠키 삭제: maxAge 0 으로 즉시 만료시킨다(로그아웃·세션 무효).
 export const clearedCookieOptions = (): CookieOptions => ({ ...BASE, maxAge: 0 });

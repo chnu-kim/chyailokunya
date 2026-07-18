@@ -10,7 +10,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { makeDb } from "@/db";
 import { COOKIE_NAME } from "@/features/auth/config";
-import { clearedCookieOptions } from "@/features/auth/cookies";
+import { clearedCookieOptions, loggedOutCookieOptions } from "@/features/auth/cookies";
 import { isAllowedOrigin } from "@/features/auth/csrf";
 import { revokeSession } from "@/features/auth/refresh-service";
 
@@ -29,5 +29,8 @@ export async function POST(req: Request) {
   const res = NextResponse.redirect(new URL("/", origin), { status: 303 });
   res.cookies.set(COOKIE_NAME.access, "", clearedCookieOptions());
   res.cookies.set(COOKIE_NAME.refresh, "", clearedCookieOptions());
+  // 쿠키 삭제만으론 부족하다 — 이 순간 회전 중이던 요청의 응답이 나중에 도착하면 access 를
+  // 다시 심는다. 마커를 남겨 그 뒤의 요청들이 세션 쿠키를 무시·삭제하게 한다.
+  res.cookies.set(COOKIE_NAME.loggedOut, "1", loggedOutCookieOptions());
   return res;
 }

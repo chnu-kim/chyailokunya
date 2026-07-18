@@ -73,5 +73,7 @@ export async function GET(req: Request) {
   res.cookies.set(COOKIE_NAME.access, session.access, accessCookieOptions());
   res.cookies.set(COOKIE_NAME.refresh, session.refresh, refreshCookieOptions());
   res.cookies.set(COOKIE_NAME.state, "", clearedCookieOptions());
+  // 로그아웃 마커를 걷는다 — 안 지우면 방금 로그인한 세션이 마커에 막혀 계속 비로그인으로 보인다.
+  res.cookies.set(COOKIE_NAME.loggedOut, "", clearedCookieOptions());
   return res;
 }
