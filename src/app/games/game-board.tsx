@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type CSSProperties } from "react";
+import { useRef, useState, useTransition, type CSSProperties } from "react";
 import { ANGLE, axis, PATTERNS, ROT, statusOf, type Status } from "@/core/games";
 import type { GameRow } from "@/db";
 import { trpc } from "@/features/trpc/client";
@@ -40,6 +40,9 @@ export function GameBoard({
   const [announcement, setAnnouncement] = useState("");
   const [composing, setComposing] = useState(false);
   const [removing, startRemove] = useTransition();
+  // 삭제된 카드는 포커스를 문 버튼째 언마운트한다 — 포커스가 body 로 떨어지지 않게 안정적으로
+  // 남는 addslot 트리거로 옮긴다(삭제 권한 canDelete 는 canWrite 를 수반하므로 addslot 은 늘 있다).
+  const addSlotRef = useRef<HTMLButtonElement>(null);
 
   function onFilter(f: Filter, label: string) {
     setFilter(f);
@@ -62,6 +65,7 @@ export function GameBoard({
         await trpc.games.remove.mutate({ id });
         setGames((prev) => prev.filter((g) => g.id !== id));
         setAnnouncement(name + " 삭제됨");
+        addSlotRef.current?.focus();
       } catch {
         setAnnouncement("삭제에 실패했어요");
       }
@@ -94,24 +98,6 @@ export function GameBoard({
           <p className="head__lead">
             챠이로 쿠냐가 방송에서 플레이한 게임 보드입니다. 상태로 골라보세요.
           </p>
-          {canWrite && (
-            <button
-              className="composer-open"
-              type="button"
-              data-od-id="composer-open"
-              onClick={() => setComposing(true)}
-            >
-              <svg className="composer-open__icon" aria-hidden="true" viewBox="0 0 16 16">
-                <path
-                  d="M8 3v10M3 8h10"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
-              게임 추가
-            </button>
-          )}
         </div>
       </section>
 
@@ -145,6 +131,25 @@ export function GameBoard({
           </div>
 
           <div className="games" data-od-id="game-grid">
+            {/* 붙이기는 드물고 사적인 행동이라 상시 폭을 먹는 접수창구 대신, 그리드 첫 칸에
+                빈 폴라로이드 한 장을 꺼내 붙이는 은유(관리자에게만). 필터가 걸려도 늘 첫 칸이라
+                이 상태에 게임이 하나도 없어도 붙일 자리가 남는다. 진짜 방어선은 서버 인가다. */}
+            {canWrite && (
+              <button
+                className="addslot"
+                type="button"
+                ref={addSlotRef}
+                data-od-id="composer-open"
+                onClick={() => setComposing(true)}
+              >
+                <span className="addslot__slot" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <span className="addslot__label">게임 추가</span>
+              </button>
+            )}
             {list.map((g) => {
               const st = statusOf(g.status);
               // 카드 정체성(기울기·패턴·각도)은 안정 id 해시로 고른다 — 정수 PK 를 문자열로.
@@ -159,25 +164,6 @@ export function GameBoard({
                   data-od-id={"game-card-" + g.id}
                 >
                   <span className="clip" aria-hidden="true" />
-                  {canDelete && (
-                    <button
-                      className="game__del"
-                      type="button"
-                      disabled={removing}
-                      aria-label={g.categoryValue + " 삭제"}
-                      data-od-id={"game-del-" + g.id}
-                      onClick={() => onRemove(g.id, g.categoryValue)}
-                    >
-                      <svg aria-hidden="true" viewBox="0 0 16 16">
-                        <path
-                          d="M4 4l8 8M12 4l-8 8"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </button>
-                  )}
                   <div
                     className="game__thumb"
                     data-p={axis(key, "pat", PATTERNS)}
@@ -206,6 +192,20 @@ export function GameBoard({
                       <h3 className="game__name">{g.categoryValue}</h3>
                       <span className={"chip " + st.cls}>{st.label}</span>
                     </div>
+                    {/* 삭제는 3차 액션 — 44px 히트 영역이되 투명·작은 글자라 시각 무게가 없다.
+                        휴지통 아이콘은 .game__del::before 가 그린다. 서버가 인가를 다시 검사한다. */}
+                    {canDelete && (
+                      <button
+                        className="game__del"
+                        type="button"
+                        disabled={removing}
+                        data-od-id={"game-del-" + g.id}
+                        onClick={() => onRemove(g.id, g.categoryValue)}
+                      >
+                        삭제
+                        <span className="sr-only">{" " + g.categoryValue}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
