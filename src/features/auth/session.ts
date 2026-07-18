@@ -35,7 +35,9 @@ export async function refreshSession(
   presentedRefresh: string,
   now: number,
 ): Promise<SessionTokens | null> {
-  const rot = await rotateRefreshToken(db, presentedRefresh, now);
+  // privateJwk 는 access 서명과 후계 파생 양쪽에 쓰인다 — 후계는 저장하지 않고 이 키에서 파생한
+  // 비밀로 재계산하므로 DB 엔 해시만 남는다(ADR-0017).
+  const rot = await rotateRefreshToken(db, presentedRefresh, now, privateJwk);
   if (!rot.ok) return null;
   const id = await getIdentity(db, rot.userId);
   if (!id) return null;

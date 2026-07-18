@@ -26,10 +26,13 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function Games() {
-  const games = await listGames(getDb());
+  // 목록과 권한은 서로 무관하므로 병렬로 — 직렬로 두면 D1 왕복 하나가 렌더에 그냥 더해진다.
   // UI 분기는 편의일 뿐 — 진짜 방어선은 tRPC 뮤테이션의 서버 인가다(불변식 3). 버튼을 숨겨도
   // 서버가 authorities 를 다시 검사한다.
-  const authorities = await getServerAuthorities(await getServerActor());
+  const [games, authorities] = await Promise.all([
+    listGames(getDb()),
+    getServerActor().then(getServerAuthorities),
+  ]);
   return (
     <main id="main">
       <GameBoard

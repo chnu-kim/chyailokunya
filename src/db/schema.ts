@@ -142,10 +142,11 @@ export const games = sqliteTable(
    무효화가 두 종류다: superseded_at = 회전으로 대체됨(후계 있음 — grace 내 재사용은 정상 동시 탭),
    revoked_at = 세션 폐기(로그아웃·도난 — 재사용 절대 불가). 둘을 하나로 합치면 로그아웃 직후
    grace 창에서 폐기된 토큰이 되살아난다. 유효 = 둘 다 NULL.
-   replaced_by_token = 회전 시 발급한 후계 refresh 의 원본(평문). grace 내 재사용에 이걸 멱등
-   반환해 모든 동시 탭이 같은 토큰으로 "수렴"하게 한다(새로 찍으면 도둑이 무제한 증식해 도난
-   탐지가 무력화된다). 평문이지만 grace 창(30초) 동안만 유효하고 cleanup 이 즉시 지운다 — access
-   가 15분인 것과 견줘 노출면이 작다. append/무효화만이라 last_updated_at 없음.
+   후계 원본은 **저장하지 않는다.** grace 내 재사용에 같은 후계를 멱등 반환해야 동시 탭이 수렴하지만
+   (새로 찍으면 도둑이 무제한 증식해 도난 탐지가 무력화된다), 그 값을 컬럼에 두면 *현재 활성*
+   토큰의 평문이 DB 에 남는다 — 초판이 그렇게 했다가 적대적 리뷰에 배포 차단으로 걸렸다. 지금은
+   구 토큰에서 서버 비밀로 재계산한다(tokens.deriveSuccessorToken). append/무효화만이라
+   last_updated_at 없음.
    인덱스는 rotation 조회 핫패스(family_id·user_id)에 필요하다. */
 export const refreshTokens = sqliteTable(
   "refresh_tokens",
@@ -160,7 +161,6 @@ export const refreshTokens = sqliteTable(
     familyExpiresAt: integer("family_expires_at").notNull(),
     supersededAt: integer("superseded_at"),
     revokedAt: integer("revoked_at"),
-    replacedByToken: text("replaced_by_token"),
     createdAt: createdAt(),
   },
   (t) => [

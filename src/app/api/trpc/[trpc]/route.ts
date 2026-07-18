@@ -6,35 +6,26 @@
 
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { cookies } from "next/headers";
-import { authoritiesFor, type Authority } from "@/core/authorities";
+import type { Authority } from "@/core/authorities";
 import { makeDb } from "@/db";
-import { COOKIE_NAME } from "@/features/auth/config";
 import { isAllowedOrigin } from "@/features/auth/csrf";
-import { parseJwk } from "@/features/auth/keys";
-import { listRolesForChannel } from "@/features/auth/service";
-import { verifyAccessToken } from "@/features/auth/tokens";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
+import { authoritiesForActor, getServerActor } from "../../../server-session";
 
 async function createContext(): Promise<Context> {
   const { env } = getCloudflareContext();
   const db = makeDb(env.DB);
 
-  const access = (await cookies()).get(COOKIE_NAME.access)?.value;
-  const publicJwks = env.JWT_PUBLIC_JWK ? [parseJwk(env.JWT_PUBLIC_JWK, "JWT_PUBLIC_JWK")] : [];
-  const claims = access && publicJwks.length ? await verifyAccessToken(publicJwks, access) : null;
+  // 세션 읽기는 server-session 이 정본이다 — 여기서 따로 구현하면 쿠키명·키 라벨·키 부재 처리가
+  // 조용히 갈라진다(실제로 갈라져 있었다).
+  const claims = await getServerActor();
   const actor = claims ? { userId: claims.userId, channelId: claims.channelId } : null;
 
   // 인가 순간에만 역할을 조회한다(요청 스코프 메모이즈). 공개 읽기는 안 불러 DB 왕복 0.
   let cached: ReadonlySet<Authority> | undefined;
-  const authoritiesOf = async (): Promise<ReadonlySet<Authority>> => {
-    if (cached) return cached;
-    cached = actor
-      ? authoritiesFor(await listRolesForChannel(db, actor.channelId))
-      : new Set<Authority>();
-    return cached;
-  };
+  const authoritiesOf = async (): Promise<ReadonlySet<Authority>> =>
+    (cached ??= await authoritiesForActor(db, actor));
 
   return {
     db,

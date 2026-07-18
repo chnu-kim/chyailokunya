@@ -66,6 +66,36 @@ export function generateRefreshToken(): string {
   return base64url.encode(bytes);
 }
 
+/* grace 멱등 후계를 **저장하지 않고 재계산**한다(ADR-0017).
+
+   초판은 후계 평문을 구 행의 replaced_by_token 에 심었다. 그 값이 지워지기 전까지 *현재 활성*
+   refresh 의 평문이 DB 에 남아 "해시만 저장" 경계가 깨졌고, 청소를 지연 호출로 바꿔도 다음
+   요청이 올 때까지(최대 sliding TTL) 남았다 — 적대적 리뷰가 배포 차단으로 지적한 지점이다.
+
+   successor = HMAC-SHA256(key = 서명 JWK 에서 파생한 서버 비밀, msg = 구 토큰).
+   - DB 를 통째로 읽어도 후계를 만들 수 없다: 구 토큰 평문도 서버 비밀도 DB 에 없다.
+   - 구 토큰을 훔친 자도 서버 비밀 없이는 오프라인 유도가 불가능하다 — 여전히 제시해야 하고,
+     grace 밖이면 도난으로 탐지된다(탐지 능력이 보존된다).
+   - 같은 구 토큰이면 항상 같은 후계라 동시 탭이 수렴한다(멱등). */
+export async function deriveSuccessorToken(privateJwk: JWK, oldToken: string): Promise<string> {
+  const material = typeof privateJwk.d === "string" ? privateJwk.d : "";
+  if (!material) throw new Error("deriveSuccessorToken: private JWK 에 d 성분이 없다");
+  // 서명 키를 HMAC 에 그대로 쓰지 않고 용도 라벨을 섞어 파생한다(키 분리).
+  const keyBytes = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode("chyailokunya/refresh-successor/v1|" + material),
+  );
+  const key = await crypto.subtle.importKey(
+    "raw",
+    keyBytes,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(oldToken));
+  return base64url.encode(new Uint8Array(mac));
+}
+
 /* refresh 원본을 DB 에 저장하지 않고 sha256 해시만 둔다(DB 유출 시 재사용 방지). hex 로 저장해
    token_hash UNIQUE 조회의 정본 키로 쓴다. */
 export async function hashToken(token: string): Promise<string> {

@@ -45,11 +45,17 @@ export function GameComposer({
   // 언마운트(부모가 composing=false)로 닫히므로 exit 애니메이션은 생략된다(진입만) — CSS 가
   // @starting-style 를 모르는 브라우저에서도 즉시 뜨는 것과 같은 "없어지는 실패 모드"라 무해하다.
   useEffect(() => {
-    dialogRef.current?.showModal();
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    // dev 의 StrictMode 는 effect 를 두 번 돌린다 — 이미 열린 dialog 에 showModal 을 다시 부르면
+    // InvalidStateError 가 나 컴포저가 통째로 깨진다. 열려 있으면 건너뛰고, 정리에서 닫는다.
+    if (!dialog.open) dialog.showModal();
     // autoFocus 속성은 여기서 무효다 — React 는 커밋 시점에 .focus() 를 대신 부르는데 그땐
     // dialog 가 아직 닫혀 있어(UA 의 display:none) no-op 이고, 이후 showModal 의 포커스 단계는
     // autofocus "속성"을 찾다 못 찾아 첫 포커서블(닫기 버튼)로 떨어진다. 열고 나서 직접 맞춘다.
     inputRef.current?.focus();
+    // 정리에서 close() 를 부르지 않는다 — close 이벤트가 onClose 로 이어져 StrictMode 의 두 번째
+    // 셋업 전에 부모가 컴포저를 닫아버린다. 언마운트되면 브라우저가 top layer 에서 알아서 뺀다.
   }, []);
 
   function onSearch(e: React.FormEvent) {

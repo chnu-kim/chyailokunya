@@ -58,16 +58,19 @@ src/components/ui  →  src/features  →  src/db  →  src/core
                           (app/ 는 조립 지점 — 어디든 쓸 수 있다)
 ```
 
-| 레이어              | 책임                                  | 의존 가능    |
-| ------------------- | ------------------------------------- | ------------ |
-| `src/core`          | 순수 도메인 로직. HTTP·DB·React 무관. | (없음)       |
-| `src/db`            | Drizzle 스키마·D1 클라이언트.         | `core`       |
-| `src/features`      | 유즈케이스·tRPC 라우터·서비스.        | `db`, `core` |
-| `src/components/ui` | Radix/shadcn 프리미티브.              | `features`   |
-| `src/app`           | 라우트·레이아웃·조립.                 | 전부         |
+| 레이어              | 책임                                  | 의존 가능                |
+| ------------------- | ------------------------------------- | ------------------------ |
+| `src/core`          | 순수 도메인 로직. HTTP·DB·React 무관. | (없음)                   |
+| `src/db`            | Drizzle 스키마·D1 클라이언트.         | `core`                   |
+| `src/features`      | 유즈케이스·tRPC 라우터·서비스.        | `db`, `core`             |
+| `src/components/ui` | Radix/shadcn 프리미티브.              | `features`               |
+| `src/proxy.ts`      | 요청 진입점(세션 갱신). 위치 고정.    | `db`, `core`, `features` |
+| `src/app`           | 라우트·레이아웃·조립.                 | 전부                     |
 
 위로 새는 import 는 `npm run boundaries` 가 error 로 죽인다. 경로 규칙이 "이 코드가 어디
-속하나"의 정본이다.
+속하나"의 정본이다. `src/proxy.ts` 는 Next 16 이 위치를 루트로 못박아 레이어 디렉터리 밖에
+있지만 규칙은 따로 명시해 뒀다(`proxy-below-ui`) — 매 요청 도는 코드라 컴포넌트·app 을 끌어오면
+안 된다.
 
 ## 스타일 구성 (Phase 2 이식)
 

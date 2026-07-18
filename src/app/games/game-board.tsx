@@ -17,6 +17,12 @@ import { GameComposer } from "./game-composer";
 
 type Filter = "all" | Status;
 
+/* 자국의 두 단계. undoable = 타이머가 도는 중(되돌릴 수 있다), committing = 삭제 뮤테이션이
+   이미 나갔다(되돌릴 수 없으므로 버튼을 잠근다). */
+type GhostState = "undoable" | "committing";
+
+const matches = (g: GameRow, f: Filter) => f === "all" || g.status === f;
+
 const FILTERS: { value: Filter; label: string; odId: string }[] = [
   { value: "all", label: "전체", odId: "filter-all" },
   { value: "playing", label: "플레이중", odId: "filter-playing" },
@@ -47,11 +53,12 @@ export function GameBoard({
   const [filter, setFilter] = useState<Filter>("all");
   const [announcement, setAnnouncement] = useState("");
   const [composing, setComposing] = useState(false);
-  // 지연 커밋 대기 중인 카드(자국으로 렌더). 행 자체는 games 에 남아 있어야 되돌릴 수 있다.
-  const [ghosts, setGhosts] = useState<ReadonlySet<number>>(new Set());
-  // 커밋 뮤테이션이 이미 나간 카드. 왕복(수백 ms~수초) 동안 되돌리기가 눌리면 "되돌렸어요"라
-  // 알린 행이 서버에서 사라진다 — 하드 삭제라 복구 경로가 없다. 그 창에서 버튼을 잠근다.
-  const [committing, setCommitting] = useState<ReadonlySet<number>>(new Set());
+  /* 지연 커밋 대기 중인 카드(자국으로 렌더). 행 자체는 games 에 남아 있어야 되돌릴 수 있다.
+     상태를 Set 둘이 아니라 Map 하나로 두는 이유: "커밋 중"은 늘 "자국"의 부분집합이라 둘을
+     따로 들면 불가능한 조합(커밋 중인데 자국 아님)이 타입에 남는다. "committing" 은 뮤테이션이
+     이미 나간 창 — 그때 되돌리기가 눌리면 "되돌렸어요"라 알린 행이 서버에서 사라진다(하드
+     삭제라 복구 불가)이므로 버튼을 잠근다. */
+  const [ghosts, setGhosts] = useState<ReadonlyMap<number, GhostState>>(new Map());
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   // 포커스를 문 버튼이 사라지는 전환(삭제→자국, 자국→복원)에서 포커스가 body 로 떨어지지
   // 않게 다음 버튼으로 옮긴다. key 는 "undo:<id>" · "del:<id>".
@@ -71,19 +78,10 @@ export function GameBoard({
     };
   }, []);
 
-  function setGhost(id: number, on: boolean) {
+  function setGhost(id: number, state: GhostState | null) {
     setGhosts((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }
-
-  function setCommitting_(id: number, on: boolean) {
-    setCommitting((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
+      const next = new Map(prev);
+      if (state) next.set(id, state);
       else next.delete(id);
       return next;
     });
@@ -107,10 +105,11 @@ export function GameBoard({
     // 아직 안 소비된 포커스 예약을 버린다 — 안 그러면 나중에 그 카드가 다시 렌더될 때
     // 방금 누른 필터 칩에서 포커스를 낚아챈다.
     pendingFocus.current = null;
-    const live = games.filter((g) => !ghosts.has(g.id));
-    const shown = live.filter((g) => f === "all" || g.status === f).length;
+    // 렌더 본문의 live 를 그대로 읽는다 — 손으로 재현하면 자국 취급 규칙이 바뀔 때 화면과
+    // 안내가 어긋난다(총계는 맞는데 announce 만 틀리는 식).
+    const count = live.filter((g) => matches(g, f)).length;
     setAnnouncement(
-      f === "all" ? "전체 " + live.length + "개 표시" : label + " " + shown + "개 표시",
+      f === "all" ? "전체 " + live.length + "개 표시" : label + " " + count + "개 표시",
     );
   }
 
@@ -126,7 +125,7 @@ export function GameBoard({
 
   // 삭제 클릭 = 자국으로 바꾸고 타이머만 건다. 뮤테이션은 여기서 안 나간다(ADR-0014).
   function onRemove(id: number, name: string) {
-    setGhost(id, true);
+    setGhost(id, "undoable");
     setAnnouncement(name + " 뗐어요. 되돌릴 수 있어요.");
     pendingFocus.current = "undo:" + id;
     timers.current.set(
@@ -141,28 +140,26 @@ export function GameBoard({
     // (Map.delete 의 반환값으로 "내가 취소한 게 맞다"를 원자적으로 확인한다.)
     if (!timers.current.delete(id)) return;
     if (t) clearTimeout(t);
-    setGhost(id, false);
+    setGhost(id, null);
     setAnnouncement(name + " 되돌렸어요");
     pendingFocus.current = "del:" + id;
   }
 
   async function commitRemove(id: number, name: string) {
     timers.current.delete(id);
-    setCommitting_(id, true);
+    setGhost(id, "committing");
     // 자국의 되돌리기 버튼에 포커스가 있었으면 그 버튼이 사라지므로 포커스를 옮겨 줘야 한다.
     const undoEl = btnRefs.current.get("undo:" + id);
     const hadFocus = !!undoEl && document.activeElement === undoEl;
     try {
       await trpc.games.remove.mutate({ id });
       setGames((prev) => prev.filter((g) => g.id !== id));
-      setGhost(id, false);
-      setCommitting_(id, false);
+      setGhost(id, null);
       setAnnouncement(name + " 삭제됨");
       if (hadFocus) addSlotRef.current?.focus();
     } catch {
       // 서버가 거부하면 자국을 걷고 카드를 되살린다 — 지워진 것처럼 보이게 두지 않는다.
-      setGhost(id, false);
-      setCommitting_(id, false);
+      setGhost(id, null);
       setAnnouncement(name + " 삭제에 실패했어요");
       if (hadFocus) pendingFocus.current = "del:" + id;
     }
@@ -171,10 +168,10 @@ export function GameBoard({
   // 자국(삭제 대기)은 아직 지워지지 않았지만 사용자에겐 "뗀 것"이라 세지 않는다 — 안 그러면
   // 6초 뒤 아무것도 안 눌렀는데 총계가 혼자 줄어든다.
   const live = games.filter((g) => !ghosts.has(g.id));
-  const shown = live.filter((g) => filter === "all" || g.status === filter);
+  const shown = live.filter((g) => matches(g, filter));
   // 자국은 필터와 무관하게 계속 렌더한다 — 필터를 바꿨다고 되돌릴 UI 가 사라지면 타이머만
   // 남아 되돌릴 수 없는 하드 삭제가 된다(ADR-0014 의 되돌림 창 계약이 깨진다).
-  const list = games.filter((g) => ghosts.has(g.id) || filter === "all" || g.status === filter);
+  const list = games.filter((g) => ghosts.has(g.id) || matches(g, filter));
   const showEmpty = list.length === 0;
   const boardEmpty = live.length === 0;
 
@@ -270,7 +267,7 @@ export function GameBoard({
                         className="game__undo"
                         type="button"
                         ref={(el) => registerBtn("undo:" + g.id, el)}
-                        disabled={committing.has(g.id)}
+                        disabled={ghosts.get(g.id) === "committing"}
                         data-od-id={"game-undo-" + g.id}
                         onClick={() => onUndo(g.id, g.categoryValue)}
                       >
@@ -343,11 +340,16 @@ export function GameBoard({
             })}
           </div>
 
-          <div className="grid-empty" hidden={!showEmpty} data-od-id="game-grid-empty">
-            <span className="t-hand">텅 비었네냥…</span>
-            <span hidden={boardEmpty}>이 상태의 게임이 없어요. 다른 필터를 골라보세요.</span>
-            <span hidden={!boardEmpty}>아직 등록된 게임이 없어요.</span>
-          </div>
+          {showEmpty && (
+            <div className="grid-empty" data-od-id="game-grid-empty">
+              <span className="t-hand">텅 비었네냥…</span>
+              <span>
+                {boardEmpty
+                  ? "아직 등록된 게임이 없어요."
+                  : "이 상태의 게임이 없어요. 다른 필터를 골라보세요."}
+              </span>
+            </div>
+          )}
 
           <p className="sr-only" role="status">
             {announcement}

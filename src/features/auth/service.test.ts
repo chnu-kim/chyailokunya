@@ -4,14 +4,11 @@ import { makeDb, roleAuditLogs } from "@/db";
 import {
   ensureSuperadmin,
   getIdentity,
-  grantRole,
   grantRoleWithAudit,
   listRolesForChannel,
   resolveUserIdByChannel,
-  revokeRole,
   revokeRoleWithAudit,
   upsertChzzkAccount,
-  writeRoleAudit,
 } from "./service";
 
 /* D1(env.DB) 위에서 신원 upsert·역할·감사를 검증한다 — apply-migrations 가 매 테스트 전에
@@ -96,31 +93,37 @@ describe("역할 부여·회수·조회", () => {
     expect(await listRolesForChannel(db(), "chan-super")).toEqual(["superadmin"]);
   });
 
-  it("grantRole 로 admin 부여 후 조회되고, revokeRole 로 사라진다", async () => {
+  it("부여 후 조회되고(멱등), 회수하면 사라진다", async () => {
     const { userId } = await upsertChzzkAccount(db(), "chan-a");
-    await grantRole(db(), userId, "admin");
+    const entry = { actorUserId: userId, targetUserId: userId, role: "admin" } as const;
+    await grantRoleWithAudit(db(), { ...entry, action: "grant" });
     expect(await listRolesForChannel(db(), "chan-a")).toEqual(["admin"]);
-    await grantRole(db(), userId, "admin"); // 멱등
+    await grantRoleWithAudit(db(), { ...entry, action: "grant" }); // 멱등
     expect(await listRolesForChannel(db(), "chan-a")).toEqual(["admin"]);
-    await revokeRole(db(), userId, "admin");
+    await revokeRoleWithAudit(db(), { ...entry, action: "revoke" });
     expect(await listRolesForChannel(db(), "chan-a")).toEqual([]);
   });
 
   it("한 채널의 역할만 조회한다(조인이 채널을 가른다)", async () => {
     const a = await upsertChzzkAccount(db(), "chan-a");
     const b = await upsertChzzkAccount(db(), "chan-b");
-    await grantRole(db(), a.userId, "admin");
+    await grantRoleWithAudit(db(), {
+      actorUserId: a.userId,
+      targetUserId: a.userId,
+      action: "grant",
+      role: "admin",
+    });
     await ensureSuperadmin(db(), b.userId);
     expect(await listRolesForChannel(db(), "chan-a")).toEqual(["admin"]);
     expect(await listRolesForChannel(db(), "chan-b")).toEqual(["superadmin"]);
   });
 });
 
-describe("writeRoleAudit", () => {
-  it("감사 행을 append 한다", async () => {
+describe("역할 감사", () => {
+  it("역할 변경이 감사 행을 append 한다", async () => {
     const actor = await upsertChzzkAccount(db(), "chan-super");
     const target = await upsertChzzkAccount(db(), "chan-target");
-    await writeRoleAudit(db(), {
+    await grantRoleWithAudit(db(), {
       actorUserId: actor.userId,
       targetUserId: target.userId,
       action: "grant",

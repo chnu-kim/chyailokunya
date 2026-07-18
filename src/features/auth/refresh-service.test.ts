@@ -11,6 +11,7 @@ import {
   rotateRefreshToken,
 } from "./refresh-service";
 import { upsertChzzkAccount } from "./service";
+import type { JWK } from "jose";
 
 /* refresh rotation·재사용 감지를 D1(env.DB) 위에서 검증한다 — 이 저장소 보안의 핵심이라 각
    경로(회전·만료·미존재·grace·도난·격리·동시성)를 개별로 못박는다. apply-migrations 가 매
@@ -18,6 +19,10 @@ import { upsertChzzkAccount } from "./service";
 
 const db = () => makeDb(env.DB);
 const NOW = 1_000_000;
+
+/* 회전에 쓰는 서명 키. 프로덕션은 env 의 JWT_SIGNING_JWK 이고, 여기선 파생에 필요한 d 만 있으면
+   된다 — 후계 파생의 결정성(같은 구 토큰 → 같은 후계)이 grace 멱등의 전제라 실제 구현을 태운다. */
+const TEST_JWK = { kty: "OKP", d: "test-derive-material" } as JWK;
 
 async function seedUser(channelId = "chan-a"): Promise<number> {
   const { userId } = await upsertChzzkAccount(db(), channelId);
@@ -45,7 +50,7 @@ describe("rotateRefreshToken — 유효 회전", () => {
     const userId = await seedUser();
     const { token, familyId } = await createSession(db(), userId, NOW);
 
-    const res = await rotateRefreshToken(db(), token, NOW + 60_000);
+    const res = await rotateRefreshToken(db(), token, NOW + 60_000, TEST_JWK);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.userId).toBe(userId);
@@ -79,20 +84,20 @@ describe("rotateRefreshToken — 재사용·무효", () => {
   it("만료된 refresh 는 invalid (family 안 건드림)", async () => {
     const userId = await seedUser();
     const { token } = await createSession(db(), userId, NOW);
-    const res = await rotateRefreshToken(db(), token, NOW + REFRESH_TTL_MS + 1);
+    const res = await rotateRefreshToken(db(), token, NOW + REFRESH_TTL_MS + 1, TEST_JWK);
     expect(res).toEqual({ ok: false, reason: "invalid" });
   });
 
   it("존재하지 않는 토큰은 invalid", async () => {
-    const res = await rotateRefreshToken(db(), "nonexistent-token", NOW);
+    const res = await rotateRefreshToken(db(), "nonexistent-token", NOW, TEST_JWK);
     expect(res).toEqual({ ok: false, reason: "invalid" });
   });
 
   it("grace 재사용은 멱등 — 같은 후계를 반환하고 새로 찍지 않는다(진짜 수렴)", async () => {
     const userId = await seedUser();
     const { token, familyId } = await createSession(db(), userId, NOW);
-    const first = await rotateRefreshToken(db(), token, NOW + 1000); // 승자 → 후계 A
-    const again = await rotateRefreshToken(db(), token, NOW + 5000); // grace → 멱등 반환
+    const first = await rotateRefreshToken(db(), token, NOW + 1000, TEST_JWK); // 승자 → 후계 A
+    const again = await rotateRefreshToken(db(), token, NOW + 5000, TEST_JWK); // grace → 멱등 반환
     expect(first.ok && again.ok).toBe(true);
     if (!first.ok || !again.ok) return;
     expect(again.token).toBe(first.token); // 같은 후계(수렴, 증식 아님)
@@ -103,16 +108,16 @@ describe("rotateRefreshToken — 재사용·무효", () => {
   it("도난 반복 재사용도 증식하지 않는다 — alive head 1 유지(탐지 무력화 방지)", async () => {
     const userId = await seedUser();
     const { token, familyId } = await createSession(db(), userId, NOW);
-    await rotateRefreshToken(db(), token, NOW + 1000);
-    for (let i = 0; i < 5; i++) await rotateRefreshToken(db(), token, NOW + 2000 + i); // grace 내 5번
+    await rotateRefreshToken(db(), token, NOW + 1000, TEST_JWK);
+    for (let i = 0; i < 5; i++) await rotateRefreshToken(db(), token, NOW + 2000 + i, TEST_JWK); // grace 내 5번
     expect(await aliveIn(familyId)).toHaveLength(1); // 새 토큰 다발 안 생김
   });
 
   it("grace 밖 재사용은 도난 — family 전체 revoke", async () => {
     const userId = await seedUser();
     const { token, familyId } = await createSession(db(), userId, NOW);
-    await rotateRefreshToken(db(), token, NOW + 1000); // token revoked
-    const res = await rotateRefreshToken(db(), token, NOW + 1000 + GRACE_MS + 1);
+    await rotateRefreshToken(db(), token, NOW + 1000, TEST_JWK); // token revoked
+    const res = await rotateRefreshToken(db(), token, NOW + 1000 + GRACE_MS + 1, TEST_JWK);
     expect(res).toEqual({ ok: false, reason: "theft" });
     expect(await aliveIn(familyId)).toHaveLength(0); // 살아있는 토큰 0
   });
@@ -121,8 +126,8 @@ describe("rotateRefreshToken — 재사용·무효", () => {
     const userId = await seedUser();
     const a = await createSession(db(), userId, NOW);
     const b = await createSession(db(), userId, NOW);
-    await rotateRefreshToken(db(), a.token, NOW + 1000);
-    await rotateRefreshToken(db(), a.token, NOW + 1000 + GRACE_MS + 1); // a 도난 → familyA 폐기
+    await rotateRefreshToken(db(), a.token, NOW + 1000, TEST_JWK);
+    await rotateRefreshToken(db(), a.token, NOW + 1000 + GRACE_MS + 1, TEST_JWK); // a 도난 → familyA 폐기
     expect(await aliveIn(a.familyId)).toHaveLength(0);
     expect((await aliveIn(b.familyId)).length).toBeGreaterThanOrEqual(1); // b 생존
   });
@@ -131,8 +136,8 @@ describe("rotateRefreshToken — 재사용·무효", () => {
     const userId = await seedUser();
     const { token } = await createSession(db(), userId, NOW);
     const [r1, r2] = await Promise.all([
-      rotateRefreshToken(db(), token, NOW + 1000),
-      rotateRefreshToken(db(), token, NOW + 1000),
+      rotateRefreshToken(db(), token, NOW + 1000, TEST_JWK),
+      rotateRefreshToken(db(), token, NOW + 1000, TEST_JWK),
     ]);
     expect(r1.ok && r2.ok).toBe(true);
   });
@@ -144,14 +149,14 @@ describe("revokeSession (로그아웃)", () => {
     const { token, familyId } = await createSession(db(), userId, NOW);
     await revokeSession(db(), token, NOW + 1000);
     expect(await aliveIn(familyId)).toHaveLength(0);
-    expect((await rotateRefreshToken(db(), token, NOW + 2000)).ok).toBe(false);
+    expect((await rotateRefreshToken(db(), token, NOW + 2000, TEST_JWK)).ok).toBe(false);
   });
 
   it("로그아웃 후 grace 창 이내 재사용도 되살아나지 않는다(폐기>회전)", async () => {
     const userId = await seedUser();
     const { token, familyId } = await createSession(db(), userId, NOW);
     await revokeSession(db(), token, NOW + 1000);
-    const res = await rotateRefreshToken(db(), token, NOW + 5000); // grace 이내
+    const res = await rotateRefreshToken(db(), token, NOW + 5000, TEST_JWK); // grace 이내
     expect(res.ok).toBe(false);
     expect(await aliveIn(familyId)).toHaveLength(0);
   });
@@ -161,8 +166,8 @@ describe("보안 이벤트·전역 폐기", () => {
   it("도난 감지 시 security_events 에 refresh_reuse 를 userId 와 함께 기록한다", async () => {
     const userId = await seedUser();
     const { token } = await createSession(db(), userId, NOW);
-    await rotateRefreshToken(db(), token, NOW + 1000);
-    await rotateRefreshToken(db(), token, NOW + 1000 + GRACE_MS + 1); // 도난
+    await rotateRefreshToken(db(), token, NOW + 1000, TEST_JWK);
+    await rotateRefreshToken(db(), token, NOW + 1000 + GRACE_MS + 1, TEST_JWK); // 도난
     const events = await db().select().from(securityEvents);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ userId, eventType: "refresh_reuse" });
@@ -175,7 +180,7 @@ describe("보안 이벤트·전역 폐기", () => {
     await revokeAllForUser(db(), userId, NOW + 1000);
     expect(await aliveIn(a.familyId)).toHaveLength(0);
     expect(await aliveIn(b.familyId)).toHaveLength(0);
-    expect((await rotateRefreshToken(db(), a.token, NOW + 2000)).ok).toBe(false);
+    expect((await rotateRefreshToken(db(), a.token, NOW + 2000, TEST_JWK)).ok).toBe(false);
   });
 });
 
@@ -183,32 +188,36 @@ describe("cleanupRefreshTokens", () => {
   it("만료된 행을 삭제한다(만료 토큰은 재사용해도 invalid 라 탐지 불필요)", async () => {
     const userId = await seedUser();
     await createSession(db(), userId, NOW);
-    await cleanupRefreshTokens(db(), NOW + REFRESH_TTL_MS + 1, GRACE_MS);
+    await cleanupRefreshTokens(db(), userId, NOW + REFRESH_TTL_MS + 1);
     expect(await db().select().from(refreshTokens)).toHaveLength(0);
   });
 
-  it("grace 지난 superseded 행의 후계 평문은 지우되 행은 만료까지 유지(도난 감지 보존)", async () => {
+  it("만료 전 superseded 행은 남긴다(지우면 재사용이 invalid 로 떨어져 도난이 조용히 통과)", async () => {
     const userId = await seedUser();
     const { token } = await createSession(db(), userId, NOW);
-    await rotateRefreshToken(db(), token, NOW + 1000); // 구 행: superseded + replaced_by_token(평문)
-    await cleanupRefreshTokens(db(), NOW + 1000 + GRACE_MS + 1, GRACE_MS);
+    await rotateRefreshToken(db(), token, NOW + 1000, TEST_JWK);
+    await cleanupRefreshTokens(db(), userId, NOW + 1000 + GRACE_MS + 1);
     const superseded = await db()
       .select()
       .from(refreshTokens)
       .where(isNotNull(refreshTokens.supersededAt));
-    expect(superseded).toHaveLength(1); // 만료 전이라 행은 남는다
-    expect(superseded[0]!.replacedByToken).toBeNull(); // 평문만 제거
+    expect(superseded).toHaveLength(1);
   });
+});
 
-  it("grace 이내 superseded 행의 후계 평문은 유지한다(멱등 반환에 필요)", async () => {
+/* 적대적 리뷰가 배포 차단으로 지적한 지점을 못박는다: 후계를 저장하던 초판은 *현재 활성*
+   refresh 의 평문이 DB 에 남아, DB 를 한 번 읽는 것만으로 세션을 탈취할 수 있었다. 이제
+   후계는 구 토큰에서 재계산되므로 어떤 행에도 평문이 없어야 한다 — 청소 호출과 무관하게. */
+describe("평문 미저장 경계", () => {
+  it("회전 직후에도 DB 어디에도 refresh 평문이 없다(청소 없이)", async () => {
     const userId = await seedUser();
     const { token } = await createSession(db(), userId, NOW);
-    await rotateRefreshToken(db(), token, NOW + 1000);
-    await cleanupRefreshTokens(db(), NOW + 1000 + 5, GRACE_MS); // grace 이내
-    const superseded = await db()
-      .select()
-      .from(refreshTokens)
-      .where(isNotNull(refreshTokens.supersededAt));
-    expect(superseded[0]!.replacedByToken).not.toBeNull(); // 아직 유지
+    const res = await rotateRefreshToken(db(), token, NOW + 1000, TEST_JWK);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const dump = JSON.stringify(await db().select().from(refreshTokens));
+    expect(dump).not.toContain(res.token); // 지금 살아 있는 토큰
+    expect(dump).not.toContain(token); // 직전 토큰
   });
 });

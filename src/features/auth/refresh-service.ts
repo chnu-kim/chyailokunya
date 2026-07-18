@@ -5,10 +5,11 @@
    유지한다. */
 
 import { and, eq, gt, isNotNull, isNull, lt } from "drizzle-orm";
+import type { JWK } from "jose";
 import { classifyReusedToken, computeFamilyExpiry, computeRefreshExpiry } from "@/core/session";
 import { refreshTokens, securityEvents, type Db } from "@/db";
 import { ABSOLUTE_CAP_MS, GRACE_MS, REFRESH_TTL_MS } from "./config";
-import { generateRefreshToken, hashToken } from "./tokens";
+import { deriveSuccessorToken, generateRefreshToken, hashToken } from "./tokens";
 
 /* 로그인 1회 = 새 family. refresh 원본을 발급(반환)하고 해시만 저장한다. family_expires_at 은
    절대 상한(첫 로그인 + 90일), expires_at 은 sliding(그 상한 이내). */
@@ -39,7 +40,7 @@ export async function createSession(
   const familyId = crypto.randomUUID();
   const familyExpiresAt = computeFamilyExpiry(now, ABSOLUTE_CAP_MS);
   await insertRefresh(db, { userId, familyId, familyExpiresAt, token, now });
-  await cleanupRefreshTokens(db, now, GRACE_MS);
+  await cleanupRefreshTokens(db, userId, now);
   return { token, familyId };
 }
 
@@ -58,23 +59,27 @@ async function familyIsRevoked(db: Db, familyId: string): Promise<boolean> {
   return row !== undefined;
 }
 
-/* refresh 회전. 조건부 UPDATE claim 이 유효 행 하나를 superseded 로 뒤집고 그 행에 후계 원본을
-   심는다 — 동시 요청 중 정확히 하나만 1행을 받는다(SQLite 단일 라이터). 그 승자만 후계 행을
-   발급하고, grace 재사용자에겐 심어둔 후계 원본을 멱등 반환한다(새로 찍으면 도둑이 무제한 증식).
+/* refresh 회전. 조건부 UPDATE claim 이 유효 행 하나를 superseded 로 뒤집는다 — 동시 요청 중
+   정확히 하나만 1행을 받는다(SQLite 단일 라이터). 그 승자만 후계 행을 발급한다. 후계는 구
+   토큰에서 결정적으로 재계산되므로(deriveSuccessorToken) grace 재사용자도 같은 값에 수렴한다 —
+   새로 찍지 않아야 도둑이 grace 창에서 유효 토큰을 무제한 증식하지 못한다(alive head 1 유지).
    claim 0행이면 재사용·도난·무효를 가른다. D1 은 트랜잭션이 없어 claim(원자)·발급·폐기가 별도
    문장이라, 발급 뒤 family 폐기를 재확인해 레이스를 보상한다. */
 export async function rotateRefreshToken(
   db: Db,
   presented: string,
   now: number,
+  privateJwk: JWK,
 ): Promise<RotateResult> {
   const tokenHash = await hashToken(presented);
-  // 후계 원본을 미리 만들어 claim UPDATE 로 구 행에 심는다(grace 멱등 반환의 정본).
-  const successor = generateRefreshToken();
+  // 후계는 구 토큰에서 **재계산**한다 — DB 에 평문을 남기지 않기 위해서다. 파생 함수를 주입받지
+  // 않고 직접 부르는 이유: grace 멱등("alive head 1")이 파생의 *결정성*에 통째로 걸려 있는데
+  // 콜백 타입은 그걸 못 강제한다. 여기서 부르면 결정성이 호출자 의무가 아니라 구조가 된다.
+  const successor = await deriveSuccessorToken(privateJwk, presented);
 
   const claimed = await db
     .update(refreshTokens)
-    .set({ supersededAt: now, replacedByToken: successor })
+    .set({ supersededAt: now })
     .where(
       and(
         eq(refreshTokens.tokenHash, tokenHash),
@@ -104,9 +109,8 @@ export async function rotateRefreshToken(
       await revokeFamily(db, won.familyId, now);
       return { ok: false, reason: "invalid" };
     }
-    // 노출 창을 닫는 곁다리 청소(cleanupRefreshTokens 주석의 계약). 방금 심은 행은 대상이
-    // 아니다 — supersededAt=now 라 grace 밖이 아니고, 후계는 만료가 미래다.
-    await cleanupRefreshTokens(db, now, GRACE_MS);
+    // 곁다리 용량 관리 — 이 유저의 만료 행만 걷는다(보안 경계가 아니다, 아래 주석 참고).
+    await cleanupRefreshTokens(db, won.userId, now);
     return { ok: true, token: successor, userId: won.userId, familyId: won.familyId };
   }
 
@@ -119,7 +123,6 @@ export async function rotateRefreshToken(
       familyExpiresAt: refreshTokens.familyExpiresAt,
       userId: refreshTokens.userId,
       familyId: refreshTokens.familyId,
-      replacedByToken: refreshTokens.replacedByToken,
     })
     .from(refreshTokens)
     .where(eq(refreshTokens.tokenHash, tokenHash))
@@ -129,28 +132,17 @@ export async function rotateRefreshToken(
   if (verdict === "invalid") return { ok: false, reason: "invalid" };
 
   if (verdict === "reuse-grace") {
-    // 정상 동시 탭: 최초 회전자가 심어둔 후계 원본을 그대로 멱등 반환한다 — 새로 찍지 않아야
-    // 도둑이 grace 창에서 유효 토큰을 무제한 증식하지 못한다(alive head 1 유지).
-    if (row!.replacedByToken) {
-      // 후계 "원본은 심겼는데 행이 없는" 반대 방향 고아도 있다(claim 성공 후 INSERT 전 크래시).
-      // 그대로 돌려주면 호출자는 access 를 받지만 다음 회전에서 invalid 로 죽는다 — 행 존재를
-      // 확인하고 없으면 손상으로 끊어 재로그인시킨다.
-      const [alive] = await db
-        .select({ id: refreshTokens.id })
-        .from(refreshTokens)
-        .where(eq(refreshTokens.tokenHash, await hashToken(row!.replacedByToken)))
-        .limit(1);
-      if (alive) {
-        return {
-          ok: true,
-          token: row!.replacedByToken,
-          userId: row!.userId,
-          familyId: row!.familyId,
-        };
-      }
-      return { ok: false, reason: "invalid" };
+    // 정상 동시 탭: 후계는 저장돼 있지 않고 위에서 같은 값으로 재계산됐다(successor). 실제로
+    // 발급됐는지는 그 해시로 행을 찾아 확인한다 — claim 성공 후 INSERT 전에 죽은 고아면 행이
+    // 없으므로, 다음 회전에서 죽을 토큰을 주는 대신 세션 손상으로 끊어 재로그인시킨다.
+    const [alive] = await db
+      .select({ revokedAt: refreshTokens.revokedAt })
+      .from(refreshTokens)
+      .where(eq(refreshTokens.tokenHash, await hashToken(successor)))
+      .limit(1);
+    if (alive && alive.revokedAt === null) {
+      return { ok: true, token: successor, userId: row!.userId, familyId: row!.familyId };
     }
-    // 후계 원본이 없다 = claim 뒤 발급이 실패한 고아 superseded. 재사용이 아니라 세션 손상이니 무효.
     return { ok: false, reason: "invalid" };
   }
 
@@ -194,21 +186,18 @@ export async function revokeAllForUser(db: Db, userId: number, now: number): Pro
     .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
 }
 
-/* 무한 누적 방지. 삭제 하한을 탐지 창에 결속한다 — superseded 행을 grace 안에 지우면 재사용
-   감지가 row=null→invalid 로 떨어져 도난이 조용히 통과한다. 그래서 (1) grace 를 넘긴 superseded
-   행의 후계 평문(replaced_by_token)만 먼저 지워 노출을 줄이고(행은 유지 — 만료 전엔 도난 감지에
-   필요), (2) 만료된 행만 삭제한다(만료 토큰은 재사용해도 classify 가 invalid 라 탐지에 무관).
-   lazy 호출(로그인·회전 성공 시 곁다리) + 필요 시 주간 크론. */
-export async function cleanupRefreshTokens(db: Db, now: number, graceMs: number): Promise<void> {
+/* 무한 누적 방지 — **만료된 행만** 지운다. 삭제 하한을 만료에 결속하는 이유: superseded 행을
+   만료 전에 지우면 재사용 조회가 row=null→invalid 로 떨어져 도난이 조용히 통과한다(만료 토큰은
+   재사용해도 classify 가 invalid 라 탐지에 무관하다).
+
+   평문 정리 단계는 없어졌다 — 후계를 저장하지 않고 재계산하므로 DB 엔 해시만 있다. 그래서 이
+   청소는 이제 **보안 경계가 아니라 용량 관리**이고, 지연 호출(로그인·회전 성공 시 곁다리)로
+   충분하다. 초판은 평문 제거를 이 호출에 의존해서, 요청이 끊기면 활성 토큰 평문이 남았다.
+
+   범위를 **자기 유저로 좁힌다**: expires_at 엔 인덱스가 없어 전역 DELETE 는 회전마다 풀스캔 +
+   쓰기 락이 된다. user_id 인덱스를 타면 각자 자기 행을 치우므로 부하가 분산되고 효과는 같다. */
+export async function cleanupRefreshTokens(db: Db, userId: number, now: number): Promise<void> {
   await db
-    .update(refreshTokens)
-    .set({ replacedByToken: null })
-    .where(
-      and(
-        isNotNull(refreshTokens.replacedByToken),
-        isNotNull(refreshTokens.supersededAt),
-        lt(refreshTokens.supersededAt, now - graceMs),
-      ),
-    );
-  await db.delete(refreshTokens).where(lt(refreshTokens.expiresAt, now));
+    .delete(refreshTokens)
+    .where(and(eq(refreshTokens.userId, userId), lt(refreshTokens.expiresAt, now)));
 }

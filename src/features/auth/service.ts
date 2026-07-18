@@ -95,16 +95,6 @@ export async function ensureSuperadmin(db: Db, userId: number): Promise<void> {
   await db.insert(usersRoles).values({ userId, role: "superadmin" }).onConflictDoNothing();
 }
 
-// 역할 부여(멱등). 상승 가드는 core.authorizeRoleChange 가 라우터에서 먼저 판정한다.
-export async function grantRole(db: Db, userId: number, role: Role): Promise<void> {
-  await db.insert(usersRoles).values({ userId, role }).onConflictDoNothing();
-}
-
-// 역할 회수(멱등). 없는 부여를 지워도 무해.
-export async function revokeRole(db: Db, userId: number, role: Role): Promise<void> {
-  await db.delete(usersRoles).where(and(eq(usersRoles.userId, userId), eq(usersRoles.role, role)));
-}
-
 export type RoleAuditEntry = {
   actorUserId: number;
   targetUserId: number;
@@ -112,11 +102,10 @@ export type RoleAuditEntry = {
   role: Role;
 };
 
-// 감사 기록(append-only, ADR-0018). 모든 사람 주도 역할 변경을 남긴다 — 뮤테이션이 DB 쓰기와
-// 함께 부른다(같은 요청). created_at 은 스키마가 자동으로 채운다(epoch ms).
-export async function writeRoleAudit(db: Db, entry: RoleAuditEntry): Promise<void> {
-  await db.insert(roleAuditLogs).values(entry);
-}
+/* 역할을 바꾸는 공개 경로는 아래 두 *WithAudit 뿐이다. 감사 없이 역할만 바꾸는 grantRole·
+   revokeRole·writeRoleAudit 을 따로 두지 않는 이유: ADR-0018 이 "모든 사람 주도 역할 변경을
+   남긴다"를 요구하는데, 짧은 우회로가 옆에 export 돼 있으면 다음 호출자가 그걸 골라 불변식이
+   조용히 뚫린다(감사 로그에 빈칸이 생긴다). 경로를 하나로 두면 규칙이 구조가 된다. */
 
 /* 역할 변경 + 감사를 **원자적으로**(ADR-0018). D1 은 interactive transaction 이 없어 db.batch 가
    유일한 all-or-nothing 수단이다 — 감사 INSERT 가 실패하면 역할 변경도 롤백돼 "역할은 바뀌었는데
