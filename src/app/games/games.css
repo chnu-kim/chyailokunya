@@ -376,6 +376,66 @@ dialog.composer[open]::backdrop {
   }
 }
 
+/* ---- Ghost — 사진을 뗀 자리 --------------------------------------------
+   삭제는 확인 창을 띄우는 대신 **지연 커밋**이다([ADR-0014]): 타이머가 만료되기 전엔 delete
+   뮤테이션을 보내지 않으므로 되돌리기가 서버 상태를 전혀 건드리지 않는다 — games 에 deleted_at
+   이 없는 근거가 이것이다. 되돌리기는 그리드 위 별도 바가 아니라 카드가 있던 그 자리에 남긴다.
+   각도 0 인 이유: 이건 붙어 있는 종이가 아니라 자국이다. */
+.game--ghost {
+  --rest-rot: 0deg;
+  box-shadow: var(--shadow-tape);
+}
+.game--ghost .game__thumb {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 9px,
+    var(--thumb-mark) 9px 18px
+  );
+}
+
+/* 카드가 자국으로 바뀌는 순간 — 살짝 가라앉으며 나타나면 뗀 자리라는 게 동작으로 읽힌다.
+   "방금 생긴 유령"에만 건다: 클래스가 붙는 순간 한 번만 돌고 이후 리렌더엔 다시 돌지 않는다.
+   backwards 인 이유는 .rise 와 같다(forwards 면 transform 이 박힌다). */
+@media (prefers-reduced-motion: no-preference) {
+  .game--settling {
+    animation: ghost-settle var(--dur-base) var(--ease-paper) backwards;
+  }
+}
+@keyframes ghost-settle {
+  from {
+    opacity: 0;
+    transform: rotate(var(--rest-rot)) scale(1.02);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(var(--rest-rot));
+  }
+}
+.game__ghost-msg {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.game__undo {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  background: transparent;
+  color: var(--fg);
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1.5px solid var(--fg);
+  border-radius: var(--radius-xs);
+}
+/* --bg 가 아니라 --fg-on-ink 인 이유: 사진지 섬 안이라 --fg 는 두 테마 잉크지만 --bg 는
+   다크에서 charcoal 이다. 잉크 배경에 charcoal 글자를 얹으면 다크에서 라벨이 사라진다. */
+.game__undo:hover {
+  background: var(--fg);
+  color: var(--fg-on-ink);
+}
+
 /* 게임 커버 아트는 전부 남의 저작물이라 실을 수 없고 AI 로 "비슷한 걸" 만드는 건 더 나쁘다.
    그래서 썸네일은 정직한 플레이스홀더 — 해시가 패턴 4종을 고르고 그 위에 이니셜이 앉는다.
    전부 CSS 라 요청 0·무게 0. 색은 --thumb-*(테마 독립 — 사진지 섬 안). */

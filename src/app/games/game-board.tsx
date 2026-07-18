@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ANGLE, axis, PATTERNS, ROT, statusOf, type Status } from "@/core/games";
 import type { GameRow } from "@/db";
 import { trpc } from "@/features/trpc/client";
@@ -9,7 +9,11 @@ import { GameComposer } from "./game-composer";
 /* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
    상태 필터 + 쓰기(추가·삭제)를 한다. 쓰기는 tRPC 뮤테이션(서버 인가가 정본)을 부르고 로컬
    상태를 낙관적으로 갱신한다. canWrite/canDelete 는 버튼 노출용 편의일 뿐 — 권한 없이 눌러도
-   서버가 FORBIDDEN 으로 막는다(불변식 3). localStorage 다중탭 경합은 서버 권위로 사라졌다. */
+   서버가 FORBIDDEN 으로 막는다(불변식 3). localStorage 다중탭 경합은 서버 권위로 사라졌다.
+
+   삭제는 **지연 커밋**이다(ADR-0014): 클릭은 카드를 자국(ghost)으로 바꾸고 타이머만 걸며,
+   delete 뮤테이션은 타이머가 만료될 때 처음 나간다. 되돌리면 서버를 아예 건드리지 않으므로
+   games 에 deleted_at 이 필요 없다 — 하드 삭제의 근거가 이 흐름이다. */
 
 type Filter = "all" | Status;
 
@@ -20,6 +24,10 @@ const FILTERS: { value: Filter; label: string; odId: string }[] = [
   { value: "played", label: "플레이함", odId: "filter-played" },
   { value: "planned", label: "예정", odId: "filter-planned" },
 ];
+
+/* 되돌릴 수 있는 창. 토스트 관례(5~7초) 안에서, 키보드로 되돌리기 버튼까지 가서 누를 여유를
+   두고 6초. 이 시간이 지나야 서버에 삭제가 나간다. */
+const UNDO_MS = 6000;
 
 // --rest-rot/--thumb-a 같은 CSS 커스텀 속성을 인라인 style 로 넘길 때의 타입 우회.
 function cssVars(vars: Record<string, string | number>): CSSProperties {
@@ -39,10 +47,48 @@ export function GameBoard({
   const [filter, setFilter] = useState<Filter>("all");
   const [announcement, setAnnouncement] = useState("");
   const [composing, setComposing] = useState(false);
-  const [removing, startRemove] = useTransition();
-  // 삭제된 카드는 포커스를 문 버튼째 언마운트한다 — 포커스가 body 로 떨어지지 않게 안정적으로
-  // 남는 addslot 트리거로 옮긴다(삭제 권한 canDelete 는 canWrite 를 수반하므로 addslot 은 늘 있다).
+  // 지연 커밋 대기 중인 카드(자국으로 렌더). 행 자체는 games 에 남아 있어야 되돌릴 수 있다.
+  const [ghosts, setGhosts] = useState<ReadonlySet<number>>(new Set());
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  // 포커스를 문 버튼이 사라지는 전환(삭제→자국, 자국→복원)에서 포커스가 body 로 떨어지지
+  // 않게 다음 버튼으로 옮긴다. key 는 "undo:<id>" · "del:<id>".
+  const btnRefs = useRef(new Map<string, HTMLButtonElement>());
+  // 다음에 포커스할 버튼 key. state 가 아니라 ref 인 이유: effect 에서 setState 로 되돌리면
+  // 연쇄 렌더가 난다. 대신 그 버튼이 ref 에 등록되는 순간(=마운트) 곧바로 포커스한다.
+  const pendingFocus = useRef<string | null>(null);
   const addSlotRef = useRef<HTMLButtonElement>(null);
+
+  // 언마운트되면 대기 중인 삭제는 커밋하지 않는다 — 지연 커밋의 안전한 실패 방향은
+  // "안 지워짐"이다(사용자는 보드에서 카드가 그대로인 걸 본다).
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      pending.forEach(clearTimeout);
+      pending.clear();
+    };
+  }, []);
+
+  function setGhost(id: number, on: boolean) {
+    setGhosts((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function registerBtn(key: string, el: HTMLButtonElement | null) {
+    if (!el) {
+      btnRefs.current.delete(key);
+      return;
+    }
+    btnRefs.current.set(key, el);
+    // 삭제→자국, 자국→복원 전환에서 사라진 버튼을 대신할 버튼이 방금 생겼다면 포커스를 넘긴다.
+    if (pendingFocus.current === key) {
+      pendingFocus.current = null;
+      el.focus();
+    }
+  }
 
   function onFilter(f: Filter, label: string) {
     setFilter(f);
@@ -59,17 +105,43 @@ export function GameBoard({
     setAnnouncement(row.categoryValue + " 추가됨");
   }
 
+  // 삭제 클릭 = 자국으로 바꾸고 타이머만 건다. 뮤테이션은 여기서 안 나간다(ADR-0014).
   function onRemove(id: number, name: string) {
-    startRemove(async () => {
-      try {
-        await trpc.games.remove.mutate({ id });
-        setGames((prev) => prev.filter((g) => g.id !== id));
-        setAnnouncement(name + " 삭제됨");
-        addSlotRef.current?.focus();
-      } catch {
-        setAnnouncement("삭제에 실패했어요");
-      }
-    });
+    setGhost(id, true);
+    setAnnouncement(name + " 뗐어요. 되돌릴 수 있어요.");
+    pendingFocus.current = "undo:" + id;
+    timers.current.set(
+      id,
+      setTimeout(() => void commitRemove(id, name), UNDO_MS),
+    );
+  }
+
+  function onUndo(id: number, name: string) {
+    const t = timers.current.get(id);
+    if (t) clearTimeout(t);
+    timers.current.delete(id);
+    setGhost(id, false);
+    setAnnouncement(name + " 되돌렸어요");
+    pendingFocus.current = "del:" + id;
+  }
+
+  async function commitRemove(id: number, name: string) {
+    timers.current.delete(id);
+    // 자국의 되돌리기 버튼에 포커스가 있었으면 그 버튼이 사라지므로 포커스를 옮겨 줘야 한다.
+    const undoEl = btnRefs.current.get("undo:" + id);
+    const hadFocus = !!undoEl && document.activeElement === undoEl;
+    try {
+      await trpc.games.remove.mutate({ id });
+      setGames((prev) => prev.filter((g) => g.id !== id));
+      setGhost(id, false);
+      setAnnouncement(name + " 삭제됨");
+      if (hadFocus) addSlotRef.current?.focus();
+    } catch {
+      // 서버가 거부하면 자국을 걷고 카드를 되살린다 — 지워진 것처럼 보이게 두지 않는다.
+      setGhost(id, false);
+      setAnnouncement(name + " 삭제에 실패했어요");
+      if (hadFocus) pendingFocus.current = "del:" + id;
+    }
   }
 
   const list = games.filter((g) => filter === "all" || g.status === filter);
@@ -151,6 +223,34 @@ export function GameBoard({
               </button>
             )}
             {list.map((g) => {
+              // 뗀 자리 — 커밋 전이라 행은 아직 살아 있다. 기울기는 .game--ghost 가 0 으로
+              // 되돌리므로 인라인 --rest-rot 을 주지 않는다(인라인이 클래스를 이긴다).
+              if (ghosts.has(g.id)) {
+                return (
+                  <div
+                    key={g.id}
+                    className="polaroid game game--ghost game--settling"
+                    data-od-id={"game-ghost-" + g.id}
+                  >
+                    <span className="clip" aria-hidden="true" />
+                    <div className="game__thumb" aria-hidden="true" />
+                    <div className="game__body">
+                      <p className="game__ghost-msg">뗀 자리 — {g.categoryValue}</p>
+                      <button
+                        className="game__undo"
+                        type="button"
+                        ref={(el) => registerBtn("undo:" + g.id, el)}
+                        data-od-id={"game-undo-" + g.id}
+                        onClick={() => onUndo(g.id, g.categoryValue)}
+                      >
+                        되돌리기
+                        <span className="sr-only">{" " + g.categoryValue}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
               const st = statusOf(g.status);
               // 카드 정체성(기울기·패턴·각도)은 안정 id 해시로 고른다 — 정수 PK 를 문자열로.
               const key = String(g.id);
@@ -198,7 +298,7 @@ export function GameBoard({
                       <button
                         className="game__del"
                         type="button"
-                        disabled={removing}
+                        ref={(el) => registerBtn("del:" + g.id, el)}
                         data-od-id={"game-del-" + g.id}
                         onClick={() => onRemove(g.id, g.categoryValue)}
                       >
