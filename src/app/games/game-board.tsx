@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState, useTransition, type CSSProperties } from "react";
 import { ANGLE, axis, PATTERNS, ROT, statusOf, type Status } from "@/core/games";
 import type { GameRow } from "@/db";
+import { trpc } from "@/features/trpc/client";
+import { GameComposer } from "./game-composer";
 
-/* 읽기 전용 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고,
-   여기선 상태 필터(클라이언트 상호작용)만 한다. 추가·삭제(컴포저 카테고리 검색·뮤테이션)는
-   인증(#6)이 세션·권한을 주면 붙는다 — 서버 쓰기 API 는 이미 tRPC 로 서 있고 단위테스트로
-   증명됐다(이슈 #5). 그래서 이 컴포넌트엔 localStorage·useSyncExternalStore·낙관적 편집이
-   없다. */
+/* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
+   상태 필터 + 쓰기(추가·삭제)를 한다. 쓰기는 tRPC 뮤테이션(서버 인가가 정본)을 부르고 로컬
+   상태를 낙관적으로 갱신한다. canWrite/canDelete 는 버튼 노출용 편의일 뿐 — 권한 없이 눌러도
+   서버가 FORBIDDEN 으로 막는다(불변식 3). localStorage 다중탭 경합은 서버 권위로 사라졌다. */
 
 type Filter = "all" | Status;
 
@@ -25,10 +26,20 @@ function cssVars(vars: Record<string, string | number>): CSSProperties {
   return vars as CSSProperties;
 }
 
-export function GameBoard({ initialGames }: { initialGames: GameRow[] }) {
-  const games = initialGames;
+export function GameBoard({
+  initialGames,
+  canWrite,
+  canDelete,
+}: {
+  initialGames: GameRow[];
+  canWrite: boolean;
+  canDelete: boolean;
+}) {
+  const [games, setGames] = useState(initialGames);
   const [filter, setFilter] = useState<Filter>("all");
   const [announcement, setAnnouncement] = useState("");
+  const [composing, setComposing] = useState(false);
+  const [removing, startRemove] = useTransition();
 
   function onFilter(f: Filter, label: string) {
     setFilter(f);
@@ -36,6 +47,25 @@ export function GameBoard({ initialGames }: { initialGames: GameRow[] }) {
     setAnnouncement(
       f === "all" ? "전체 " + games.length + "개 표시" : label + " " + shown + "개 표시",
     );
+  }
+
+  function onAdded(row: GameRow) {
+    // 최신 추가가 위로(구 보드의 prepend). 서버 정본과 같은 정렬.
+    setGames((prev) => [row, ...prev]);
+    setComposing(false);
+    setAnnouncement(row.categoryValue + " 추가됨");
+  }
+
+  function onRemove(id: number, name: string) {
+    startRemove(async () => {
+      try {
+        await trpc.games.remove.mutate({ id });
+        setGames((prev) => prev.filter((g) => g.id !== id));
+        setAnnouncement(name + " 삭제됨");
+      } catch {
+        setAnnouncement("삭제에 실패했어요");
+      }
+    });
   }
 
   const list = games.filter((g) => filter === "all" || g.status === filter);
@@ -64,8 +94,28 @@ export function GameBoard({ initialGames }: { initialGames: GameRow[] }) {
           <p className="head__lead">
             챠이로 쿠냐가 방송에서 플레이한 게임 보드입니다. 상태로 골라보세요.
           </p>
+          {canWrite && (
+            <button
+              className="composer-open"
+              type="button"
+              data-od-id="composer-open"
+              onClick={() => setComposing(true)}
+            >
+              <svg className="composer-open__icon" aria-hidden="true" viewBox="0 0 16 16">
+                <path
+                  d="M8 3v10M3 8h10"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              </svg>
+              게임 추가
+            </button>
+          )}
         </div>
       </section>
+
+      {composing && <GameComposer onAdded={onAdded} onClose={() => setComposing(false)} />}
 
       {/* BOARD */}
       <section className="board" aria-labelledby="board-h2">
@@ -109,14 +159,31 @@ export function GameBoard({ initialGames }: { initialGames: GameRow[] }) {
                   data-od-id={"game-card-" + g.id}
                 >
                   <span className="clip" aria-hidden="true" />
+                  {canDelete && (
+                    <button
+                      className="game__del"
+                      type="button"
+                      disabled={removing}
+                      aria-label={g.categoryValue + " 삭제"}
+                      data-od-id={"game-del-" + g.id}
+                      onClick={() => onRemove(g.id, g.categoryValue)}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 16 16">
+                        <path
+                          d="M4 4l8 8M12 4l-8 8"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  )}
                   <div
                     className="game__thumb"
                     data-p={axis(key, "pat", PATTERNS)}
                     aria-hidden="true"
                   >
                     {g.posterImageUrl ? (
-                      // 치지직 포스터 스냅샷(ADR-0015). Workers 엔 이미지 옵티마이저가 없어 평범한
-                      // <img> + width/height 로 CLS 만 막는다(thumb 이 4/3 을 이미 예약).
                       <img
                         className="game__poster"
                         src={g.posterImageUrl}

@@ -4,6 +4,7 @@ import "./chrome.css";
 import { SvgDefs } from "@/components/ui/svg-defs";
 import { SiteNav } from "@/components/ui/site-nav";
 import { SiteFooter } from "@/components/ui/site-footer";
+import { getServerActor } from "./server-session";
 import { OG_IMAGE, OG_LOCALE, OG_SITE_NAME } from "./site-meta";
 
 // og:image·og:url 은 절대 URL 이어야 한다 — X·Slack 은 상대 경로를 무시해 이미지 없는
@@ -38,7 +39,9 @@ if(t!=="light"&&t!=="dark"){t=matchMedia("(prefers-color-scheme: dark)").matches
 document.documentElement.setAttribute("data-theme",t);
 }catch(e){}})();`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // proxy 가 진입점에서 access 를 갱신해 두므로 여기선 세션을 읽어 nav 로그인 상태만 그린다.
+  const actor = await getServerActor();
   return (
     <html lang="ko" suppressHydrationWarning>
       <head>
@@ -62,7 +65,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a className="skip-link" href="#main">
             본문 바로가기
           </a>
-          <SiteNav />
+          <SiteNav user={actor ? { name: actor.channelName } : null} />
           {children}
           <SiteFooter />
         </div>
