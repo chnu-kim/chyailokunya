@@ -38,6 +38,10 @@ jobs:
         run: npm run boundaries
       - name: unit (Vitest · Workers pool)
         run: npm test
+      # 스키마↔마이그레이션 정합성(드리프트) 검증. 마이그레이션이 실제로 적용되는지는 unit 이
+      # 이미 증명한다(applyD1Migrations 로 workerd D1 에 적용). 오프라인이라 CF 인증 불요.
+      - name: db 마이그레이션 정합성 (drizzle-kit check)
+        run: npx drizzle-kit check
       - name: build (next build)
         run: npm run build
 
