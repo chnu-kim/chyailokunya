@@ -1,11 +1,11 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
-import { authoritiesFor } from "@/core/authorities";
+import { authoritiesFor, type Authority } from "@/core/authorities";
 import { makeDb } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
-import { searchCategories } from "./client";
+import { searchCategories, type ChzzkCreds } from "./client";
 
 /* 네트워크 없이 매핑·GAME 필터·에러 경로를 못박는다(Q2: 코드는 실제, 검증은 목). fetch 를
    주입해 응답을 흉내낸다 — searchCategories 는 fetchImpl 을 받는다. */
@@ -58,8 +58,16 @@ describe("searchCategories (클라이언트)", () => {
 const createCaller = createCallerFactory(appRouter);
 const write = authoritiesFor(["admin"]); // game:write
 
-function makeCtx(over: Partial<Context> = {}): Context {
-  return { db: makeDb(env.DB), authorities: new Set(), chzzk: null, ...over };
+function makeCtx(
+  over: { authorities?: ReadonlySet<Authority>; chzzk?: ChzzkCreds | null } = {},
+): Context {
+  const authorities = over.authorities ?? new Set<Authority>();
+  return {
+    db: makeDb(env.DB),
+    actor: null,
+    chzzk: over.chzzk ?? null,
+    authoritiesOf: async () => authorities,
+  };
 }
 
 describe("chzzk.categorySearch (라우터)", () => {

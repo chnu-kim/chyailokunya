@@ -23,13 +23,15 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply chyailokunya --local",
     "db:migrate:remote": "wrangler d1 migrations apply chyailokunya --remote",
-    "db:seed": "node scripts/seed.mjs"
+    "db:seed": "node scripts/seed.mjs",
+    "gen-jwt-keys": "node scripts/gen-jwt-keys.mjs"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.1",
     "@trpc/client": "^11.18.0",
     "@trpc/server": "^11.18.0",
     "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.3",
     "next": "^16.2.10",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

@@ -7,6 +7,12 @@
 > `users` 가 아니라 `oauth_accounts.provider_user_id` 로 내려가고(users ↔ OAuth 분리, 다중 로그인
 > 수단 대비), 세션엔 `role` 대신 **effective authorities** 를 싣는다. 이 ADR 의 핵심(치지직 커스텀
 > OAuth → 자체 JWT, 치지직 토큰 미저장)은 그대로 유효하다.
+>
+> **보완:** [ADR-0017](./0017-self-session-eddsa-refresh-rotation.md) 이 _세션 메커니즘_ 을 정했다 —
+> 인증 라이브러리 없이 자체 발급: **EdDSA(Ed25519) access(15분·신원만)** + **DB 저장 refresh(해시,
+> 회전 + 재사용 감지)**. 이 ADR 의 핵심(치지직 커스텀 OAuth → 자체 JWT, 치지직 토큰 미저장)은 그대로
+> 유효하다. 단 위 0014 보완 중 **"세션에 effective authorities 를 싣는다"는 0017 이 뒤집었다** —
+> 인가 순간 DB 조회로 바꿔야 역할 회수가 즉시 반영된다.
 
 ## 맥락
 
@@ -44,5 +50,7 @@ OIDC 가 아니라 자체 OAuth 흐름을 쓴다. 신원의 안정 식별자는 
 - (+) 세션 수명·역할을 우리가 통제. 외부 토큰 갱신 부담 없음.
 - (−) 커스텀 프로바이더는 손이 많이 간다(콜백·state·CSRF·매핑). Phase 4 의 핵심 리스크.
 - (−) redirect URI 는 안정 배포 URL 이 필요해 Phase 0(앱 등록)·Phase 5(도메인)가 상호 의존.
-- 비밀(`CHZZK_CLIENT_SECRET`·`AUTH_SECRET`·`SUPERADMIN_CHANNEL_ID`)은 저장소가 아니라
-  Cloudflare secret / 1Password Environment 로만 주입한다.
+- 비밀(`CHZZK_CLIENT_SECRET`·세션 서명 키·`SUPERADMIN_CHANNEL_ID`)은 저장소가 아니라
+  Cloudflare secret / 1Password Environment 로만 주입한다. (세션 서명 키는 초안의 HMAC
+  `AUTH_SECRET` 이 아니라 EdDSA JWK 쌍 `JWT_SIGNING_JWK`/`JWT_PUBLIC_JWK` 다 —
+  [ADR-0017](./0017-self-session-eddsa-refresh-rotation.md).)

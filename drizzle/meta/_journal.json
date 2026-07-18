@@ -8,6 +8,41 @@
       "when": 1784339633571,
       "tag": "0000_sharp_doctor_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784350896927,
+      "tag": "0001_dry_shaman",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784376471071,
+      "tag": "0002_broad_human_fly",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784377463962,
+      "tag": "0003_blushing_stardust",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784378599518,
+      "tag": "0004_quiet_sprite",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784390880526,
+      "tag": "0005_fast_expediter",
+      "breakpoints": true
     }
   ]
 }

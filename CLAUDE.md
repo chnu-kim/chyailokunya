@@ -14,7 +14,8 @@
 결정의 "왜"는 [`docs/adr/`](./docs/adr/), 규칙·불변식·지뢰 목록은 `AGENTS.md`.
 
 - 검증은 로컬에서 `npm run build && npm test && npm run typecheck && npm run lint &&
-npm run boundaries` 로 그대로 돌린다. 배포는 main 푸시 시 Cloudflare Workers Builds.
+npm run boundaries` 로 그대로 돌린다. 배포는 main 푸시 시 GitHub Actions
+  (`.github/workflows/deploy.yml`) — Workers Builds 는 [ADR-0016](./docs/adr/0016-deploy-github-actions-opennext.md)이 대체했다.
 - PR 을 만들면(`gh pr create`) 직후 `/codex-pr-review --base <base>` 를 실행한다(전역 지침).
 - remote 가 SSH 면 푸시가 키 주인 명의로 나갈 수 있다 — HTTPS + `gh auth git-credential`
   로 해당 푸시에만 자격증명을 적용한다(자세히는 AGENTS.md "지뢰").

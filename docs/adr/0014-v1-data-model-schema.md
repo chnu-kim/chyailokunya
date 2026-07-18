@@ -3,6 +3,9 @@
 - 상태: Accepted
 - 날짜: 2026-07-18
 
+> **보완:** 여기서 Phase 4 로 미룬 **역할 변경 감사 로그**는 [ADR-0018](./0018-role-audit-and-elevation-guard.md)
+> 이 `role_audit_logs` 테이블로 실현했다.
+
 ## 맥락
 
 Phase 3 는 D1+Drizzle([ADR-0003](./0003-d1-drizzle.md)) 위에 실제 스키마를 세운다. v1 정박점
@@ -76,7 +79,10 @@ games             치지직 카테고리 스냅샷 보드. (ADR-0015)
   authority(`game:write`·`game:delete`·`role:manage`) 매핑은 **`src/core` 코드 상수**(런타임 편집
   요구가 v1 에 없으므로 DB 테이블로 승격하지 않는다). superadmin 만 `role:manage` 를 가져
   **admin 은 다른 admin 을 임명·강등할 수 없다** — 상승 가드가 절차가 아니라 구조로 강제된다.
-  세션엔 role 대신 **effective authorities 집합**을 싣고, 인가는 권한 단위로 검사한다.
+  ~~세션엔 role 대신 **effective authorities 집합**을 싣고,~~ 인가는 권한 단위로 검사한다.
+  (**[ADR-0017](./0017-self-session-eddsa-refresh-rotation.md) 이 앞 절을 뒤집었다** — authorities 를
+  세션에 실으면 역할 회수가 토큰 만료까지 지연된다. 세션은 신원만 싣고 authorities 는 **인가 순간
+  DB 조회**(요청 스코프 메모이즈)로 얻는다. 권한 단위 검사라는 결정 자체는 그대로다.)
 - **games = 치지직 카테고리 스냅샷** ([ADR-0015](./0015-chzzk-category-as-game-source.md)). freetext
   `name`·`genre`·`platform` 을 제거하고 category API 4필드를 denormalize. `status`·`played_at`
   ·`cleared_at` 은 우리 도메인(치지직이 주지 않는 플레이 상태·이력). 삭제는 **하드 삭제**

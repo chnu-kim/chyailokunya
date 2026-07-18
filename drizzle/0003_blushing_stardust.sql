@@ -1,0 +1,1 @@
+ALTER TABLE `refresh_tokens` ADD `superseded_at` integer;
