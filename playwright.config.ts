@@ -13,6 +13,9 @@ const BASE_URL = `http://localhost:${PORT}`;
 //    베이스라인으로만 둔다(npm run e2e:visual). reduced-motion 으로 등장 애니메이션을 꺼 안정화.
 export default defineConfig({
   testDir: "./e2e",
+  // 로컬 D1 에 스키마+결정적 픽스처를 심는다(games 페이지가 D1 을 읽으므로 필수). --local 이라
+  // CF 인증 불요 → CI 에서도 그대로. 스냅샷 대상 파일이 아니라 testDir 밖 setup 이다.
+  globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
