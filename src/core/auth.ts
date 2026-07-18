@@ -1,5 +1,5 @@
 /* 인증 세션의 순수 로직(ADR-0006·0017). HTTP·DB 무관 — 부트스트랩 판정만 담아 단위테스트로
-   못박는다. OAuth 콜백(app/api/auth/callback)이 이 함수를 호출해 최초 로그인 시 superadmin
+   못박는다. OAuth 콜백(app/api/auth/callback/chzzk)이 이 함수를 호출해 최초 로그인 시 superadmin
    승격 여부를 정한다. (access 엔 authorities 를 싣지 않으므로 클레임 직렬화·좁힘 로직은 없다 —
    인가는 인가 순간 DB 조회로 한다, ADR-0017.) */
 

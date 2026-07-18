@@ -1,5 +1,5 @@
 /* 인증·인가 데이터 유즈케이스(tRPC 무관 순수 db 연산 — games/service.ts 와 같은 결). OAuth 콜백
-   라우트(app/api/auth/callback)와 역할 라우터(router.ts)가 재사용한다. 신원 upsert·역할 조회는
+   라우트(app/api/auth/callback/chzzk)와 역할 라우터(router.ts)가 재사용한다. 신원 upsert·역할 조회는
    로그인 콜백이, grant/revoke·감사는 role 뮤테이션이 부른다. 상승 가드 판정은 여기가 아니라 순수
    core(roles.ts)가 한다 — 이 파일은 그 판정을 통과한 뒤의 DB 쓰기만 맡는다. */
 
