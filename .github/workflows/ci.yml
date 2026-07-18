@@ -1,8 +1,8 @@
 name: CI
 
 # 나쁜 머지를 막는 게이트. main 으로의 PR 과 main 푸시에서 돈다.
-# 실제 배포는 여기가 아니라 Cloudflare Workers Builds(GitHub 연동, Phase 0)가 맡는다 —
-# 이 워크플로는 "초록이어야 머지된다"는 관문일 뿐이다.
+# 실제 배포는 여기가 아니라 deploy.yml 이 맡는다 — 이 CI 가 main 에서 성공하면 workflow_run 으로
+# Deploy 가 이어 돈다(ADR-0016). 즉 이 워크플로는 "초록이어야 머지·배포된다"는 관문이다.
 on:
   pull_request:
     branches: [main]
