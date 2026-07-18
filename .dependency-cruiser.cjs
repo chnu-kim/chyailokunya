@@ -40,14 +40,14 @@ module.exports = {
       to: { path: "^src/(db|core|app)" },
     },
     {
-      name: "proxy-below-ui",
+      name: "middleware-below-ui",
       comment:
-        "src/proxy.ts 는 Next 16 이 위치를 루트로 못박은 요청 진입점이라 레이어 디렉터리 밖에 " +
+        "src/middleware.ts 는 위치가 루트로 고정된 요청 진입점이라 레이어 디렉터리 밖에 " +
         "있다 — 그래서 다른 규칙의 from 패턴(core|db|features|components)에 안 걸린다. 매 요청 " +
         "도는 코드가 컴포넌트 트리나 app 모듈을 끌어오면 번들이 부풀고 next/headers 가 안 도는 " +
         "컨텍스트로 딸려오므로, features 와 같은 높이로 명시해 둔다.",
       severity: "error",
-      from: { path: "^src/proxy\\.ts$" },
+      from: { path: "^src/middleware\\.ts$" },
       to: { path: "^src/(components|app)" },
     },
     {
