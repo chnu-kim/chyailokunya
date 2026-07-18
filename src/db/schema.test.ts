@@ -19,7 +19,9 @@ describe("games 스키마 (D1 마이그레이션 스모크)", () => {
     expect(row).toBeDefined();
     expect(row!.status).toBe("played"); // CHECK 밖이 아닌 DEFAULT
     expect(typeof row!.createdAt).toBe("number"); // $defaultFn(Date.now) — 앱이 단일 진실원
-    expect(row!.lastUpdatedAt).toBe(row!.createdAt);
+    // 둘 다 삽입 시각이지만 각기 다른 Date.now() 호출이라 ms 경계에서 1ms 어긋날 수 있다 —
+    // 동일성이 아니라 근접으로 본다(삽입 시엔 갱신이 없어 사실상 같은 시각).
+    expect(Math.abs(row!.lastUpdatedAt - row!.createdAt)).toBeLessThanOrEqual(5);
 
     const all = await db.select().from(games);
     expect(all).toHaveLength(1);

@@ -60,6 +60,24 @@ describe("games 라우터", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
+  it("categoryId·categoryValue 를 trim 하고 공백만이면 거절(빈 카드·UNIQUE 우회 방지)", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    await expect(
+      caller.games.add({ categoryId: "   ", categoryType: "GAME", categoryValue: "x" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // ' abc ' 는 'abc' 로 정규화 저장되고, 'abc' 재추가는 UNIQUE 충돌 — 패딩으로 못 우회한다.
+    const row = await caller.games.add({
+      categoryId: " abc ",
+      categoryType: "GAME",
+      categoryValue: "  엘든 링  ",
+    });
+    expect(row.categoryId).toBe("abc");
+    expect(row.categoryValue).toBe("엘든 링");
+    await expect(
+      caller.games.add({ categoryId: "abc", categoryType: "GAME", categoryValue: "다른 값" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("remove 는 game:delete 없으면 FORBIDDEN", async () => {
     const caller = createCaller(makeCtx());
     await expect(caller.games.remove({ id: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" });

@@ -8,10 +8,12 @@ import { STATUS_KEYS } from "@/core/games";
    GAME 리터럴로 못박아 보드 불변식을 입력 경계에서 강제한다(DB CHECK 와 이중). poster·
    날짜는 nullable, status 는 기본 'played'. 날짜는 epoch ms(과거 가능)라 int. */
 export const addGameInput = z.object({
-  categoryId: z.string().min(1),
+  // trim 후 non-empty — 공백만·패딩 값(' abc ')이 빈 카드로 저장되거나 'abc'/' abc ' 로
+  // category_id UNIQUE 를 우회하는 걸 입력 경계에서 막는다(core toGameSnapshot 와 같은 정규화).
+  categoryId: z.string().trim().min(1),
   categoryType: z.literal("GAME"),
-  categoryValue: z.string().min(1),
-  posterImageUrl: z.string().min(1).nullable().default(null),
+  categoryValue: z.string().trim().min(1),
+  posterImageUrl: z.string().trim().min(1).nullable().default(null),
   status: z.enum(STATUS_KEYS).default("played"),
   playedAt: z.number().int().nullable().default(null),
   clearedAt: z.number().int().nullable().default(null),
