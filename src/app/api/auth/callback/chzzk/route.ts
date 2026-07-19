@@ -18,6 +18,7 @@ import {
 import { parseJwk } from "@/features/auth/keys";
 import { ensureSuperadmin, superadminExists, upsertChzzkAccount } from "@/features/auth/service";
 import { issueSession, type SessionTokens } from "@/features/auth/session";
+import { expireLegacyCookies } from "../../legacy-cookies";
 
 export async function GET(req: Request) {
   const { env } = getCloudflareContext();
@@ -31,6 +32,8 @@ export async function GET(req: Request) {
   const fail = () => {
     const res = NextResponse.redirect(new URL("/?login=failed", origin));
     res.cookies.set(COOKIE_NAME.state, "", clearedCookieOptions());
+    // 로그인 흐름을 탄 브라우저의 구 이름 쿠키를 만료 — 롤백해도 옛 세션이 안 살아나게.
+    expireLegacyCookies(res);
     return res;
   };
 
@@ -75,5 +78,7 @@ export async function GET(req: Request) {
   res.cookies.set(COOKIE_NAME.state, "", clearedCookieOptions());
   // 로그아웃 마커를 걷는다 — 안 지우면 방금 로그인한 세션이 마커에 막혀 계속 비로그인으로 보인다.
   res.cookies.set(COOKIE_NAME.loggedOut, "", clearedCookieOptions());
+  // 새 __Host- 세션으로 로그인 확정 — 남아 있던 구 이름 쿠키를 만료시켜 롤백 시 되살아나지 못하게.
+  expireLegacyCookies(res);
   return res;
 }
