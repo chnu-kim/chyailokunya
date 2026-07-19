@@ -20,6 +20,7 @@ import {
   plantSessionCookies,
   readOauthStateCookie,
 } from "@/features/auth/session-cookies";
+import { credsFromEnv } from "@/features/chzzk-http";
 
 export async function GET(req: Request) {
   const { env } = getCloudflareContext();
@@ -46,7 +47,8 @@ export async function GET(req: Request) {
 
   // CSRF: 쿼리 state 와 쿠키 state 대조. 공격자는 우리 httpOnly 쿠키를 못 심으므로 위조 콜백이 막힌다.
   if (!code || !state || !savedState || state !== savedState) return fail();
-  if (!env.CHZZK_CLIENT_ID || !env.CHZZK_CLIENT_SECRET) return fail();
+  const creds = credsFromEnv(env.CHZZK_CLIENT_ID, env.CHZZK_CLIENT_SECRET);
+  if (!creds) return fail();
   // 서명키만 있으면 세션 쿠키는 발급되지만 검증자(proxy·서버 컴포넌트·tRPC)가 전부 공개키를
   // 필요로 해 사용자는 계속 비로그인으로 보인다. 쓸 수 없는 세션을 만들지 않고 실패시킨다
   // (키는 쌍으로만 의미가 있다 — proxy 와 같은 규칙, keys.sessionKeys 가 정본).
@@ -55,7 +57,6 @@ export async function GET(req: Request) {
 
   let session: SessionTokens | null;
   try {
-    const creds = { clientId: env.CHZZK_CLIENT_ID, clientSecret: env.CHZZK_CLIENT_SECRET };
     const tokens = await exchangeCodeForTokens(creds, code, state);
     const user = await fetchChzzkUser(tokens.accessToken);
 

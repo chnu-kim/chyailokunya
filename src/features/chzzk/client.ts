@@ -1,20 +1,13 @@
 /* 치지직 category API 클라이언트(ADR-0015). client_credentials 는 Client-Id/Client-Secret
    헤더로 받는다 — 별도 토큰 교환이 없다(실측: GET /open/v1/categories/search 가 헤더만으로
-   200). 시크릿을 공개 트래픽에 노출하지 않도록 이 호출은 서버(features)에서만 하고, 공개
-   읽기는 games 스냅샷만 읽는다. 반환은 GAME 카테고리만 정규화해 돌려준다. */
+   200). 공통 어댑터(features/chzzk-http.ts)를 auth 의 사용자 OAuth 와 함께 쓴다. 시크릿을
+   공개 트래픽에 노출하지 않도록 이 호출은 서버(features)에서만 하고, 공개 읽기는 games
+   스냅샷만 읽는다. 반환은 GAME 카테고리만 정규화해 돌려준다. */
 
 import { isGameCategory, type ChzzkCategory } from "@/core/games";
+import { asRecord, callChzzkApi, chzzkUrl, type ChzzkCreds } from "@/features/chzzk-http";
 
-const BASE_URL = "https://openapi.chzzk.naver.com";
-
-export type ChzzkCreds = { clientId: string; clientSecret: string };
-
-// 응답 래퍼: { code, message, content: { data: [...] } }. 성공은 code === 200.
-type SearchEnvelope = {
-  code?: number;
-  message?: string | null;
-  content?: { data?: unknown[] } | null;
-};
+export type { ChzzkCreds };
 
 // size 는 1..50(스펙). 범위 밖은 조인다 — 잘못된 입력이 그대로 API 로 새지 않게.
 function clampSize(size: number): number {
@@ -42,19 +35,16 @@ export async function searchCategories(
   size = 20,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ChzzkCategory[]> {
-  const url = new URL("/open/v1/categories/search", BASE_URL);
-  url.searchParams.set("query", query);
-  url.searchParams.set("size", String(clampSize(size)));
+  const content = await callChzzkApi(
+    chzzkUrl("/open/v1/categories/search", { query, size: String(clampSize(size)) }),
+    { headers: { "Client-Id": creds.clientId, "Client-Secret": creds.clientSecret } },
+    "category 검색",
+    fetchImpl,
+  );
 
-  const res = await fetchImpl(url, {
-    headers: { "Client-Id": creds.clientId, "Client-Secret": creds.clientSecret },
-  });
-  if (!res.ok) throw new Error(`치지직 category 검색 실패: HTTP ${res.status}`);
-
-  const body = (await res.json()) as SearchEnvelope;
-  if (body.code !== 200) {
-    throw new Error(`치지직 category 검색 오류 ${body.code ?? "?"}: ${body.message ?? ""}`);
-  }
-  const rows = Array.isArray(body.content?.data) ? body.content.data : [];
-  return rows.map(toCategory).filter((c): c is ChzzkCategory => c !== null && isGameCategory(c));
+  // content 모양은 { data?: unknown[] } — asRecord 로 좁힌 뒤 Array.isArray 로 배열만 남긴다.
+  const rows = asRecord(content).data;
+  return (Array.isArray(rows) ? rows : [])
+    .map(toCategory)
+    .filter((c): c is ChzzkCategory => c !== null && isGameCategory(c));
 }
