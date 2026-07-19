@@ -5,11 +5,16 @@ import { desc, eq, sql } from "drizzle-orm";
 import { games, type Db, type GameRow } from "@/db";
 import type { AddGameInput, UpdateGameInput } from "./schema";
 
-/* 공개 읽기. 보드는 "언제 플레이했나" 순이다 — 최근 플레이가 위로 온다.
-   played_at 이 null 인 행(아직 안 한 게임)은 시간축 위에 자리가 없으므로 뒤로 몰고, 그
-   안에서만 추가 순(createdAt 내림차순)으로 정렬한다. SQLite 의 기본 NULLS FIRST 를 그대로
-   두면 날짜 없는 카드가 최신 플레이 위에 얹히므로 (played_at IS NULL) 키를 먼저 세운다
-   — 정수 0/1 이라 false(=날짜 있음)가 먼저다. 정렬 인덱스는 검색 이슈로 미룸(ADR-0014). */
+/* 공개 읽기. 보드는 "언제 플레이했나" 순이다 — 최근 플레이가 위로 온다. played_at 이 null 인
+   행(아직 안 한 게임)은 시간축 위에 자리가 없으므로 뒤로 몰고, 그 안에서만 추가 순
+   (created_at 내림차순)으로 정렬한다.
+
+   정렬 키가 셋인 이유: 첫 키 (played_at IS NULL) 은 **날짜 있음/없음 두 덩이를 가르는 것만**
+   한다(0/1 ASC 라 날짜 있는 쪽이 먼저). 이건 SQLite 의 NULL 위치를 고치는 게 아니다 —
+   SQLite 는 DESC 에서 NULL 을 이미 뒤로 보내므로 이 키가 없어도 덩이 순서는 같다. 남겨 둔
+   건 정렬 의도를 SQL 이 직접 말하게 하려는 것이고, 그래야 셋째 키의 의미가 성립한다:
+   null 덩이 안에서는 둘째 키가 전부 NULL 이라 무의미해지고 created_at DESC 만 남는다.
+   정렬 인덱스는 검색 이슈로 미룸(ADR-0014). */
 export function listGames(db: Db): Promise<GameRow[]> {
   return db
     .select()

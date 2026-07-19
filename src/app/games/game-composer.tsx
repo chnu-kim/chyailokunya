@@ -9,7 +9,14 @@ import {
 } from "@/core/games-composer";
 import type { GameRow } from "@/db";
 import { trpc } from "@/features/trpc/client";
-import { DateFields, dateOrderError, GameDialog, messageFor } from "./game-dialog";
+import {
+  DateFields,
+  dateOrderError,
+  GameDialog,
+  messageFor,
+  REQUEST_TIMEOUT_MS,
+  WRITE_UNCERTAIN_MESSAGE,
+} from "./game-dialog";
 
 /* 게임 추가 컴포저(ADR-0015·0017). 두 단계다:
 
@@ -34,7 +41,9 @@ export function GameComposer({
   const searchRef = useRef<HTMLInputElement>(null);
   const firstDateRef = useRef<HTMLInputElement>(null);
   const [state, dispatch] = useReducer(composerReducer, initialComposerState);
-  const [error, setError] = useState("");
+  /* 상세 단계의 서버 쓰기 에러만 여기 든다. 검색 에러(state.searchError)는 리듀서 소관이다 —
+     응답이 늦게 도착할 때 어느 단계에 속한 문구인지 판단하는 건 전이 규칙이라서. */
+  const [addError, setAddError] = useState("");
   /* 닫기 신호와, 닫힌 뒤에 부모에게 넘길 행. 추가 성공 즉시 onAdded 를 부르면 부모가 같은
      커밋에서 컴포저를 언마운트해 닫기 effect 가 아예 안 돌고, 열린 채로 DOM 에서 빠져 포커스가
      body 로 떨어진다. 그래서 성공은 행을 쥐고 신호만 세우고, 실제 인계는 브라우저가 dialog 를
@@ -64,16 +73,29 @@ export function GameComposer({
 
   function onSearch(e: React.FormEvent) {
     e.preventDefault();
-    const q = state.query.trim();
+    /* 응답에 실어 보낼 검색어는 **제출 순간의 입력값 그대로**(trim 전)여야 한다 — 리듀서가
+       state.query 와 문자열 동등으로 비교해 늦게 온 응답을 버리기 때문이다. 서버로 나갈 때만
+       trim 한다. */
+    const submitted = state.query;
+    const q = submitted.trim();
     if (!q) return;
+    dispatch({ type: "searchStarted" });
     startSearch(async () => {
-      setError("");
       try {
-        const found = await trpc.chzzk.categorySearch.query({ query: q, size: 12 });
-        dispatch({ type: "searchSucceeded", results: found });
+        /* 검색에도 같은 상한을 건다. 여기선 닫기를 안 잠그므로 갇히지는 않지만, 상한이 없으면
+           '검색 중…' 이 영영 돌며 「검색」이 disabled 로 남아 재시도조차 못 한다 — 끝나야
+           다시 누를 수 있다. */
+        const found = await trpc.chzzk.categorySearch.query(
+          { query: q, size: 12 },
+          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
+        );
+        dispatch({ type: "searchSucceeded", query: submitted, results: found });
       } catch (e) {
-        dispatch({ type: "searchFailed" });
-        setError(messageFor(e, "검색에 실패했어요. 잠시 후 다시 시도해 주세요."));
+        dispatch({
+          type: "searchFailed",
+          query: submitted,
+          message: messageFor(e, "검색에 실패했어요. 잠시 후 다시 시도해 주세요."),
+        });
       }
     });
   }
@@ -82,22 +104,26 @@ export function GameComposer({
     e.preventDefault();
     if (!selected || orderError) return;
     startAdd(async () => {
-      setError("");
+      setAddError("");
       try {
         // 필드를 그대로 옮길 뿐 여기서 trim·empty→null 을 다시 하지 않는다 — 그 정규화의
         // 정본은 games.add 뮤테이션의 addGameInput(Zod) 하나다(중복 정규화 금지).
-        const row = await trpc.games.add.mutate({
-          categoryId: selected.categoryId,
-          categoryType: "GAME",
-          categoryValue: selected.categoryValue,
-          posterImageUrl: selected.posterImageUrl,
-          playedAt: dates.playedAt,
-          clearedAt: dates.clearedAt,
-        });
+        const row = await trpc.games.add.mutate(
+          {
+            categoryId: selected.categoryId,
+            categoryType: "GAME",
+            categoryValue: selected.categoryValue,
+            posterImageUrl: selected.posterImageUrl,
+            playedAt: dates.playedAt,
+            clearedAt: dates.clearedAt,
+          },
+          // 상한이 없으면 busy 가 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
+          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
+        );
         setAdded(row);
         setClosing(true);
       } catch (e) {
-        setError(messageFor(e, "추가에 실패했어요."));
+        setAddError(messageFor(e, WRITE_UNCERTAIN_MESSAGE, WRITE_UNCERTAIN_MESSAGE));
       }
     });
   }
@@ -107,6 +133,7 @@ export function GameComposer({
       title="게임 추가"
       odId="composer"
       closing={closing}
+      busy={adding}
       onClose={() => (added ? onAdded(added) : onClose())}
     >
       {selected ? (
@@ -137,9 +164,9 @@ export function GameComposer({
             firstFieldRef={firstDateRef}
           />
 
-          {(orderError || error) && (
+          {(orderError || addError) && (
             <p className="err" role="alert">
-              {orderError || error}
+              {orderError || addError}
             </p>
           )}
 
@@ -148,9 +175,11 @@ export function GameComposer({
               className="btn btn--secondary composer__btn"
               type="button"
               data-od-id="composer-back"
+              // 쓰기가 날아가는 동안은 뒤로도 막는다 — 닫기와 같은 인계 경쟁이다(GameDialog 주석).
+              disabled={adding}
               onClick={() => {
                 dispatch({ type: "back" });
-                setError("");
+                setAddError("");
               }}
             >
               뒤로
@@ -184,9 +213,18 @@ export function GameComposer({
             </button>
           </form>
 
-          {error && (
+          {state.searchError && (
             <p className="err" role="alert">
-              {error}
+              {state.searchError}
+            </p>
+          )}
+
+          {/* 에러가 아니므로 err 스타일을 안 쓴다 — 통신은 성공했고, 사용자가 스스로 검색어를
+              바꿔 결과가 무효가 된 것뿐이다. 모달 바깥은 inert 라 페이지 하단 라이브 영역이
+              안 읽히므로 카드 안에서 status 로 말한다. */}
+          {state.staleDropped && (
+            <p className="composer__hint" role="status" data-od-id="composer-stale">
+              검색어가 바뀌어서 앞선 결과는 접었어요 — 다시 검색해 주세요.
             </p>
           )}
 

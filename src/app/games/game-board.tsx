@@ -5,7 +5,14 @@ import { ANGLE, axis, formatDate, PATTERNS, ROT } from "@/core/games";
 import type { GameRow } from "@/db";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
-import { DateFields, GameDialog, messageFor, useDatePair } from "./game-dialog";
+import {
+  DateFields,
+  GameDialog,
+  messageFor,
+  REQUEST_TIMEOUT_MS,
+  useDatePair,
+  WRITE_UNCERTAIN_MESSAGE,
+} from "./game-dialog";
 
 /* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
    쓰기(추가·날짜 수정·삭제)를 한다. 쓰기는 tRPC 뮤테이션(서버 인가가 정본)을 부르고 로컬
@@ -152,7 +159,8 @@ export function GameBoard({
     const undoEl = btnRefs.current.get("undo:" + id);
     const hadFocus = !!undoEl && document.activeElement === undoEl;
     try {
-      await trpc.games.remove.mutate({ id });
+      // 삭제도 상한을 건다 — 안 끊기면 자국이 "지우는 중"으로 굳어 카드가 영영 안 돌아온다.
+      await trpc.games.remove.mutate({ id }, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       setGames((prev) => prev.filter((g) => g.id !== id));
       setGhost(id, null);
       setAnnouncement(name + " 삭제됨");
@@ -381,15 +389,19 @@ function GameDateEditor({
       setError("");
       try {
         // 빈 문자열 → null 전처리의 정본은 서버 updateGameInput(Zod)이다 — 여기서 다시 하지 않는다.
-        const row = await trpc.games.update.mutate({
-          id: game.id,
-          playedAt: dates.playedAt,
-          clearedAt: dates.clearedAt,
-        });
+        const row = await trpc.games.update.mutate(
+          {
+            id: game.id,
+            playedAt: dates.playedAt,
+            clearedAt: dates.clearedAt,
+          },
+          // 상한이 없으면 saving 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
+          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
+        );
         setSaved(row);
         setClosing(true);
       } catch (e) {
-        setError(messageFor(e, "수정에 실패했어요."));
+        setError(messageFor(e, WRITE_UNCERTAIN_MESSAGE, WRITE_UNCERTAIN_MESSAGE));
       }
     });
   }
@@ -399,6 +411,7 @@ function GameDateEditor({
       title="날짜 수정"
       odId="date-editor"
       closing={closing}
+      busy={saving}
       onClose={() => (saved ? onUpdated(saved) : onClose())}
     >
       <form className="composer__detail" onSubmit={onSave}>
@@ -434,6 +447,8 @@ function GameDateEditor({
             className="btn btn--secondary composer__btn"
             type="button"
             data-od-id="date-editor-cancel"
+            // 저장이 날아가는 동안은 취소도 막는다 — 닫기와 같은 인계 경쟁이다(GameDialog 주석).
+            disabled={saving}
             onClick={() => setClosing(true)}
           >
             취소

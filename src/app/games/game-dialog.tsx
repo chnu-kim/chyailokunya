@@ -11,9 +11,38 @@ import type { DatePair } from "@/core/games-composer";
    표면이 .paper 인 이유: .polaroid 는 --border-strong 을 안 되돌려 다크에서 입력 테두리가
    크림 위 1.01:1 로 사라진다. .paper 위에선 14.3:1 이라 폼은 반드시 이쪽에 올린다. */
 
+/* 모든 tRPC 호출에 거는 상한. 이 값이 없으면 promise 가 settle 을 안 하는 경우(Workers 응답
+   지연, 프록시가 소켓을 붙잡은 채 놓지 않음)에 useTransition 의 pending 이 영영 안 내려간다 —
+   쓰기 중엔 busy 가 X·배경·Esc·뒤로·취소를 전부 잠그므로 새로고침이 유일한 탈출이 되고, 그건
+   사용자가 방금 입력한 날짜를 버린다. reject 는 기존 catch 가 잡지만 "끝나지 않음"은 아무도
+   안 잡으므로 상한이 유일한 방어선이다.
+
+   15초인 이유: 사용자가 "멈췄다"고 느끼기 전에는 풀려야 하고(그 체감은 대략 10초대 초반부터
+   시작한다), 느린 모바일 회선의 **정상** 왕복은 넘겨야 한다 — 짧게 잡으면 성공할 요청을
+   끊어 아래 "저장됐을 수도 있다" 상태를 우리가 만들어 낸다. */
+export const REQUEST_TIMEOUT_MS = 15_000;
+
+/* AbortSignal.timeout 은 AbortError 가 아니라 **TimeoutError** DOMException 으로 끊는다. 둘 다
+   본다 — 앞으로 사용자 취소(AbortError)를 붙여도 같은 분기로 들어오게. tRPC 는 원인을 감싸
+   던지므로 cause 체인을 끝까지 훑는다(D1 의 UNIQUE 를 찾을 때와 같은 이유). */
+function isAborted(e: unknown): boolean {
+  for (let cur = e; cur; cur = (cur as { cause?: unknown }).cause) {
+    const name = (cur as { name?: string }).name;
+    if (name === "TimeoutError" || name === "AbortError") return true;
+  }
+  return false;
+}
+
 /* tRPC 에러 **코드**로 분기한다 — 서버 문구 매칭(msg.includes("이미"))은 문구를 다듬는 순간
    조용히 죽는다. 세션 만료·권한 없음은 재시도로 안 풀리므로 실행 가능한 조치를 안내한다. */
-export function messageFor(e: unknown, fallback: string): string {
+export function messageFor(
+  e: unknown,
+  fallback: string,
+  /* 상한에 걸려 끊겼을 때의 문구. 기본값은 **읽기**(검색) 기준이라 "실패"를 말해도 거짓이
+     아니지만, 쓰기는 호출부가 직접 넘긴다 — 아래 주석을 보라. */
+  timeoutMessage = "네트워크가 느린 것 같아요. 잠시 후 다시 시도해 주세요.",
+): string {
+  if (isAborted(e)) return timeoutMessage;
   const code = (e as { data?: { code?: string } } | null)?.data?.code;
   if (code === "CONFLICT") return "이미 보드에 있는 게임이에요.";
   if (code === "NOT_FOUND") return "보드에 없는 게임이에요. 새로고침해 주세요.";
@@ -22,6 +51,18 @@ export function messageFor(e: unknown, fallback: string): string {
   return fallback;
 }
 
+/* 쓰기(add·update)가 **코드 없는 에러**로 끝났을 때의 문구. **"실패했어요"라고 단정하지 않는다**
+   — 서버가 코드를 준 게 아니라 왕복 자체가 깨진 것이라, 쓰기가 이미 들어갔는지 우리가 알 수
+   없다. 단정하면 거짓말이 되고, 사용자가 그 말을 믿고 다시 추가했을 때 CONFLICT("이미 보드에
+   있는 게임이에요")를 보는 이유를 설명할 길이 없어진다. 그래서 "확인해 달라"까지가 이 문구의 몫이다.
+
+   상한(timeoutMessage)뿐 아니라 **fallback 으로도 이걸 쓴다.** isAborted 가 abort 를 못 알아보면
+   (tRPC 가 name 없는 모양으로 갈아 던지는 경우) 조용히 fallback 으로 떨어지는데, 거기에 단정하는
+   문구를 두면 정직함이 isAborted 의 정확성에 매달린다. 애매한 경우를 애매하게 말하는 쪽이
+   기본값이어야 한다 — 확정적인 문구는 서버가 코드를 준 분기(CONFLICT·NOT_FOUND·…)의 몫이다. */
+export const WRITE_UNCERTAIN_MESSAGE =
+  "네트워크가 느린 것 같아요. 저장됐을 수도 있으니 새로고침해 확인한 뒤 다시 시도해 주세요.";
+
 /* 네이티브 <dialog>+showModal() 을 쓰는 이유: 포커스 트랩·Esc 닫기·배경 inert·top-layer·
    닫을 때 트리거로 포커스 복원을 전부 브라우저가 준다(직접 만든 백드롭 div 는 이걸 더 나쁘게
    재구현한다). 진입 애니메이션·스크림·바텀시트는 games.css 의 dialog.composer 가 그린다. */
@@ -29,6 +70,7 @@ export function GameDialog({
   title,
   odId,
   closing,
+  busy = false,
   onClose,
   children,
 }: {
@@ -38,6 +80,20 @@ export function GameDialog({
      children 으로 내려보내면 react-hooks/refs 가 렌더 중 ref 접근으로 읽어 error 를 낸다.
      신호를 값으로 받으면 실제 ref 접근이 effect 안에서만 일어난다. */
   closing: boolean;
+  /* 서버 쓰기가 날아가는 중인가. 그동안은 닫기를 셋 다 잠근다(X 버튼·::backdrop·Esc).
+
+     왜 잠그나: 호출자는 "성공하면 행을 쥐고 closing 만 세우고, 실제 인계는 브라우저가
+     dialog 를 닫은 뒤 오는 onClose 이벤트에서 한다"는 규약을 쓴다. 쓰기가 in-flight 인 동안
+     사용자가 먼저 닫으면 close 이벤트가 앞질러 도착하고, 그때 added/saved 는 아직 null 이라
+     취소 경로를 타 컴포넌트가 언마운트된다 — 뒤늦게 성공한 뮤테이션의 setState 는 no-op 이
+     되어 행이 부모에게 영영 안 넘어간다. 서버엔 들어갔는데 보드엔 카드도 안내도 없고,
+     실패로 읽은 사용자가 다시 추가하면 CONFLICT 를 본다.
+
+     왜 "언마운트 뒤에도 ref 로 인계"가 아닌가: 그러면 쓰기 도중 모달이 사라지고 잠시 뒤
+     보드가 혼자 바뀌는 화면이 된다 — 무슨 일이 일어났는지 사용자가 추적할 수 없다. 잠깐
+     못 닫는 쪽이 정직하다. 잠금은 네트워크 왕복 한 번 동안뿐이고, 이유는 버튼의
+     "추가 중…"/"저장 중…" 과 aria-busy 가 말한다. */
+  busy?: boolean;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -75,8 +131,13 @@ export function GameDialog({
       e.clientY <= r.bottom
     );
   }
-  // 셸 자신의 닫기(모서리 X·배경 클릭)는 이벤트 핸들러라 ref 를 직접 만져도 된다.
-  const close = useCallback(() => dialogRef.current?.close(), []);
+  /* 셸 자신의 닫기(모서리 X·배경 클릭)는 이벤트 핸들러라 ref 를 직접 만져도 된다.
+     busy 면 아무것도 안 한다 — busy prop 주석의 인계 경쟁을 막는 잠금이다. 부모가 세우는
+     closing 신호는 이 잠금을 거치지 않는다(성공해서 닫는 길이라 경쟁이 없다). */
+  const close = useCallback(() => {
+    if (busy) return;
+    dialogRef.current?.close();
+  }, [busy]);
 
   return (
     <dialog
@@ -84,7 +145,12 @@ export function GameDialog({
       ref={dialogRef}
       aria-labelledby={titleId}
       data-od-id={odId}
+      aria-busy={busy || undefined}
       onClose={onClose}
+      /* Esc 는 close() 를 거치지 않고 UA 가 직접 닫는다 — cancel 을 막아야 잠금이 성립한다. */
+      onCancel={(e) => {
+        if (busy) e.preventDefault();
+      }}
       onMouseDown={(e) => {
         pressedOutside.current = isOutside(e);
       }}
@@ -93,7 +159,13 @@ export function GameDialog({
         pressedOutside.current = false;
       }}
     >
-      <button className="composer__close" type="button" aria-label="닫기" onClick={close}>
+      <button
+        className="composer__close"
+        type="button"
+        aria-label="닫기"
+        disabled={busy}
+        onClick={close}
+      >
         <svg aria-hidden="true" viewBox="0 0 16 16">
           <path
             d="M4 4l8 8M12 4l-8 8"
