@@ -28,11 +28,14 @@ test("게임: D1 에서 읽어 렌더 · 날짜 표시", async ({ page }) => {
   await expect(little).toContainText("2026.04.11 플레이");
   await expect(little.getByText("클리어")).toBeVisible();
 
-  // 플레이한 날 없이 클리어만 아는 행 — 날짜 줄에 클리어한 날을 싣고, 칩은 접는다(줄 안에서
-  // "클리어"가 두 번 나오지 않게). 이 분기는 e2e 가 한 번도 실행하지 않던 조합이었다.
+  // 플레이한 날 없이 클리어만 아는 행 — 카드에 뜨는 날짜는 플레이한 날뿐이라 날짜 줄이 아예
+  // 없고, 클리어 사실은 칩이 홀로 맡는다. 클리어한 날(2026-05-02)은 어디에도 안 나온다 —
+  // 정렬 축이 아닌 날짜를 카드에 실으면 순서가 어긋나 보이기 때문이다.
+  // (줄 자체는 칩을 담아야 하므로 남는다 — 사라지는 건 날짜 텍스트다.)
   const hollow = page.locator(CARDS).filter({ hasText: "할로우 나이트" });
-  await expect(hollow).toContainText("2026.05.02 클리어");
-  await expect(hollow.locator(".chip")).toHaveCount(0);
+  await expect(hollow.locator(".game__date")).toHaveCount(0);
+  await expect(hollow.getByText("클리어")).toBeVisible();
+  await expect(hollow).not.toContainText("2026.05.02");
 
   // 날짜가 하나도 없는 행 — 날짜 줄 자체를 렌더하지 않는다.
   const manual = page.locator(CARDS).filter({ hasText: "직접 넣은 게임" });

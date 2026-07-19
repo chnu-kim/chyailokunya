@@ -45,13 +45,13 @@ function cssVars(vars: Record<string, string | number>): CSSProperties {
   return vars as CSSProperties;
 }
 
-/* 카드의 날짜 한 줄. 플레이한 날을 아는 게 보통이라 그걸 싣고, 클리어 여부는 칩이 맡는다.
-   플레이한 날 없이 클리어만 아는 행은 그 날짜를 대신 싣고 칩을 접는다 — 안 그러면 한 줄에서
-   "클리어"가 두 번 나온다. 둘 다 없으면 호출부가 줄 자체를 안 그린다(null 반환). */
+/* 카드의 날짜 한 줄. **플레이한 날만 싣는다** — 이 보드가 답하는 질문이 "무엇을 언제 플레이했나"
+   라서, 정렬 기준도 카드에 뜨는 날짜도 같은 하나여야 한다. 한때 플레이한 날이 없는 행에 클리어
+   날짜를 대신 실었는데, 그러면 카드마다 다른 축의 날짜가 섞여 정렬이 어긋나 보였다(클리어 날짜가
+   더 늦은데 카드는 뒤에 선다). 클리어는 날짜가 아니라 칩이 맡는다.
+   플레이한 날이 없으면 호출부가 줄 자체를 안 그린다(null 반환). */
 function dateLabel(g: GameRow): string | null {
-  if (g.playedAt) return formatDate(g.playedAt) + " 플레이";
-  if (g.clearedAt) return formatDate(g.clearedAt) + " 클리어";
-  return null;
+  return g.playedAt ? formatDate(g.playedAt) + " 플레이" : null;
 }
 
 export function GameBoard({
@@ -263,8 +263,9 @@ export function GameBoard({
               const rot = ROT[axis(key, "rot", ROT.length)] ?? ROT[0];
               const ang = ANGLE[axis(key, "ang", ANGLE.length)] ?? ANGLE[0];
               const label = dateLabel(g);
-              // 줄 안에서 날짜 텍스트가 이미 "클리어"라 말했으면 칩이 같은 말을 되풀이한다.
-              const showCleared = g.clearedAt !== null && g.playedAt !== null;
+              /* 날짜 줄은 플레이한 날만 실으므로 칩이 클리어를 홀로 맡는다 — 플레이한 날을
+                 모르는 채 클리어만 아는 행도 칩으로는 그 사실을 말할 수 있어야 한다. */
+              const showCleared = g.clearedAt !== null;
               return (
                 <div
                   key={g.id}
