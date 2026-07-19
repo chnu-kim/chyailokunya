@@ -9,29 +9,31 @@ import { NextResponse } from "next/server";
 import { shouldBootstrapSuperadmin } from "@/core/auth";
 import { makeDb } from "@/db";
 import { exchangeCodeForTokens, fetchChzzkUser } from "@/features/auth/chzzk-api";
-import { COOKIE_NAME } from "@/features/auth/config";
-import {
-  accessCookieOptions,
-  clearedCookieOptions,
-  refreshCookieOptions,
-} from "@/features/auth/cookies";
-import { parseJwk } from "@/features/auth/keys";
+import { sessionKeys } from "@/features/auth/keys";
+import { requireAuthOrigin } from "@/features/auth/request-guard";
 import { ensureSuperadmin, superadminExists, upsertChzzkAccount } from "@/features/auth/service";
 import { issueSession, type SessionTokens } from "@/features/auth/session";
-import { expireLegacyCookies } from "../../legacy-cookies";
+import {
+  clearLoggedOutMarker,
+  clearOauthStateCookie,
+  expireLegacyCookies,
+  plantSessionCookies,
+  readOauthStateCookie,
+} from "@/features/auth/session-cookies";
 
 export async function GET(req: Request) {
   const { env } = getCloudflareContext();
   const url = new URL(req.url);
   // AUTH_URL 부재 시 url.origin(=Host 헤더)으로 폴백하면 리다이렉트 대상이 요청자에게 좌우된다.
-  // login 이 이미 503 으로 막으므로 여기도 fail-closed 로 맞춘다.
-  if (!env.AUTH_URL) return new NextResponse("AUTH_URL 미설정", { status: 503 });
-  const origin = env.AUTH_URL;
+  // login 이 이미 503 으로 막으므로 여기도 fail-closed 로 맞춘다(request-guard).
+  const guarded = requireAuthOrigin(env);
+  if (guarded instanceof Response) return guarded;
+  const origin = guarded.origin;
   // 실패해도 state 쿠키를 걷는다 — 남겨 두면 같은 nonce 로 TTL(10분) 내내 콜백을 재시도할 수
   // 있어 "state = 일회용" 속성이 코드로 지켜지지 않는다.
   const fail = () => {
     const res = NextResponse.redirect(new URL("/?login=failed", origin));
-    res.cookies.set(COOKIE_NAME.state, "", clearedCookieOptions());
+    clearOauthStateCookie(res);
     // 로그인 흐름을 탄 브라우저의 구 이름 쿠키를 만료 — 롤백 시 옛 세션이 되살아날 창을
     // 좁힌다(부분 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
     expireLegacyCookies(res);
@@ -40,15 +42,16 @@ export async function GET(req: Request) {
 
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const savedState = (await cookies()).get(COOKIE_NAME.state)?.value;
+  const savedState = readOauthStateCookie(await cookies());
 
   // CSRF: 쿼리 state 와 쿠키 state 대조. 공격자는 우리 httpOnly 쿠키를 못 심으므로 위조 콜백이 막힌다.
   if (!code || !state || !savedState || state !== savedState) return fail();
-  // 공개키도 함께 요구한다 — 서명키만 있으면 세션 쿠키는 발급되지만 검증자(proxy·서버 컴포넌트
-  // ·tRPC)가 전부 공개키를 필요로 해 사용자는 계속 비로그인으로 보인다. 쓸 수 없는 세션을 만들지
-  // 않고 실패시킨다(키는 쌍으로만 의미가 있다 — proxy 와 같은 규칙).
   if (!env.CHZZK_CLIENT_ID || !env.CHZZK_CLIENT_SECRET) return fail();
-  if (!env.JWT_SIGNING_JWK || !env.JWT_PUBLIC_JWK) return fail();
+  // 서명키만 있으면 세션 쿠키는 발급되지만 검증자(proxy·서버 컴포넌트·tRPC)가 전부 공개키를
+  // 필요로 해 사용자는 계속 비로그인으로 보인다. 쓸 수 없는 세션을 만들지 않고 실패시킨다
+  // (키는 쌍으로만 의미가 있다 — proxy 와 같은 규칙, keys.sessionKeys 가 정본).
+  const keys = sessionKeys(env);
+  if (!keys) return fail();
 
   let session: SessionTokens | null;
   try {
@@ -66,19 +69,17 @@ export async function GET(req: Request) {
     ) {
       await ensureSuperadmin(db, userId);
     }
-    const privateJwk = parseJwk(env.JWT_SIGNING_JWK, "JWT_SIGNING_JWK");
-    session = await issueSession(db, privateJwk, userId, Date.now());
+    session = await issueSession(db, keys.signingKey(), userId, Date.now());
   } catch {
     return fail();
   }
   if (!session) return fail();
 
   const res = NextResponse.redirect(new URL("/games", origin));
-  res.cookies.set(COOKIE_NAME.access, session.access, accessCookieOptions());
-  res.cookies.set(COOKIE_NAME.refresh, session.refresh, refreshCookieOptions());
-  res.cookies.set(COOKIE_NAME.state, "", clearedCookieOptions());
+  plantSessionCookies(res, session);
+  clearOauthStateCookie(res);
   // 로그아웃 마커를 걷는다 — 안 지우면 방금 로그인한 세션이 마커에 막혀 계속 비로그인으로 보인다.
-  res.cookies.set(COOKIE_NAME.loggedOut, "", clearedCookieOptions());
+  clearLoggedOutMarker(res);
   // 새 __Host- 세션으로 로그인 확정 — 남아 있던 구 이름 쿠키를 만료시켜 롤백 시 되살아날 창을
   // 좁힌다(부분 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
   expireLegacyCookies(res);
