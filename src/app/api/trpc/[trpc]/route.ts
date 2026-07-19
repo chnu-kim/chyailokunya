@@ -53,6 +53,20 @@ function handler(req: Request): Promise<Response> {
     req,
     router: appRouter,
     createContext,
+    /* 실패를 로그로 남긴다. 이게 없어서 프로덕션의 games.add 400 을 `wrangler tail` 로
+       진단할 수 없었다 — Worker 관점에선 tRPC 에러도 정상 응답(Ok)이라 요청 줄만 찍히고
+       이유가 아무 데도 안 남는다.
+
+       **입력값은 찍지 않는다.** 우리 쓰기 입력은 로그인한 사용자의 것이라 개인정보로
+       이어질 수 있고, 진단에 필요한 건 "어느 필드가 왜 걸렸나"지 값 자체가 아니다.
+       BAD_REQUEST 는 Zod 이슈의 path·code 만 추린다(message 에는 값이 섞여 들어온다). */
+    onError({ error, path, type }) {
+      const zod = error.cause as { issues?: { path: (string | number)[]; code: string }[] } | null;
+      const issues = zod?.issues?.map((i) => i.path.join(".") + ":" + i.code).join(", ");
+      console.error(
+        `[trpc] ${type} ${path ?? "<no-path>"} ${error.code}` + (issues ? ` — ${issues}` : ""),
+      );
+    },
   });
 }
 

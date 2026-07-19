@@ -48,6 +48,11 @@ export function messageFor(
   if (code === "NOT_FOUND") return "보드에 없는 게임이에요. 새로고침해 주세요.";
   if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
     return "로그인이 만료됐거나 권한이 없어요. 다시 로그인해 주세요.";
+  /* 입력이 우리 경계에 걸린 것이라 **서버엔 아무것도 안 들어갔다** — 여기서 fallback 의
+     "저장됐을 수도 있으니 새로고침해 확인하라"를 쓰면 거짓말이 된다. 실제로 프로덕션에서
+     이 문구가 400 에 떴다: 사용자는 네트워크 탓인 줄 알고 같은 입력으로 재시도하게 된다.
+     재시도로는 절대 안 풀리는 종류라 그 사실을 말해야 한다. */
+  if (code === "BAD_REQUEST") return "이 게임은 지금 보드에 넣을 수 없어요. 알려 주시면 고칠게요.";
   return fallback;
 }
 
