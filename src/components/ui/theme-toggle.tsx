@@ -2,10 +2,7 @@
 
 import { useEffect } from "react";
 import { useTheme, type Theme } from "./use-theme";
-
-// layout 인라인 스크립트와 반드시 같은 키를 쓴다 — 첫 페인트가 읽는 값과 토글이 쓰는
-// 값이 갈리면 새로고침마다 테마가 튄다.
-const KEY = "theme";
+import { THEME_ATTR, THEME_DARK, THEME_LIGHT, THEME_STORAGE_KEY } from "./theme-contract";
 
 /* 라이트/다크 토글. 이름은 고정하고 상태만 바꾼다: 스크린리더는 접근 이름과 상태를
    이어 읽으므로 둘 다 상태를 따라가면 서로를 부정한다 — 이름이 "지금 누르면 무엇이
@@ -21,22 +18,22 @@ export function ThemeToggle() {
     const onChange = (e: MediaQueryListEvent) => {
       let saved: string | null = null;
       try {
-        saved = localStorage.getItem(KEY);
+        saved = localStorage.getItem(THEME_STORAGE_KEY);
       } catch {
         // storage 가 막혀 있어도 리스너 자체는 무해하게 넘어간다.
       }
-      if (saved === "light" || saved === "dark") return;
-      document.documentElement.setAttribute("data-theme", e.matches ? "dark" : "light");
+      if (saved === THEME_LIGHT || saved === THEME_DARK) return;
+      document.documentElement.setAttribute(THEME_ATTR, e.matches ? THEME_DARK : THEME_LIGHT);
     };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
   function toggle() {
-    const next: Theme = theme === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", next);
+    const next: Theme = theme === THEME_DARK ? THEME_LIGHT : THEME_DARK;
+    document.documentElement.setAttribute(THEME_ATTR, next);
     try {
-      localStorage.setItem(KEY, next);
+      localStorage.setItem(THEME_STORAGE_KEY, next);
     } catch {
       // private mode 등에서 storage 가 막혀도 토글 자체는 동작해야 한다.
     }
@@ -48,7 +45,7 @@ export function ThemeToggle() {
       type="button"
       data-od-id="theme-toggle"
       onClick={toggle}
-      aria-pressed={theme === "dark"}
+      aria-pressed={theme === THEME_DARK}
       aria-label="다크 모드"
       suppressHydrationWarning
     >

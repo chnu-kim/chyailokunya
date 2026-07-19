@@ -1,6 +1,7 @@
 "use client";
 
 import { useTheme } from "./use-theme";
+import { THEME_DARK } from "./theme-contract";
 
 type ThemedImgProps = {
   lightSrc: string;
@@ -21,6 +22,6 @@ type ThemedImgProps = {
    두고, alt 가 내용인 이 마스코트만 <img> 로 스왑한다. */
 export function ThemedImg({ lightSrc, darkSrc, alt, ...rest }: ThemedImgProps) {
   const theme = useTheme();
-  const src = theme === "dark" ? darkSrc : lightSrc;
+  const src = theme === THEME_DARK ? darkSrc : lightSrc;
   return <img src={src} alt={alt} suppressHydrationWarning {...rest} />;
 }
