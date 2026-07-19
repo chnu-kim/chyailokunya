@@ -12,8 +12,10 @@ import { grantRoleWithAudit, resolveUserIdByChannel, revokeRoleWithAudit } from 
 
 // 입력은 신뢰하지 않는다: channelId trim·비어있음 거절, role 은 저장되는 역할(admin·superadmin)만.
 // superadmin 입력은 Zod 를 통과하지만 authorizeRoleChange 가 부트스트랩 전용이라 막는다.
+// .max(64) — 치지직 channelId(UUID 계열) 실측보다 여유 있는 상한. 감사 로그·DB 컬럼에
+// 그대로 쌓이므로 상한 없이는 초대형 문자열이 감사 테이블을 부풀릴 수 있다.
 const roleChangeInput = z.object({
-  channelId: z.string().trim().min(1),
+  channelId: z.string().trim().min(1).max(64),
   role: z.enum(ROLES),
 });
 

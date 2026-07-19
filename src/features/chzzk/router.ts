@@ -8,7 +8,14 @@ import { searchCategories } from "./client";
 
 export const chzzkRouter = router({
   categorySearch: authorizedProcedure("game:write")
-    .input(z.object({ query: z.string().min(1), size: z.number().int().min(1).max(50).optional() }))
+    // query.max(100) — 외부(치지직) API 로 그대로 전달되는 값이라, 상한 없이는 우리 서버를
+    // 거쳐 외부 검색 엔드포인트에 초대형 문자열을 흘려보내는 경로가 된다.
+    .input(
+      z.object({
+        query: z.string().min(1).max(100),
+        size: z.number().int().min(1).max(50).optional(),
+      }),
+    )
     .query(({ ctx, input }) => {
       // 라이브는 creds 있을 때만(Q2). 없으면 라우터가 명확히 실패하고 공개 읽기엔 영향 없다.
       if (!ctx.chzzk) {

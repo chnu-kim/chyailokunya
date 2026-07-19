@@ -10,10 +10,22 @@ import { STATUS_KEYS } from "@/core/games";
 export const addGameInput = z.object({
   // trim 후 non-empty — 공백만·패딩 값(' abc ')이 빈 카드로 저장되거나 'abc'/' abc ' 로
   // category_id UNIQUE 를 우회하는 걸 입력 경계에서 막는다(core toGameSnapshot 와 같은 정규화).
-  categoryId: z.string().trim().min(1),
+  // .max(64) — 치지직 categoryId 실측(짧은 숫자·슬러그)보다 훨씬 넉넉한 여유 상한. list 가
+  // 공개·무페이지네이션이라 상한 없이는 초대형 행으로 응답 크기를 부풀릴 수 있다.
+  categoryId: z.string().trim().min(1).max(64),
   categoryType: z.literal("GAME"),
-  categoryValue: z.string().trim().min(1),
-  posterImageUrl: z.string().trim().min(1).nullable().default(null),
+  // .max(200) — 치지직 categoryValue(게임 제목) 실측 대비 여유. 이유는 categoryId 와 동일.
+  categoryValue: z.string().trim().min(1).max(200),
+  // .max(2048) 은 URL 길이 상한, https 스킴 강제는 별개 이유: game-board 가 이 값을 그대로
+  // <img src> 로 렌더하므로 javascript:/data: 등 비-http(s) 스킴이 들어오면 XSS 로 이어진다.
+  posterImageUrl: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2048)
+    .regex(/^https:\/\//, "https URL 이어야 해요")
+    .nullable()
+    .default(null),
   status: z.enum(STATUS_KEYS).default("played"),
   playedAt: z.number().int().nullable().default(null),
   clearedAt: z.number().int().nullable().default(null),
