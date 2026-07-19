@@ -4,8 +4,7 @@
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
-import { COOKIE_NAME } from "@/features/auth/config";
-import { stateCookieOptions } from "@/features/auth/cookies";
+import { plantOauthStateCookie } from "@/features/auth/session-cookies";
 
 export async function GET() {
   const { env } = getCloudflareContext();
@@ -23,6 +22,6 @@ export async function GET() {
   authUrl.searchParams.set("state", state);
 
   const res = NextResponse.redirect(authUrl);
-  res.cookies.set(COOKIE_NAME.state, state, stateCookieOptions());
+  plantOauthStateCookie(res, state);
   return res;
 }

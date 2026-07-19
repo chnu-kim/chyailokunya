@@ -19,38 +19,33 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse, type NextRequest } from "next/server";
 import { makeDb } from "@/db";
-import { COOKIE_NAME, LEGACY_COOKIE_NAMES } from "@/features/auth/config";
-import {
-  accessCookieOptions,
-  clearedCookieOptions,
-  refreshCookieOptions,
-} from "@/features/auth/cookies";
-import { parseJwk } from "@/features/auth/keys";
+import { sessionKeys } from "@/features/auth/keys";
 import { refreshSession } from "@/features/auth/session";
+import {
+  clearSessionCookies,
+  dropSessionFromRequest,
+  expireLegacyCookies,
+  forwardRotatedAccess,
+  hasLegacyCookies,
+  hasLoggedOutMarker,
+  plantSessionCookies,
+  readSessionCookies,
+} from "@/features/auth/session-cookies";
 import { verifyAccessToken } from "@/features/auth/tokens";
 
 export const config = {
   matcher: ["/((?!_next/|api/auth/|assets/|favicon|icon).*)"],
 };
 
-/* 레거시 세션 쿠키(구 이름, __Host- 이전)를 응답에서 만료시킨다(config.LEGACY_COOKIE_NAMES 주석).
-   NextResponse 를 만지므로 features 가 아니라 여기(진입점) 에 둔다 — /api/auth 두 라우트는 같은
-   일을 app 레이어 헬퍼(expireLegacyCookies)로 하지만, middleware 는 레이어 경계상 app 을 import
-   할 수 없어(.dependency-cruiser `middleware-below-ui`) 로직을 여기 따로 둔다. */
-function clearLegacyCookies(res: NextResponse) {
-  for (const name of LEGACY_COOKIE_NAMES) res.cookies.set(name, "", clearedCookieOptions());
-}
-
 export async function middleware(request: NextRequest) {
   const { env } = await getCloudflareContext({ async: true });
-  // 키는 쌍으로만 의미가 있다. public 만 빠지면 access 검증이 **영원히 실패**해 모든 요청이
-  // 회전 분기로 떨어진다 — 요청마다 refresh 행이 늘고 세션이 안착하지 못한다. 한쪽만 있는
-  // 설정은 오설정이므로 세션 기능 자체를 끈 비로그인으로 통과시킨다(fail-closed, 조용한 폭주 금지).
-  if (!env.JWT_PUBLIC_JWK || !env.JWT_SIGNING_JWK) return NextResponse.next();
+  // 키는 쌍으로만 의미가 있다(keys.sessionKeys 주석) — 한쪽만 있는 오설정이면 세션 기능 자체를
+  // 끈 비로그인으로 통과시킨다(fail-closed, 조용한 refresh 폭주 금지).
+  const keys = sessionKeys(env);
+  if (!keys) return NextResponse.next();
 
   // 쿠키를 먼저 본다 — 트래픽 대부분인 비로그인 요청이 쓰지도 않을 JWK 파싱을 내지 않게.
-  const access = request.cookies.get(COOKIE_NAME.access)?.value;
-  const refresh = request.cookies.get(COOKIE_NAME.refresh)?.value;
+  const { access, refresh } = readSessionCookies(request.cookies);
   if (!access && !refresh) {
     // 배포 후 __Host- 쿠키가 없는 요청은 전부 여기로 떨어진다 — 익명 방문자와 "구 이름 쿠키만
     // 남은" 사용자가 섞인다. 후자면(구 쿠키가 하나라도 있으면) 응답에 만료를 실어, 수동 브라우징
@@ -58,7 +53,7 @@ export async function middleware(request: NextRequest) {
     // 않으려고 존재할 때만 만료시킨다. 이 이른 반환이 레거시 전용 사용자의 유일한 통과 지점이라,
     // 아래 access-valid·refresh-success 정상 경로는 그들에게 도달하지 않는다(그 경로는 만지지 않음).
     const res = NextResponse.next();
-    if (LEGACY_COOKIE_NAMES.some((name) => request.cookies.has(name))) clearLegacyCookies(res);
+    if (hasLegacyCookies(request.cookies)) expireLegacyCookies(res);
     return res;
   }
 
@@ -66,23 +61,18 @@ export async function middleware(request: NextRequest) {
      나중에 도착해 access 를 되심을 수 있는데, access 는 무상태라 그대로면 최대 ACCESS_TTL 동안
      통과한다 — 공용 브라우저에서 "로그아웃했는데 로그인 상태"가 된다. 되심긴 쿠키를 걷고
      이번 요청에서도 다운스트림에 안 넘겨, 로그아웃이 확정되게 한다. 로그인이 마커를 지운다. */
-  if (request.cookies.get(COOKIE_NAME.loggedOut)) {
-    request.cookies.delete(COOKIE_NAME.access);
-    request.cookies.delete(COOKIE_NAME.refresh);
+  if (hasLoggedOutMarker(request.cookies)) {
+    dropSessionFromRequest(request.cookies);
     const res = NextResponse.next({ request });
-    res.cookies.set(COOKIE_NAME.access, "", clearedCookieOptions());
-    res.cookies.set(COOKIE_NAME.refresh, "", clearedCookieOptions());
+    clearSessionCookies(res);
     // 세션을 걷는 김에 구 이름 쿠키도 만료 — 로그아웃 확정 응답이 롤백 시 되살아날 창을 좁힌다
     // (부분 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
-    clearLegacyCookies(res);
+    expireLegacyCookies(res);
     return res;
   }
 
   // access 유효 → 서명 검증만(DB 0) → 통과.
-  if (
-    access &&
-    (await verifyAccessToken([parseJwk(env.JWT_PUBLIC_JWK, "JWT_PUBLIC_JWK")], access))
-  ) {
+  if (access && (await verifyAccessToken(keys.verificationKeys(), access))) {
     return NextResponse.next();
   }
 
@@ -90,24 +80,21 @@ export async function middleware(request: NextRequest) {
   if (!refresh) return NextResponse.next();
 
   const db = makeDb(env.DB);
-  const privateJwk = parseJwk(env.JWT_SIGNING_JWK, "JWT_SIGNING_JWK");
-  const next = await refreshSession(db, privateJwk, refresh, Date.now());
+  const next = await refreshSession(db, keys.signingKey(), refresh, Date.now());
 
   if (!next) {
     // 도난·만료 refresh → 세션 쿠키를 걷고 비로그인으로 통과.
     const res = NextResponse.next();
-    res.cookies.set(COOKIE_NAME.access, "", clearedCookieOptions());
-    res.cookies.set(COOKIE_NAME.refresh, "", clearedCookieOptions());
+    clearSessionCookies(res);
     // 세션을 걷는 김에 구 이름 쿠키도 만료 — 롤백 시 옛 세션이 되살아날 창을 좁힌다(부분
     // 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
-    clearLegacyCookies(res);
+    expireLegacyCookies(res);
     return res;
   }
 
   // 갱신 성공 → 다운스트림이 이번 요청에서 새 access 를 읽도록 request 쿠키를 덮어 forward.
-  request.cookies.set(COOKIE_NAME.access, next.access);
+  forwardRotatedAccess(request.cookies, next.access);
   const res = NextResponse.next({ request });
-  res.cookies.set(COOKIE_NAME.access, next.access, accessCookieOptions());
-  res.cookies.set(COOKIE_NAME.refresh, next.refresh, refreshCookieOptions());
+  plantSessionCookies(res, next);
   return res;
 }

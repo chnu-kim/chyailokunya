@@ -13,9 +13,9 @@ import { cookies } from "next/headers";
 import { cache } from "react";
 import { authoritiesFor, type Authority } from "@/core/authorities";
 import { makeDb, type Db } from "@/db";
-import { COOKIE_NAME } from "@/features/auth/config";
-import { parseJwk } from "@/features/auth/keys";
+import { verificationKeys } from "@/features/auth/keys";
 import { listRolesForChannel } from "@/features/auth/service";
+import { hasLoggedOutMarker, readSessionCookies } from "@/features/auth/session-cookies";
 import { verifyAccessToken, type AccessClaims } from "@/features/auth/tokens";
 
 /* 요청 스코프 메모이즈(react cache) — 한 렌더에서 layout 과 page 가 각각 부른다. 없으면 쿠키
@@ -29,13 +29,15 @@ export const getServerActor = cache(async (): Promise<AccessClaims | null> => {
   // 로그아웃 마커가 있으면 access 를 믿지 않는다 — 늦게 도착한 refresh 응답이 되심은 토큰일 수
   // 있다(proxy 주석 참고). proxy 가 대부분 걸러 주지만, 세션 판단의 정본이 여기이므로 여기서도
   // 막아야 경로에 따라 결과가 갈리지 않는다.
-  if (jar.get(COOKIE_NAME.loggedOut)) return null;
-  const access = jar.get(COOKIE_NAME.access)?.value;
+  if (hasLoggedOutMarker(jar)) return null;
+  const access = readSessionCookies(jar).access;
   if (!access) return null;
   try {
     const { env } = getCloudflareContext();
-    if (!env.JWT_PUBLIC_JWK) return null;
-    return await verifyAccessToken([parseJwk(env.JWT_PUBLIC_JWK, "JWT_PUBLIC_JWK")], access);
+    // 읽기 경로는 공개키만 요구한다(keys.verificationKeys 주석) — 부재면 비로그인.
+    const keys = verificationKeys(env);
+    if (!keys) return null;
+    return await verifyAccessToken(keys, access);
   } catch {
     // 런타임 컨텍스트가 없는 경로(빌드 중 예외 등)에선 비로그인으로 렌더한다.
     return null;

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./games.css";
-import { getDb } from "@/db/runtime";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { makeDb } from "@/db";
 import { listGames } from "@/features/games/service";
 import { GameBoard } from "./game-board";
 import { getServerActor, getServerAuthorities } from "../server-session";
@@ -30,7 +31,9 @@ export default async function Games() {
   // UI 분기는 편의일 뿐 — 진짜 방어선은 tRPC 뮤테이션의 서버 인가다(불변식 3). 버튼을 숨겨도
   // 서버가 authorities 를 다시 검사한다.
   const [games, authorities] = await Promise.all([
-    listGames(getDb()),
+    // 요청 스코프의 D1 바인딩으로 직접 조립한다 — server-session·tRPC 라우트와 같은 패턴
+    // (한때 db/runtime.getDb 가 이 한 곳만을 위해 있었다 — shallow 라 흡수).
+    listGames(makeDb(getCloudflareContext().env.DB)),
     getServerActor().then(getServerAuthorities),
   ]);
   /* 보드에 신원(로그인 여부)을 넘기지 않는다. 한때 "비로그인 / 로그인+권한없음"을 갈라 서로
