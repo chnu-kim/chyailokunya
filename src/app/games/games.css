@@ -3,6 +3,7 @@
 
 :root {
   --trash: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14'/%3E%3C/svg%3E");
+  --pencil: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L20 8l-4-4L4 16v4zM14 6l4 4'/%3E%3C/svg%3E");
 }
 .head {
   padding: var(--space-7) 0 var(--space-5);
@@ -35,44 +36,18 @@
   padding-bottom: var(--space-9);
 }
 
-/* ---- Filters ---------------------------------------------------------- */
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-bottom: var(--space-5);
-}
-.fchip {
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: var(--text-sm);
-  cursor: pointer;
-  padding: 7px 14px;
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  border: 1.5px solid var(--fg-muted);
-  color: var(--fg-muted);
-  min-height: 44px;
-  transition:
-    background var(--dur-base),
-    color var(--dur-base),
-    border-color var(--dur-base);
-}
-.fchip:hover {
-  color: var(--fg);
-  border-color: var(--fg);
-}
-.fchip[aria-pressed="true"] {
-  background: var(--fg);
-  color: var(--bg);
-  border-color: var(--fg);
-}
+/* 상태 필터 줄이 여기 있었다. status 컬럼이 사라지며 같이 걷어냈다 —
+   남은 축이 날짜뿐인데 서버가 이미 플레이한 날 내림차순으로 주므로, 필터는 같은 정보를
+   두 번째 조작으로 되풀이하면서 보드 위 44px 한 줄을 상시 먹었다. */
 
 /* ---- Game grid -------------------------------------------------------- */
+/* 썸네일이 가로(4/3)에서 세로(3/4)로 서면서 같은 폭의 카드가 ~140px 더 커진다 — 190px 열을
+   그대로 두면 한 화면에 카드 높이만 보인다. 열을 168px 로 좁혀 데스크톱 열 수를 유지하고
+   행 간격을 키워(세로로 길어진 카드끼리 붙어 보이지 않게) 균형을 되찾는다. */
 .games {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: var(--space-6) var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--space-7) var(--space-5);
 }
 /* .polaroid 가 사진지 표면 + 다크 토큰 섬을 준다. 쉼 각도를 --rest-rot 으로 부르는 건
    index·landing 과 같은 규약(리터럴 대신 변수 — 미디어쿼리가 각도만 덮게). */
@@ -127,10 +102,11 @@
     box-shadow: var(--shadow-card);
   }
 }
+/* 빈 슬롯도 게임 썸네일과 같은 3/4 다 — 비율이 어긋나면 첫 칸만 키가 달라 그리드가 흔들린다. */
 .addslot__slot {
   display: grid;
   place-items: center;
-  aspect-ratio: 4/3;
+  aspect-ratio: 3/4;
   background-color: var(--thumb-paper);
   border: 1px dashed var(--thumb-edge);
   background-image: repeating-linear-gradient(
@@ -365,6 +341,79 @@ dialog.composer[open]::backdrop {
   font-size: var(--text-xs);
   margin: var(--space-3) 0 0;
 }
+/* 검색 결과가 0건일 때만 열리는 수동 입력 비상구. 결과 목록 자리에 그대로 들어오므로 위
+   구분선으로 "검색은 끝났고 다른 길"임을 표시한다 — 상시 노출하지 않는 근거는 컴포저 주석에. */
+.composer__manual {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.composer__manual .composer__hint {
+  margin-top: 0;
+  margin-bottom: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Composer 2단계: 고른 게임 확인 + 날짜 ------------------------------
+   결과 클릭이 곧 추가였던 걸 나눴다. 이 단계는 "무엇을" 과 "언제" 를 한 화면에 놓는다 —
+   포스터·제목은 잘못 고른 걸 잡는 확인용이고, 날짜 두 개가 유일한 입력이다. */
+.composer__chosen {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+/* 결과 목록의 40×53 보다 크게 — 여기선 "고른 것을 확인"이 목적이라 알아볼 크기가 필요하다.
+   3/4 로 게임 카드 썸네일과 같은 비율. */
+.composer__poster--lg {
+  width: 72px;
+  height: 96px;
+  font-size: var(--text-2xl);
+}
+.composer__chosenname {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+/* 두 날짜는 나란히 두되 좁으면 쌓는다 — 220px 아래로 줄면 date 입력의 UA 위젯(달력 아이콘 +
+   yyyy/mm/dd)이 잘린다. flex-basis 로 그 하한을 박고 wrap 에 맡긴다. */
+.datefields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+.datefield {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: block;
+}
+/* 라벨은 11px 라 4.5:1 게이트 — .paper 표면 위 --fg-muted 는 라이트 6.39:1 / 다크 6.69:1. */
+.datefield__label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+/* date 입력은 UA 위젯이라 높이가 폰트에 안 붙는다 — 44px 터치 하한을 직접 박는다. */
+.datefield .field {
+  min-height: 44px;
+}
+/* 되돌리기(뒤로/취소)가 왼쪽, 확정이 오른쪽. 좁으면 확정이 위로 올라오지 않게 wrap 대신
+   둘 다 늘려 한 줄을 유지한다 — 이 줄의 결정은 둘뿐이라 폭을 나눠도 라벨이 안 잘린다. */
+.composer__actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+.composer__actions .composer__btn {
+  flex: 1 1 0;
+  justify-content: center;
+}
 
 /* 좁은 화면에선 바텀 시트 — 엄지가 닿는 곳에 붙고, 위쪽 여백으로 뒤 보드가 계속 보인다. */
 @media (max-width: 560px) {
@@ -444,8 +493,11 @@ dialog.composer[open]::backdrop {
 /* 게임 커버 아트는 전부 남의 저작물이라 실을 수 없고 AI 로 "비슷한 걸" 만드는 건 더 나쁘다.
    그래서 썸네일은 정직한 플레이스홀더 — 해시가 패턴 4종을 고르고 그 위에 이니셜이 앉는다.
    전부 CSS 라 요청 0·무게 0. 색은 --thumb-*(테마 독립 — 사진지 섬 안). */
+/* 3/4 인 이유: 치지직 포스터가 세로형이라 4/3 에선 cover 가 위아래를 크게 잘라 제목 로고가
+   날아갔다. 비율을 원본에 맞추면 잘림이 사라진다. 포스터가 없는 카드의 패턴+이니셜 폴백도
+   같은 상자를 쓰므로 그리드 높이는 어느 쪽이든 같다. */
 .game__thumb {
-  aspect-ratio: 4/3;
+  aspect-ratio: 3/4;
   display: grid;
   place-items: center;
   position: relative;
@@ -494,7 +546,7 @@ dialog.composer[open]::backdrop {
   opacity: 0.28;
 }
 /* 실제 포스터가 있으면 패턴·이니셜 대신 이미지를 씌운다(ADR-0015: posterImageUrl 스냅샷).
-   thumb 이 4/3·overflow:hidden 이라 cover 로 잘라 채운다. 포스터가 없으면 위 패턴+이니셜
+   thumb 이 3/4·overflow:hidden 이라 cover 로 잘라 채운다. 포스터가 없으면 위 패턴+이니셜
    폴백이 그대로 보인다 — 요청 0·무게 0. */
 .game__poster {
   position: absolute;
@@ -505,15 +557,6 @@ dialog.composer[open]::backdrop {
 }
 .game__body {
   margin: 12px 4px 0;
-}
-/* 이름과 칩이 한 줄에 안 들어가면 칩이 아래로 — wrap 이 없으면 칩(flex:0 0 auto)은 안 줄고
-   이름만 짓눌린다. */
-.game__top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 /* min-width:0 + anywhere 가 둘 다 필요하다 — 게임명은 사용자 입력이라 끊을 데 없는 라틴
    한 덩어리(Cyberpunk2077)가 들어올 수 있고, flex 자식 기본 min-width:auto 는 그 폭 아래로
@@ -526,34 +569,75 @@ dialog.composer[open]::backdrop {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.game__top .chip {
+/* 상태 칩과 장르·플랫폼 정의 목록이 여기 있었다. status 컬럼이 사라지고 장르·
+   플랫폼은 치지직 category API 가 안 주므로(ADR-0015) 둘 다 걷어냈다 — 남은 사실은 날짜뿐이다.
+
+   날짜 줄: 텍스트 + 클리어 칩이 한 줄에 안 들어가면 칩이 아래로 내려가야 한다. wrap 이 없으면
+   칩(flex:0 0 auto)은 안 줄고 날짜 텍스트만 짓눌린다. 날짜가 둘 다 없는 카드는 이 줄 자체가
+   렌더되지 않는다 — 빈 상자가 남으면 카드마다 이름 아래 여백이 달라진다. */
+.game__when {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: var(--space-2) 0 0;
+}
+/* 14px 이라 4.5:1 게이트다 — --fg-muted 는 사진지 위 라이트 6.39:1 / 다크 크림 섬 5.22:1.
+   여기서 한 단계 더 줄이면 게이트는 그대로인데 여유가 사라지므로 크기를 내리지 않는다. */
+.game__date {
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  min-width: 0;
+}
+/* --ok 는 12px 라 4.5:1 필요 — 라이트 6.89:1 / 다크 크림 섬 5.63:1(섬이 --ok 를 되돌린 덕분). */
+.game__when .chip {
   flex: 0 0 auto;
 }
-.game__meta {
+/* 수정·삭제는 나란히. 카드가 좁아(최소 168px) 라벨 둘이 한 줄에 안 들어갈 수 있으므로 wrap. */
+.game__acts {
   display: flex;
-  gap: var(--space-4);
-  margin: var(--space-3) 0 0;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-2);
 }
-.game__meta > div {
-  min-width: 0;
-} /* 장르·플랫폼도 사용자 입력 */
-/* uppercase 를 뺐다: 라벨이 한글('장르'·'플랫폼')이라 대소문자가 없어 아무 일도 안 하면서
-   영문 캡스 디자인이라고 말하고 있었다. 자간은 이 크기 라벨을 떨어뜨리는 값이라 남긴다. */
-.game__meta dt {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: var(--fg-muted);
-  letter-spacing: 0.06em;
-}
-.game__meta dd {
-  margin: 2px 0 0;
-  font-size: var(--text-sm);
+/* 수정은 삭제와 같은 3차 무게지만 파괴적이지 않다 — 색만 --danger 대신 --fg-muted
+   (사진지 위 라이트 6.39:1 / 다크 크림 섬 5.22:1, 12px 4.5:1 게이트 통과). */
+.game__edit {
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-body);
   font-weight: 700;
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  /* 44px 히트 영역인데 시각 무게는 없다: 박스는 커지되 버튼은 투명·12px 라 3차 액션으로 읽힌다. */
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition:
+    background var(--dur-base),
+    border-color var(--dur-base),
+    color var(--dur-base);
+}
+.game__edit::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  background: currentColor;
+  -webkit-mask: var(--pencil) center/contain no-repeat;
+  mask: var(--pencil) center/contain no-repeat;
+}
+/* hover 에서 --fg 로 올린다 — 사진지 위 두 테마 모두 잉크라 14.5:1 이상. */
+.game__edit:hover {
   color: var(--fg);
-  overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 28%, transparent);
 }
 .game__del {
-  margin-top: var(--space-3);
   background: transparent;
   cursor: pointer;
   font-family: var(--font-body);
@@ -607,6 +691,7 @@ dialog.composer[open]::backdrop {
   .head h1 {
     font-size: var(--text-3xl);
   }
-  /* 2열이 되어도 각도는 남긴다 — 최악 360px 에서 카드 144px, 최대 1.4°·높이 ~230px 이면
-     모서리가 2.8px 밀리는데 열 gap 24px 이라 안 침범한다. 1열로 내리면 이 계산을 다시 한다. */
+  /* 2열이 되어도 각도는 남긴다 — 최악 360px 에서 카드 144px, 썸네일이 3/4 로 서면서 카드
+     높이가 ~290px 이 됐고 최대 1.4° 면 모서리가 3.5px 밀리는데 열 gap 24px 이라 안 침범한다.
+     썸네일 비율이나 1열로 내리면 이 계산을 다시 한다. */
 }

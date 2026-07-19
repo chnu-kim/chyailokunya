@@ -17,17 +17,19 @@ import { join } from "node:path";
 
 const BASE_URL = "https://openapi.chzzk.naver.com";
 
-// 이름 → 원하는 플레이 상태(구 보드의 시드 의미를 잇는다). 치지직 GAME 카테고리에 없는 이름은
-// 검색이 비어 제외된다(ADR-0015: 예 "마이 보이스 주"·"겟 투 워크").
+/* 이름 → 플레이/클리어 날짜. status 컬럼은 드롭됐다 — 이제 날짜 두 개가 상태의 정본이고
+   "클리어"는 cleared_at 이 있다는 뜻이다. 날짜를 모르는 시드는 둘 다 null 로 둔다(보드에선
+   날짜 줄 없이 뜬다). 치지직 GAME 카테고리에 없는 이름은 검색이 비어 제외된다
+   (ADR-0015: 예 "마이 보이스 주"·"겟 투 워크"). */
 const SEED = [
-  { q: "마인크래프트", status: "playing" },
-  { q: "리그 오브 레전드", status: "playing" },
-  { q: "레이튼 교수와 이상한 마을", status: "cleared" },
-  { q: "레이튼 교수와 악마의 상자", status: "played" },
-  { q: "리틀 나이트메어", status: "cleared" },
-  { q: "엘든 링", status: "played" },
-  { q: "마이 보이스 주", status: "played" },
-  { q: "겟 투 워크", status: "played" },
+  { q: "마인크래프트", playedAt: "2026-07-12", clearedAt: null },
+  { q: "리그 오브 레전드", playedAt: "2026-07-05", clearedAt: null },
+  { q: "레이튼 교수와 이상한 마을", playedAt: "2026-05-02", clearedAt: "2026-05-19" },
+  { q: "레이튼 교수와 악마의 상자", playedAt: "2026-06-08", clearedAt: null },
+  { q: "리틀 나이트메어", playedAt: "2026-04-11", clearedAt: "2026-04-14" },
+  { q: "엘든 링", playedAt: "2026-03-01", clearedAt: null },
+  { q: "마이 보이스 주", playedAt: null, clearedAt: null },
+  { q: "겟 투 워크", playedAt: null, clearedAt: null },
 ];
 
 const target = process.argv.includes("--remote") ? "--remote" : "--local";
@@ -60,15 +62,17 @@ function sqlStr(s) {
 
 const now = Date.now();
 const values = [];
-for (const { q, status } of SEED) {
+for (const { q, playedAt, clearedAt } of SEED) {
   const cat = await searchGame(q);
   if (!cat) {
     console.warn(`제외(치지직 GAME 카테고리 없음): ${q}`);
     continue;
   }
   const poster = cat.posterImageUrl ? sqlStr(cat.posterImageUrl) : "NULL";
+  const played = playedAt ? sqlStr(playedAt) : "NULL";
+  const cleared = clearedAt ? sqlStr(clearedAt) : "NULL";
   values.push(
-    `(${sqlStr(cat.categoryId)}, 'GAME', ${sqlStr(cat.categoryValue)}, ${poster}, ${sqlStr(status)}, ${now}, ${now})`,
+    `(${sqlStr(cat.categoryId)}, 'GAME', ${sqlStr(cat.categoryValue)}, ${poster}, ${played}, ${cleared}, ${now}, ${now})`,
   );
   console.log(`해결: ${q} → ${cat.categoryValue} (${cat.categoryId})`);
 }
@@ -80,7 +84,7 @@ if (values.length === 0) {
 
 const sql =
   "INSERT OR IGNORE INTO games\n" +
-  "  (category_id, category_type, category_value, poster_image_url, status, created_at, last_updated_at)\n" +
+  "  (category_id, category_type, category_value, poster_image_url, played_at, cleared_at, created_at, last_updated_at)\n" +
   "VALUES\n  " +
   values.join(",\n  ") +
   ";\n";

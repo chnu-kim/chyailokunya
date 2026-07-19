@@ -3,8 +3,8 @@
 
 import { TRPCError } from "@trpc/server";
 import { authorizedProcedure, publicProcedure, router } from "../trpc/init";
-import { addGameInput, removeGameInput } from "./schema";
-import { addGame, listGames, removeGame } from "./service";
+import { addGameInput, removeGameInput, updateGameInput } from "./schema";
+import { addGame, listGames, removeGame, updateGame } from "./service";
 
 export const gamesRouter = router({
   list: publicProcedure.query(({ ctx }) => listGames(ctx.db)),
@@ -21,6 +21,18 @@ export const gamesRouter = router({
         }
         throw e;
       }
+    }),
+
+  /* 날짜 수정도 보드를 바꾸는 쓰기다 — game:write 로 add 와 같은 문을 쓴다(날짜만 고치는
+     별도 권한을 새로 만들 근거가 없다). 없는 id 는 NOT_FOUND 로 올린다. */
+  update: authorizedProcedure("game:write")
+    .input(updateGameInput)
+    .mutation(async ({ ctx, input }) => {
+      const row = await updateGame(ctx.db, input);
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "보드에 없는 게임이에요." });
+      }
+      return row;
     }),
 
   remove: authorizedProcedure("game:delete")

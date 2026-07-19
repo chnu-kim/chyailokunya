@@ -1,30 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import type { ChzzkCategory } from "@/core/games";
+import { useEffect, useReducer, useRef, useState, useTransition } from "react";
+import {
+  composerReducer,
+  composerStep,
+  initialComposerState,
+  showsManualEntry,
+} from "@/core/games-composer";
 import type { GameRow } from "@/db";
 import { trpc } from "@/features/trpc/client";
+import { DateFields, dateOrderError, GameDialog, messageFor } from "./game-dialog";
 
-/* 게임 추가 컴포저(ADR-0015·0017). 치지직 카테고리를 검색해(서버 인가된 tRPC, creds 는 서버에만)
-   고른 뒤 games.add 뮤테이션으로 보드에 넣는다. 성공하면 onAdded 로 보드 상태를 낙관적 갱신한다.
-   드물고 사적인 행동이라 상시 폭을 차지하지 않게 다이얼로그로 띄운다 — 여는 트리거는 보드 그리드
-   첫 칸의 빈 폴라로이드(.addslot)다. 서버가 인가·중복(CONFLICT)을 정본으로 검사하므로 여기선
-   결과를 한국어로 보여줄 뿐이다.
+/* 게임 추가 컴포저(ADR-0015·0017). 두 단계다:
 
-   네이티브 <dialog>+showModal() 을 쓰는 이유: 포커스 트랩·Esc 닫기·배경 inert·top-layer 를
-   브라우저가 준다(직접 만든 백드롭 div 는 이걸 더 나쁘게 재구현한다). 진입 애니메이션·스크림·
-   바텀시트는 games.css 의 dialog.composer 가 이미 그린다. 표면은 .paper — .polaroid 는
-   --border-strong 을 안 되돌려 다크에서 입력 테두리가 1.01:1 로 사라진다(그 자리 주석 참고). */
+     search  — 치지직 카테고리를 검색한다(서버 인가된 tRPC, creds 는 서버에만).
+     detail  — 고른 게임의 포스터·제목을 확인하고 날짜 두 개를 넣은 뒤 추가한다.
 
-/* tRPC 에러 **코드**로 분기한다 — 서버 문구 매칭(msg.includes("이미"))은 문구를 다듬는 순간
-   조용히 죽는다. 세션 만료·권한 없음은 재시도로 안 풀리므로 실행 가능한 조치를 안내한다. */
-function messageFor(e: unknown, fallback: string): string {
-  const code = (e as { data?: { code?: string } } | null)?.data?.code;
-  if (code === "CONFLICT") return "이미 보드에 있는 게임이에요.";
-  if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
-    return "로그인이 만료됐거나 권한이 없어요. 다시 로그인해 주세요.";
-  return fallback;
-}
+   결과 클릭이 곧 추가였던 한 단계짜리를 나눈 이유: 날짜는 붙인 뒤에 고치는 값이 아니라 붙일
+   때 아는 값이고, 클릭 한 번이 곧 서버 쓰기면 잘못 고른 걸 되돌리는 유일한 길이 삭제였다.
+   detail 은 뒤로 갈 수 있고(결과 목록은 그대로 남는다) 그때까지 서버는 안 건드린다.
+
+   단계 사이의 전이 규칙(선택·뒤로·수동 입력 비상구·날짜 초기화)은 전부 core/games-composer
+   의 순수 리듀서가 쥔다 — 이 파일은 그리기와 통신만 한다. 그래야 "뒤로 갔다 다른 게임을
+   고르면 이전 날짜가 따라오는가" 같은 전이 버그를 DOM 없이 단위 테스트가 잡는다. */
 
 export function GameComposer({
   onAdded,
@@ -33,178 +31,225 @@ export function GameComposer({
   onAdded: (row: GameRow) => void;
   onClose: () => void;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ChzzkCategory[]>([]);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const firstDateRef = useRef<HTMLInputElement>(null);
+  const [state, dispatch] = useReducer(composerReducer, initialComposerState);
   const [error, setError] = useState("");
+  /* 닫기 신호와, 닫힌 뒤에 부모에게 넘길 행. 추가 성공 즉시 onAdded 를 부르면 부모가 같은
+     커밋에서 컴포저를 언마운트해 닫기 effect 가 아예 안 돌고, 열린 채로 DOM 에서 빠져 포커스가
+     body 로 떨어진다. 그래서 성공은 행을 쥐고 신호만 세우고, 실제 인계는 브라우저가 dialog 를
+     닫은 뒤 오는 onClose 이벤트에서 한다. */
+  const [closing, setClosing] = useState(false);
+  const [added, setAdded] = useState<GameRow | null>(null);
   const [searching, startSearch] = useTransition();
   const [adding, startAdd] = useTransition();
 
-  // 마운트되면 모달로 띄운다 — showModal() 이 top-layer·포커스 트랩·배경 inert 를 켠다.
-  // 언마운트(부모가 composing=false)로 닫히므로 exit 애니메이션은 생략된다(진입만) — CSS 가
-  // @starting-style 를 모르는 브라우저에서도 즉시 뜨는 것과 같은 "없어지는 실패 모드"라 무해하다.
+  const { selected, dates } = state;
+  const step = composerStep(state);
+  const orderError = dateOrderError(dates);
+
+  /* 단계가 바뀌면 포커스를 그 단계의 첫 조작점으로 옮긴다. 단계를 여는 버튼(결과 항목·뒤로·
+     직접 입력)은 전부 **자기 자신을 언마운트**하므로, 안 옮기면 포커스가 dialog 로 떨어져
+     키보드·스크린리더 사용자는 화면이 통째로 바뀐 걸 모른 채 Tab 을 처음부터 훑어야 한다.
+     보드의 pendingFocus 규약과 같은 취지다.
+
+     마운트 시 검색 입력 포커스도 이 effect 가 겸한다(초기 단계가 search). autoFocus 속성은
+     여기서 무효다 — React 는 커밋 시점에 .focus() 를 대신 부르는데 그땐 dialog 가 아직 닫혀
+     있어(UA 의 display:none) no-op 이고, 이후 showModal 의 포커스 단계는 autofocus "속성"을
+     찾다 못 찾아 첫 포커서블(닫기 버튼)로 떨어진다. */
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    // dev 의 StrictMode 는 effect 를 두 번 돌린다 — 이미 열린 dialog 에 showModal 을 다시 부르면
-    // InvalidStateError 가 나 컴포저가 통째로 깨진다. 열려 있으면 건너뛰고, 정리에서 닫는다.
-    if (!dialog.open) dialog.showModal();
-    // autoFocus 속성은 여기서 무효다 — React 는 커밋 시점에 .focus() 를 대신 부르는데 그땐
-    // dialog 가 아직 닫혀 있어(UA 의 display:none) no-op 이고, 이후 showModal 의 포커스 단계는
-    // autofocus "속성"을 찾다 못 찾아 첫 포커서블(닫기 버튼)로 떨어진다. 열고 나서 직접 맞춘다.
-    inputRef.current?.focus();
-    // 정리에서 close() 를 부르지 않는다 — close 이벤트가 onClose 로 이어져 StrictMode 의 두 번째
-    // 셋업 전에 부모가 컴포저를 닫아버린다. 언마운트되면 브라우저가 top layer 에서 알아서 뺀다.
-  }, []);
+    if (step === "detail") firstDateRef.current?.focus();
+    else searchRef.current?.focus();
+  }, [step]);
 
   function onSearch(e: React.FormEvent) {
     e.preventDefault();
-    const q = query.trim();
+    const q = state.query.trim();
     if (!q) return;
     startSearch(async () => {
       setError("");
       try {
         const found = await trpc.chzzk.categorySearch.query({ query: q, size: 12 });
-        setResults(found);
-        if (found.length === 0) setError("검색 결과가 없어요. 다른 이름으로 찾아보세요.");
+        dispatch({ type: "searchSucceeded", results: found });
       } catch (e) {
-        // 실패한 검색의 이전 결과를 남기면 방금 검색어와 무관한 게임을 붙이게 된다 — 비운다.
-        setResults([]);
+        dispatch({ type: "searchFailed" });
         setError(messageFor(e, "검색에 실패했어요. 잠시 후 다시 시도해 주세요."));
       }
     });
   }
 
-  function onPick(c: ChzzkCategory) {
+  function onAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selected || orderError) return;
     startAdd(async () => {
       setError("");
       try {
         // 필드를 그대로 옮길 뿐 여기서 trim·empty→null 을 다시 하지 않는다 — 그 정규화의
         // 정본은 games.add 뮤테이션의 addGameInput(Zod) 하나다(중복 정규화 금지).
         const row = await trpc.games.add.mutate({
-          categoryId: c.categoryId,
+          categoryId: selected.categoryId,
           categoryType: "GAME",
-          categoryValue: c.categoryValue,
-          posterImageUrl: c.posterImageUrl,
+          categoryValue: selected.categoryValue,
+          posterImageUrl: selected.posterImageUrl,
+          playedAt: dates.playedAt,
+          clearedAt: dates.clearedAt,
         });
-        // 닫기는 close() 로 — 포커스가 트리거(addslot)로 복원되고, 부모 언마운트는 onClose
-        // 이벤트가 위임한다. onAdded 는 보드에 행을 낙관적으로 얹는다.
-        dialogRef.current?.close();
-        onAdded(row);
+        setAdded(row);
+        setClosing(true);
       } catch (e) {
         setError(messageFor(e, "추가에 실패했어요."));
       }
     });
   }
 
-  // 배경(::backdrop) 클릭만 닫는다. 카드 박스 밖 좌표일 때만(헤더 패딩까지 닫지 않게), 그리고
-  // 입력에서 시작한 드래그 선택이 밖에서 놓여도 닫히지 않게 "누른 지점도 밖"일 때만 닫는다.
-  const pressedOutside = useRef(false);
-  function isOutside(e: React.MouseEvent<HTMLDialogElement>) {
-    const d = dialogRef.current;
-    if (!d) return false;
-    const r = d.getBoundingClientRect();
-    return !(
-      e.clientX >= r.left &&
-      e.clientX <= r.right &&
-      e.clientY >= r.top &&
-      e.clientY <= r.bottom
-    );
-  }
-  function onBackdropMouseDown(e: React.MouseEvent<HTMLDialogElement>) {
-    pressedOutside.current = isOutside(e);
-  }
-  // close() 를 부르면 브라우저의 dialog 닫기 알고리즘이 실행돼 포커스가 트리거(addslot)로
-  // 복원된다 — onClose(부모 언마운트)를 직접 부르면 열린 채로 DOM 에서 제거돼 포커스가 body
-  // 로 떨어진다. 실제 언마운트는 dialog 의 onClose 이벤트가 부모에게 위임한다.
-  function onBackdropClick(e: React.MouseEvent<HTMLDialogElement>) {
-    if (pressedOutside.current && isOutside(e)) dialogRef.current?.close();
-    pressedOutside.current = false;
-  }
-
   return (
-    <dialog
-      className="composer paper"
-      ref={dialogRef}
-      aria-labelledby="composer-title"
-      data-od-id="composer"
-      onClose={onClose}
-      onMouseDown={onBackdropMouseDown}
-      onClick={onBackdropClick}
+    <GameDialog
+      title="게임 추가"
+      odId="composer"
+      closing={closing}
+      onClose={() => (added ? onAdded(added) : onClose())}
     >
-      <button
-        className="composer__close"
-        type="button"
-        aria-label="닫기"
-        onClick={() => dialogRef.current?.close()}
-      >
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <path
-            d="M4 4l8 8M12 4l-8 8"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-        </svg>
-      </button>
+      {selected ? (
+        <form className="composer__detail" onSubmit={onAdd}>
+          <p className="composer__hint">언제 플레이했는지 적어 두면 보드가 시간순으로 서요.</p>
 
-      <div className="composer__body">
-        <h2 className="composer__title" id="composer-title">
-          게임 추가
-        </h2>
-        <p className="composer__hint">치지직 게임 카테고리를 검색해 보드에 붙여요.</p>
+          <div className="composer__chosen" data-od-id="composer-chosen">
+            {selected.posterImageUrl ? (
+              <img
+                className="composer__poster composer__poster--lg"
+                src={selected.posterImageUrl}
+                alt=""
+                width={72}
+                height={96}
+              />
+            ) : (
+              <span className="composer__noposter composer__poster--lg" aria-hidden="true">
+                {selected.categoryValue.charAt(0)}
+              </span>
+            )}
+            <span className="composer__chosenname">{selected.categoryValue}</span>
+          </div>
 
-        <form className="composer__search" onSubmit={onSearch}>
-          <input
-            className="field"
-            type="search"
-            placeholder="게임 이름으로 검색"
-            value={query}
-            ref={inputRef}
-            onChange={(e) => setQuery(e.target.value)}
-            data-od-id="composer-input"
+          <DateFields
+            dates={dates}
+            onChange={(next) => dispatch({ type: "datesChanged", dates: next })}
+            idPrefix="composer-date"
+            firstFieldRef={firstDateRef}
           />
-          <button className="btn btn--secondary composer__btn" type="submit" disabled={searching}>
-            {searching ? "검색 중…" : "검색"}
-          </button>
+
+          {(orderError || error) && (
+            <p className="err" role="alert">
+              {orderError || error}
+            </p>
+          )}
+
+          <div className="composer__actions">
+            <button
+              className="btn btn--secondary composer__btn"
+              type="button"
+              data-od-id="composer-back"
+              onClick={() => {
+                dispatch({ type: "back" });
+                setError("");
+              }}
+            >
+              뒤로
+            </button>
+            <button
+              className="btn btn--primary composer__btn"
+              type="submit"
+              disabled={adding || !!orderError}
+              data-od-id="composer-submit"
+            >
+              {adding ? "추가 중…" : "추가"}
+            </button>
+          </div>
         </form>
+      ) : (
+        <>
+          <p className="composer__hint">치지직 게임 카테고리를 검색해 보드에 붙여요.</p>
 
-        {error && (
-          <p className="err" role="alert">
-            {error}
-          </p>
-        )}
+          <form className="composer__search" onSubmit={onSearch}>
+            <input
+              className="field"
+              type="search"
+              placeholder="게임 이름으로 검색"
+              value={state.query}
+              ref={searchRef}
+              onChange={(e) => dispatch({ type: "queryChanged", query: e.target.value })}
+              data-od-id="composer-input"
+            />
+            <button className="btn btn--secondary composer__btn" type="submit" disabled={searching}>
+              {searching ? "검색 중…" : "검색"}
+            </button>
+          </form>
 
-        <ul className="composer__results" data-od-id="composer-results">
-          {results.map((c) => (
-            <li key={c.categoryId}>
+          {error && (
+            <p className="err" role="alert">
+              {error}
+            </p>
+          )}
+
+          <ul className="composer__results" data-od-id="composer-results">
+            {state.results.map((c) => (
+              <li key={c.categoryId}>
+                <button
+                  className="composer__pick"
+                  type="button"
+                  onClick={() =>
+                    dispatch({
+                      type: "picked",
+                      selection: {
+                        categoryId: c.categoryId,
+                        categoryValue: c.categoryValue,
+                        posterImageUrl: c.posterImageUrl,
+                      },
+                    })
+                  }
+                >
+                  {c.posterImageUrl ? (
+                    <img
+                      className="composer__poster"
+                      src={c.posterImageUrl}
+                      alt=""
+                      width={40}
+                      height={53}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="composer__noposter" aria-hidden="true">
+                      {c.categoryValue.charAt(0)}
+                    </span>
+                  )}
+                  <span className="composer__pickname">{c.categoryValue}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {showsManualEntry(state) && (
+            <div className="composer__manual" data-od-id="composer-manual">
+              <p className="composer__hint">
+                ‘{state.query.trim()}’ 검색 결과가 없어요 — 직접 입력할까요?
+              </p>
               <button
-                className="composer__pick"
+                className="btn btn--secondary composer__btn"
                 type="button"
-                disabled={adding}
-                onClick={() => onPick(c)}
+                data-od-id="composer-manual-go"
+                onClick={() => dispatch({ type: "manualPicked" })}
               >
-                {c.posterImageUrl ? (
-                  <img
-                    className="composer__poster"
-                    src={c.posterImageUrl}
-                    alt=""
-                    width={40}
-                    height={53}
-                    loading="lazy"
-                  />
-                ) : (
-                  <span className="composer__noposter" aria-hidden="true">
-                    {c.categoryValue.charAt(0)}
-                  </span>
-                )}
-                <span className="composer__pickname">{c.categoryValue}</span>
+                직접 입력으로 추가
               </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </dialog>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 단계 전환은 화면이 통째로 바뀌는 사건이라 포커스 이동만으로는 맥락이 안 실린다 —
+          보드의 announcement 규약과 같이 한 줄로 알린다. */}
+      <p className="sr-only" role="status">
+        {selected ? selected.categoryValue + " 선택됨. 날짜를 입력하세요." : ""}
+      </p>
+    </GameDialog>
   );
 }
