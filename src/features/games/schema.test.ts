@@ -31,6 +31,14 @@ describe("addGameInput", () => {
     if (result.success) expect(result.data.posterImageUrl).toBeNull();
   });
 
+  it("posterImageUrl 의 빈 문자열·공백만은 null 로 접힌다(포스터 없음의 유일한 표현)", () => {
+    for (const empty of ["", "   "]) {
+      const result = addGameInput.safeParse({ ...base, posterImageUrl: empty });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.posterImageUrl).toBeNull();
+    }
+  });
+
   it("정상 치지직 category 스냅샷은 통과", () => {
     const result = addGameInput.safeParse({
       ...base,

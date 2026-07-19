@@ -80,6 +80,8 @@ export function GameComposer({
     startAdd(async () => {
       setError("");
       try {
+        // 필드를 그대로 옮길 뿐 여기서 trim·empty→null 을 다시 하지 않는다 — 그 정규화의
+        // 정본은 games.add 뮤테이션의 addGameInput(Zod) 하나다(중복 정규화 금지).
         const row = await trpc.games.add.mutate({
           categoryId: c.categoryId,
           categoryType: "GAME",
