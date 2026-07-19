@@ -14,7 +14,7 @@ import { OG_IMAGE, OG_LOCALE, OG_SITE_NAME } from "./site-meta";
 export const metadata: Metadata = {
   metadataBase: new URL("https://chyailokunya.com"),
   title: "챠이로 쿠냐 — 팬 사이트",
-  description: "버추얼 스트리머 챠이로 쿠냐 팬 사이트. 소개 랜딩과 플레이 게임 목록.",
+  description: "버추얼 스트리머 챠이로 쿠냐 팬 사이트. 소개 랜딩과 플레이한 게임 보드.",
   openGraph: {
     siteName: OG_SITE_NAME,
     locale: OG_LOCALE,

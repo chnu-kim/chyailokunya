@@ -7,7 +7,7 @@ import { getServerActor, getServerAuthorities } from "../server-session";
 import { OG_IMAGE, OG_LOCALE, OG_SITE_NAME } from "../site-meta";
 
 export const metadata: Metadata = {
-  title: "챠이로 쿠냐 — 플레이 게임 목록",
+  title: "챠이로 쿠냐 — 플레이한 게임",
   description: "챠이로 쿠냐가 플레이한 게임 목록. 방송에서 플레이한 게임 보드.",
   openGraph: {
     siteName: OG_SITE_NAME,
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [OG_IMAGE],
     url: "/games",
-    title: "챠이로 쿠냐 — 플레이 게임 목록",
+    title: "챠이로 쿠냐 — 플레이한 게임",
     description: "방송에서 플레이한 게임 보드. 상태로 골라보세요.",
   },
 };
@@ -33,6 +33,9 @@ export default async function Games() {
     listGames(getDb()),
     getServerActor().then(getServerAuthorities),
   ]);
+  /* 보드에 신원(로그인 여부)을 넘기지 않는다. 한때 "비로그인 / 로그인+권한없음"을 갈라 서로
+     다른 안내를 띄웠지만, member 역할이 없어 둘 다 영원히 쓰기를 못 얻으므로 구분에 실익이
+     없었다(이슈 #22). 권한만 넘기면 보드는 "쓸 수 있나"만 알면 된다 — 불변식 3 과도 결이 맞다. */
   return (
     <main id="main">
       <GameBoard
