@@ -32,7 +32,8 @@ export async function GET(req: Request) {
   const fail = () => {
     const res = NextResponse.redirect(new URL("/?login=failed", origin));
     res.cookies.set(COOKIE_NAME.state, "", clearedCookieOptions());
-    // 로그인 흐름을 탄 브라우저의 구 이름 쿠키를 만료 — 롤백해도 옛 세션이 안 살아나게.
+    // 로그인 흐름을 탄 브라우저의 구 이름 쿠키를 만료 — 롤백 시 옛 세션이 되살아날 창을
+    // 좁힌다(부분 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
     expireLegacyCookies(res);
     return res;
   };
@@ -78,7 +79,8 @@ export async function GET(req: Request) {
   res.cookies.set(COOKIE_NAME.state, "", clearedCookieOptions());
   // 로그아웃 마커를 걷는다 — 안 지우면 방금 로그인한 세션이 마커에 막혀 계속 비로그인으로 보인다.
   res.cookies.set(COOKIE_NAME.loggedOut, "", clearedCookieOptions());
-  // 새 __Host- 세션으로 로그인 확정 — 남아 있던 구 이름 쿠키를 만료시켜 롤백 시 되살아나지 못하게.
+  // 새 __Host- 세션으로 로그인 확정 — 남아 있던 구 이름 쿠키를 만료시켜 롤백 시 되살아날 창을
+  // 좁힌다(부분 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
   expireLegacyCookies(res);
   return res;
 }

@@ -33,7 +33,8 @@ export async function POST(req: Request) {
   // 쿠키 삭제만으론 부족하다 — 이 순간 회전 중이던 요청의 응답이 나중에 도착하면 access 를
   // 다시 심는다. 마커를 남겨 그 뒤의 요청들이 세션 쿠키를 무시·삭제하게 한다.
   res.cookies.set(COOKIE_NAME.loggedOut, "1", loggedOutCookieOptions());
-  // 구 이름 쿠키도 함께 만료 — 배포 롤백 시 남은 구 쿠키가 로그아웃한 세션을 되살리지 못하게.
+  // 구 이름 쿠키도 함께 만료 — 배포 롤백 시 남은 구 쿠키가 로그아웃한 세션을 되살릴 창을
+  // 좁힌다(부분 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
   expireLegacyCookies(res);
   return res;
 }
