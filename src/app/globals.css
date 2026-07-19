@@ -43,6 +43,18 @@
      전용(대비는 그 위 글자가 책임진다). */
   --focus: #b25a68;
 
+  /* 상태 워시(nav hover·아바타 칩). 불투명 표면색(--surface-2)을 쓰면 다크에서 방향이
+     뒤집힌다 — 다크 --surface-2(#161210)가 nav 실효 배경(--surface 88% 믹스 = #1e1916)보다
+     어두워서 hover 가 "더 어두워지는" 쪽으로 갔고, 반투명 nav 위에서 1.07:1 로 육안 구분이
+     안 됐다. 알파 워시는 테마마다 다른 잉크를 얹어 항상 "배경에서 멀어지는" 방향이다.
+     실측 nav 위 대비 — wash-1: 라이트 1.13:1 / 다크 1.38:1. hover 는 WCAG 대비 요건이 있는
+     상태가 아니므로(포커스·선택이 아니다) 지각 가능하면 되고, 기존 라이트값 1.11:1 보다
+     약해지지 않는 게 하한이다.
+     @theme 에 올리지 않는 이유: 팔레트가 아니라 상태 워시다. bg-wash-1 유틸리티로 노출하면
+     알파가 겹쳐 쌓이는 자리에 쓰이게 된다. */
+  --wash-1: color-mix(in srgb, var(--brand-ink) 6%, transparent);
+  --wash-2: color-mix(in srgb, var(--brand-ink) 10%, transparent);
+
   /* Status — 12px 텍스트로 라이트 표면(#ffffff·크림 섬)에서 AA 를 넘게 튜닝 */
   --ok: #47613f;
   --warn: #7a5c26;
@@ -83,7 +95,9 @@
   --thumb-edge: #e3d8cf;
 
   /* .nav 실측 높이: 12+12 패딩 + 44 최대 자식 + 1.5 보더 ≈ 70px. sticky offset 과
-     앵커 scroll-margin 이 손으로 찍은 상수 대신 여기서 파생된다. */
+     앵커 scroll-margin 이 손으로 찍은 상수 대신 여기서 파생된다.
+     "44 최대 자식"이 이 값의 유일한 변수다 — 아바타(26px)·채널명은 그보다 낮고 CTA·
+     로그아웃·토글이 전부 44 하한에 맞춰져 있어, 인증 UI 를 바꿔도 70px 은 안 움직인다. */
   --nav-h: 70px;
 }
 
@@ -103,6 +117,12 @@
   --accent: #e9b6bd;
   --accent-ink: #c79b86;
   --focus: #e9b6bd;
+  /* 워시를 잉크가 아니라 --fg 로 뒤집는다 — 라이트와 같은 잉크를 얹으면 이미 어두운 nav 가
+     더 어두워져 hover 가 사라진다. 알파를 6/10 → 12/18 로 올린 건 어두운 표면 위에서 같은
+     지각 세기를 내려면 더 큰 델타가 필요해서다. 실측 nav(#1e1916) 위 wash-1 1.38:1,
+     wash-2 칩 위 --fg 글자 8.70:1(12px 게이트 4.5:1 통과). */
+  --wash-1: color-mix(in srgb, var(--fg) 12%, transparent);
+  --wash-2: color-mix(in srgb, var(--fg) 18%, transparent);
   --ok: #8fbf87;
   --warn: #e0b567;
   --danger: #e88b80;

@@ -120,11 +120,17 @@ h2.t-script {
   align-items: center;
   gap: var(--space-4);
 }
+/* overflow:hidden 은 브랜드가 "양보하는 유일한 자식"이라는 계약을 실제로 지키게 한다.
+   .brand__cat 은 flex:0 0 auto(46px)라 브랜드 상자가 min-width:0 로 짜부라져도 안 줄고,
+   클리핑이 없으면 마크가 상자 밖으로 흘러 바로 오른쪽 .nav__links 위에 그려진다
+   (실측 320px: brand 상자 21px 인데 마크는 46px). 잘린 마크가 겹친 마크보다 낫다.
+   자기 outline 은 overflow 에 안 잘리므로 포커스 링은 그대로 보인다. */
 .brand {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   text-decoration: none;
+  overflow: hidden;
 }
 /* 브랜드 마크는 C·카오모지(#mk-kao) — 64×22 얼굴이라 정사각 아이콘이 아니다.
    fill 을 여기서 준다: SVG 기본 fill 은 검정이라 없으면 다크에서 눈·코가 검정에
@@ -173,73 +179,223 @@ h2.t-script {
    iOS HIG·이 프로젝트 기준은 44 를 원한다. */
 .nav__link {
   font-family: var(--font-body);
-  font-weight: 700;
+  /* 위계 3단 중 가운데 — 링크는 "이동"이라 현재 페이지(--fg 700)보다 가볍고, 세션
+     컨트롤과는 밑줄 유무로 갈린다. Gothic A1 500 은 layout head 가 이미 로드한다. */
+  font-weight: 500;
   font-size: var(--text-sm);
   text-decoration: none;
-  color: var(--fg);
+  /* --fg 에서 한 단 물러난다. nav 실효 표면(--surface 88% 믹스) 위 실측 —
+     라이트 6.39:1(줄노트 줄 위 6.22:1) · 다크 6.76:1(6.62:1)로 본문 4.5:1 통과.
+     nav 가 반투명이라 아래 콘텐츠가 12% 비치는데, 최악(라이트 아래 순검정 / 다크 아래
+     순백)에서도 4.84:1 · 4.70:1 이라 투명도 때문에 미달로 떨어지지 않는다. */
+  color: var(--fg-muted);
   padding: 9px 12px;
   border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  /* 한 줄 유지 — "치지직 로그인"이 좁은 nav 에서 2줄로 접히면 --nav-h(sticky offset·앵커
-     scroll-margin 의 정본)가 튄다. 로그아웃 상태와 대칭으로 링크도 nowrap. */
+  /* 한 줄 유지 — 좁은 nav 에서 2줄로 접히면 --nav-h(sticky offset·앵커 scroll-margin 의
+     정본)가 튄다. */
   white-space: nowrap;
-  transition: background var(--dur-base);
+  transition:
+    background var(--dur-base),
+    color var(--dur-base);
 }
 .nav__link:hover {
-  background: var(--surface-2);
+  background: var(--wash-1);
+  color: var(--fg);
 }
+/* 현재 페이지만 무게를 되돌린다 — 2px 밑줄 하나로는 스캔이 안 됐다. 정적 상태라 굵기
+   변화가 레이아웃을 흔들지 않는다(hover 가 색만 바꾸는 이유가 그것이다). */
 .nav__link[aria-current="page"] {
+  color: var(--fg);
+  font-weight: 700;
   box-shadow: inset 0 -2px 0 var(--fg);
 }
 
 /* ---- 인증 컨트롤 (로그인/로그아웃) --------------------------------------
    로그인은 GET <a>, 로그아웃은 POST <form> — SameSite+POST 로 CSRF 강제 로그아웃을
-   막는다(GET 링크면 <img src> 로 남을 로그아웃시킬 수 있다). 버튼도 링크와 같은 무게로
-   보이게 .nav__link--btn 이 버튼 크롬(배경·테두리·폰트)만 지우고 크기·44px 하한은 .nav__link 가 준다. */
+   막는다(GET 링크면 <img src> 로 남을 로그아웃시킬 수 있다). 이 계약은 바꾸지 않는다.
+
+   위계: 내 이름·현재 페이지(--fg) > 이동 링크(--fg-muted) > 세션 컨트롤(--fg-muted + 밑줄).
+   예전엔 넷이 전부 700/--fg/14px 라 "이동"과 "세션 변경"이 구별되지 않았다. 로그인을 채운
+   잉크 CTA 로 올렸다가 되돌린 근거는 아래 .nav__signin 주석에 있다 — 무게는 목적지가
+   무엇을 열어 주는지에 비례해야 한다. */
+
+/* 토글+계정 묶음. .nav__inner 의 gap(16px)이 이 안의 gap(8px)보다 넓어야 두 그룹으로
+   읽힌다 — 두 값의 대소가 뒤집히면 헤더가 다시 세 조각이 된다.
+   min-width:0 를 **주지 않는다**: 0 이면 이 묶음이 콘텐츠 폭 아래로 짜부라지는데 안의
+   토글·인증은 전부 flex:0 0 auto 라 안 줄어, 남는 건 겹침뿐이다. 폭 압박은 브랜드가 진다. */
+.nav__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 로그인 전/후 공통 슬롯. 한때 여기 min-width 로 넓은 쪽(로그인 후 202px)을 예약해 두 상태의
+   폭을 같게 만들었지만 **걷어냈다.** 예약의 대가가 비로그인 상태에 그대로 남기 때문이다:
+   실측 1280px 에서 로그인 링크는 101.7px 인데 슬롯이 202px 라 왼쪽에 100.3px 빈 공간이 생기고,
+   nav 간격이 소개→게임 8 · 게임→토글 16 · 토글→로그인 **108** 로 마지막만 튀어 로그인만
+   혼자 떨어진 덩어리로 보였다(오너 지적). 빈 공간은 늘 보이고 예약이 막아 주던 이동은
+   로그인하는 순간 한 번 보인다 — 게다가 member 역할이 없어(이슈 #22) 로그인하는 사람은
+   관리자뿐이다. 다수 상태를 위해 극소수 상태의 이동을 받아들인다.
+   flex-end 는 남는 폭을 왼쪽으로 뺀다. 여유가 음수일 때(콘텐츠가 컨테이너보다 넓을 때) 그
+   넘침도 왼쪽으로 가는데 바로 옆이 .theme-toggle 이라 토글이 덮여 클릭이 안 됐다(실측
+   320~430px). 그래서 이 슬롯은 콘텐츠 폭 아래로 줄면 안 된다 — 아래 560px 블록이 min-width 를
+   0 이 아니라 auto(콘텐츠 기반 자동 최소 크기)로 되돌리는 이유다. */
 .nav__auth {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* 이름은 라벨이지 컨트롤이 아니다 — hover 반응을 일부러 주지 않는다. 클릭하면 뭔가
+   열릴 것처럼 보이는 순간 "눌러도 아무 일 없는 텍스트" 문제가 되살아난다. */
+/* flex:0 0 auto 가 필수다 — min-width:0 만 두면 좁은 nav 에서 이 래퍼가 0px 로 짜부라지고
+   안의 아바타(flex:0 0 auto, 26px)가 밖으로 흘러 로그아웃 글자 위에 겹쳐 그려진다(실측
+   400px 에서 재현). 폭이 발산하지 않는 근거는 자식 상한이다: 26 + 8 + 이름 6em. */
+.nav__user {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  flex: 0 0 auto;
   min-width: 0;
 }
-/* 채널명 — 긴 이름은 말줄임. --fg-muted 로 링크(--fg)보다 한 걸음 물러난다(표면 위 4.5:1↑). */
-.nav__user {
+/* 채널명 첫 글자 배지 — 치지직 users/me 는 프로필 이미지를 주지 않아 아바타를 그릴
+   데이터가 없다. 560px 이하에서 이름을 clip 한 뒤 남는 시각 단서는 **글자 한 개**다:
+   칩 채움(--wash-2)은 nav 표면 대비 라이트 1.23:1 · 다크 1.66:1 이라 원형 자체는 사실상
+   안 보인다. 정보를 지는 건 그 글자이고(--fg 는 칩 위 라이트 14.49:1 · 다크 8.70:1,
+   칩이 안 보여도 맨 nav 표면 위 17.76:1 · 14.41:1) aria-hidden 컨테이너는 독립 정보를
+   지지 않으므로 1.4.11 위반은 아니다.
+   **알파를 올려 칩을 보이게 만들 수는 없다** — 칩과 글자가 같은 잉크라 칩을 진하게 한
+   만큼 글자 대비가 정확히 깎인다(스윕: 다크 40% 에서 칩 3.37 인데 글자가 4.28 로 12px
+   게이트 4.5 아래로 떨어진다). 원형을 정말 보이게 하려면 채움이 아니라 테마 독립 링
+   (inset box-shadow)을 얹어야 한다 — 지금은 게이트를 넘으므로 값을 그대로 둔다.
+   26px 는 --nav-h 의 "최대 자식 44" 항 아래라 헤더 높이를 건드리지 않는다. */
+.nav__user-avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--wash-2);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+/* 상한을 ch 가 아니라 em 으로 잡는다 — ch 는 라틴 '0' 폭이라 한글이 몇 자 들어가는지
+   예측할 수 없다. 한글 글리프는 폰트와 무관하게 ~1em 이므로 상한은 **공백 포함** 글자
+   수로 읽어야 한다: 5em 이던 시절 사이트 주인공 이름 "챠이로 쿠냐"(공백 포함 6자)가
+   1280px 데스크톱에서까지 "챠이로 …"로 잘렸다(실측 name w=70, ellipsed). 6em 은 그
+   이름이 어절 공백까지 온전히 들어가는 최소 단이다.
+   이 값이 로그인 상태 계정 영역의 폭을 정한다: 아바타 26 + gap 8 + 이름 6em(84) + gap 8 +
+   "로그아웃"(4자 56 + 좌우 패딩 20) ≈ 202px. 아래 699px 배지 접기가 이 숫자에 걸려 있다. */
+.nav__user-name {
   font-family: var(--font-body);
+  font-weight: 500;
   font-size: var(--text-sm);
-  color: var(--fg-muted);
-  max-width: 14ch;
+  color: var(--fg);
+  max-width: 6em;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.nav__link--btn {
+/* 세션 컨트롤 두 개(로그인·로그아웃)가 같은 규칙을 쓴다. 로그인을 채운 잉크 CTA 에서
+   여기로 되돌린 이유: 지금 이 사이트에서 세션이 여는 UI 는 **관리자 전용 쓰기 세 개**
+   (게임 추가·삭제·카테고리 검색)뿐이고 core/authorities.ts 에 member 역할 자체가 없다.
+   일반 팬이 로그인해서 얻는 건 자기 이름과 로그아웃 버튼뿐이라, 헤더에서 가장 무거운
+   요소로 승격할 근거가 없다 — 목적지가 막다른 길인 버튼을 크게 그리면 위계가 거짓말이 된다.
+   member 에게 줄 payoff(응원 카운트 등)가 생기면 그때 다시 승격한다.
+
+   둘 다 세션을 바꾸지만 한 번 더 누르면 되돌아오는 액션이라 확인 다이얼로그가 아니라
+   "조용한 컨트롤"로 낮추는 게 비용에 맞다. 밑줄이 라벨(.nav__user-name)과 컨트롤을
+   가른다: 둘 다 밑줄 없는 텍스트면 어느 쪽이 눌리는지 알 수 없다.
+   글자 --fg-muted 실측 라이트 6.39:1 · 다크 6.76:1. min-height 44px 로 터치 하한을 지킨다
+   (가로는 "로그아웃" 4자 56px + 패딩 20px = 76px 라 44 를 넘는다). */
+.nav__signout,
+.nav__signin {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
   background: transparent;
   border: 0;
   cursor: pointer;
-  font-family: var(--font-body);
+  display: inline-flex;
+  align-items: center;
+  /* 같은 이유로 안 줄인다 — 줄면 nowrap 글자가 버튼 밖으로 흘러 아바타와 겹친다.
+     nav 가 좁아질 때 양보하는 건 브랜드다(min-width:0 + overflow:hidden + ellipsis 를 가진
+     유일한 자식). .nav__end·.nav__auth 는 min-width:0 를 갖지 않는다 — 가지면 컨테이너만
+     줄고 자식은 안 줄어 넘침이 토글을 덮는다. */
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  transition:
+    background var(--dur-base),
+    color var(--dur-base);
+}
+
+/* 밑줄은 **로그아웃에만** 있다. 근거가 "라벨(.nav__user-name)과 컨트롤을 가른다 — 둘 다
+   밑줄 없는 텍스트면 어느 쪽이 눌리는지 알 수 없다"인데, 그 라벨은 로그인 상태에만 존재한다.
+   비로그인 nav 에서 .nav__signin 은 이웃이 전부 링크(소개·게임)라 가를 대상이 없고, 밑줄만
+   혼자 달면 같은 무게의 이웃 사이에서 저 혼자 강조된다 — 실제로 그렇게 보인다는 지적을 받았다.
+   70% 알파는 45% 였을 때 밑줄 실효색이 nav 표면 대비 라이트 2.01:1 · 다크 2.40:1 로 사실상
+   안 보였기 때문이다(스윕 결과 70% 부터 양쪽 테마·양쪽 배경이 UI 3:1 을 넘는다:
+   라이트 3.24:1 / 줄 위 3.19, 다크 3.99:1 / 3.93). hover 에서만 진하게 하던 예전 값은
+   마우스 없는 터치 기기에서 영원히 2.01:1 이었다. */
+.nav__signout {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 70%, transparent);
+}
+.nav__signout:hover,
+.nav__signin:hover {
+  background: var(--wash-1);
+  color: var(--fg);
+}
+.nav__signout:hover {
+  text-decoration-color: currentColor;
 }
 
 /* 테마 토글 — 페이지 <style> 가 아니라 여기 살아서 모든 라우트에서 동일하게 동작한다
-   (페이지 레벨 transition 단축이 배경 이징을 조용히 떨군다). */
+   (페이지 레벨 transition 단축이 배경 이징을 조용히 떨군다).
+
+   실선 상자를 지운 이유: 위계상 가장 덜 중요한 컨트롤(외형 설정)이 헤더에서 유일한
+   1.5px 실선 + 채운 표면이라 가장 강하게 그려져 있었다. 아이콘은 그래픽 오브젝트라
+   3:1 만 요구하는데 --fg-muted 가 nav 표면 위 라이트 6.39:1 · 다크 6.76:1 로 두 배 이상
+   여유가 있다 — 상자 없이도 사라지지 않는다. 상태는 hover 워시와 포커스 링이 진다
+   (--focus 는 nav 표면 위 라이트 4.49:1 · 다크 9.66:1 로 테두리 없이도 보인다).
+   44×44 는 그대로다: --nav-h(70px) 유도의 "최대 자식 44" 항이자 터치 하한이고,
+   preflight 가 box-sizing:border-box 를 걸어 뒀으므로 테두리를 지워도 높이는 44px 이다. */
 .theme-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
   width: 44px;
   height: 44px;
   cursor: pointer;
-  background: var(--surface);
-  color: var(--fg);
-  border: 1.5px solid var(--border-strong);
+  background: transparent;
+  color: var(--fg-muted);
+  border: 0;
   border-radius: var(--radius-sm);
   transition:
     transform var(--dur-fast) var(--ease-paper),
-    background var(--dur-base);
+    background var(--dur-base),
+    color var(--dur-base);
 }
 .theme-toggle:hover {
+  background: var(--wash-1);
+  color: var(--fg);
   transform: translateY(-1px);
 }
 .theme-toggle:active {
@@ -456,6 +612,15 @@ h2.t-script {
   color: var(--fg-on-ink);
   border-color: var(--brand-ink);
 }
+/* 크기와 색은 **한 쌍이다 — 아래 두 줄을 따로 고치지 마라.** taupe 는 사진지 위 4.08:1
+   (라이트 흰 종이) / 3.34:1(다크 크림 섬)이라 WCAG 큰 텍스트 3:1 로만 통과하고, 25px 는
+   24px 경계를 딱 1px 넘긴 값이다. 캡션을 한 단계만 줄이면 기준이 4.5:1 로 뒤집혀 라이트·
+   다크가 동시에 미달한다 — 크기를 내려야 하면 색도 --fg-muted 로 같이 내린다(home 의
+   .snap 이 20px + --fg-muted 로 그렇게 한다).
+   한때 이 기본값을 --fg-muted 로 올려 두 값의 결합을 끊었지만 되돌렸다: 대비는 안전해져도
+   캡션이 landing 프로필에서 본문보다 진해져, 장식이어야 할 손글씨가 쿠냐의 정보보다 시선을
+   먼저 가져갔다. 접근성 게이트를 넘기는 것과 위계를 지키는 것은 다른 일이고, 여기선
+   게이트를 이미 넘고 있었다. */
 .polaroid figcaption {
   text-align: center;
   font-family: var(--font-hand);
@@ -575,21 +740,43 @@ h2.t-script {
 }
 
 /* ---- 반응형 nav --------------------------------------------------------- */
-@media (max-width: 560px) {
+
+/* VTUBER 배지를 560 이 아니라 여기서 먼저 접는다. 근거는 **로그인 상태의 계정 영역 폭**이다
+   (아바타+이름+로그아웃 ≈ 202px, 유도는 .nav__user-name 주석) — 슬롯 예약을 걷어낸 뒤에도
+   로그인하면 그만큼을 실제로 쓰므로 이 압박은 그대로다. 배지는 폭 64 + gap 16 = 80px 를
+   쓰는 순수 장식이고, 압박을 지는 건 브랜드 마크다. 실측 561px 로그인 후: 배지를 접으면
+   브랜드 100.5px, 안 접으면 20.2px 로 카오모지가 거의 통째로 잘린다. 둘 중 하나를 포기해야
+   하면 장식이 먼저다. 가로 넘침은 어느 쪽이든 안 난다(브랜드가 min-width:0 로 흡수한다). */
+@media (max-width: 699px) {
   .brand__tag {
     display: none;
   }
+}
+
+@media (max-width: 560px) {
   .nav__inner {
     gap: var(--space-2);
   }
+  /* 8 이 아니라 9 인 이유는 터치 하한이다 — 한글 2자 27.2px + 좌우 16 = 43.2px 로 44 를
+     0.8px 못 넘겼다(실측). 좌우 1px 씩만 올리면 45.2px 로 하한을 넘고, 이 폭대 nav 는
+     브랜드가 폭을 흡수하므로 링크 2개 ×2px 는 넘침을 만들지 않는다. */
   .nav__link {
-    padding: 6px 8px;
+    padding: 6px 9px;
   }
-  /* 좁은 nav 에선 채널명을 **시각적으로만** 접는다 — 로그아웃 버튼만 남겨 가로 넘침을 막되
-     (폰트 늦으면 한글이 전각 폴백으로 먼저 그려져 더 넓다), display:none 은 쓰지 않는다:
-     접근성 트리에서도 지워져 "누구로 로그인했는지"를 알 방법이 사라진다(title 툴팁은 정확히
-     이 폭대의 터치 기기에서 띄울 수 없다). clip 기법으로 스크린리더엔 계속 읽히게 둔다. */
-  .nav__user {
+  /* 예약 해제는 여기서 한다 — 이름을 clip 하고 라벨을 줄인 뒤엔 슬롯이 로그인 전 97px /
+     후 100px 라(실측) 링크가 3px 만 움직인다. 예약이 사 줄 게 없다.
+     0 이 아니라 auto 인 게 핵심이다: 0 이면 슬롯이 콘텐츠 폭 아래로 짜부라지고,
+     flex-end 라 그 넘침이 왼쪽 .theme-toggle 을 덮는다. */
+  .nav__auth {
+    min-width: auto;
+  }
+  /* 좁은 nav 에선 채널명 **글자만** 시각적으로 접는다 — 가로 넘침을 막되(폰트 늦으면
+     한글이 전각 폴백으로 먼저 그려져 더 넓다), display:none 은 쓰지 않는다: 접근성
+     트리에서도 지워져 "누구로 로그인했는지"를 알 방법이 사라진다(title 툴팁은 정확히
+     이 폭대의 터치 기기에서 띄울 수 없다). clip 기법으로 스크린리더엔 계속 읽힌다.
+     아바타(.nav__user-avatar, 26px)는 남긴다 — 예전엔 이름을 접는 순간 시각 사용자에게
+     로그인 정체성 단서가 하나도 안 남는 게 이 처리의 구멍이었다. */
+  .nav__user-name {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -600,10 +787,37 @@ h2.t-script {
     white-space: nowrap;
     border: 0;
   }
+  .nav__signout,
+  .nav__signin {
+    padding: 0 6px;
+  }
   /* 31px 손글씨가 360px nav 의 40% 를 먹었다 — 마크가 46px 로 커진 뒤엔 폰트가
      오면 ~1px 만 남았다. 작은 화면에서 워드마크를 한 단계 줄이면 로드 상태에
      ~19px 여유가 생긴다. */
   .brand__name {
     font-size: var(--text-xl);
+  }
+}
+
+/* 로그인 라벨에서 공급자 이름만 시각적으로 접는다. 근거는 브랜드 마크다 — 이 폭대에서
+   폭을 흡수하는 건 .brand 인데, "치지직 로그인"(97px)을 그대로 두면 320px 에서 브랜드
+   상자가 0px 까지 눌려 카오모지 마크가 통째로 사라졌다(실측). 42px 를 접으면 마크가
+   온전히 돌아온다(320px 에서 brand 44.7px, 마크 폭 46 에 거의 닿는다).
+   display:none 이 아니라 clip 인 이유: 접근 이름이 "로그인"으로 줄면 같은 목적지를 가진
+   다른 진입점과 이름이 갈라진다. 430 은 이 계산이 성립하는 상한이다.
+   로그인 **후**엔 접을 라벨이 없어 320px 에서 마크가 여전히 잘린다 — 허용값이다:
+   쓰기 권한은 allowlist 관리자뿐이라 그 조합은 사실상 관리자 전용이고, 잘린 마크가
+   겹친 마크보다 낫다는 .brand 의 계약은 그대로다. */
+@media (max-width: 430px) {
+  .nav__signin-brand {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
