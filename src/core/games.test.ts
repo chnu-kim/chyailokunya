@@ -2,42 +2,77 @@ import { describe, expect, it } from "vitest";
 import {
   ANGLE,
   axis,
+  formatDate,
   hash,
+  isDateOrderValid,
+  isDateString,
   isGameCategory,
-  isStatus,
   PATTERNS,
   ROT,
-  STATUS,
-  statusOf,
   type ChzzkCategory,
 } from "./games";
 
-describe("statusOf", () => {
-  it("알려진 상태를 그대로 돌려준다", () => {
-    expect(statusOf("playing")).toBe(STATUS.playing);
-    expect(statusOf("cleared").label).toBe("클리어");
+describe("isDateString", () => {
+  it("정상 YYYY-MM-DD 는 통과", () => {
+    expect(isDateString("2026-07-20")).toBe(true);
+    expect(isDateString("2024-02-29")).toBe(true); // 윤년
+    expect(isDateString("1999-12-31")).toBe(true);
   });
 
-  it("프로토타입 체인 키는 played 로 떨어진다(대괄호 조회 함정)", () => {
-    // 'constructor'·'toString' 은 STATUS 자기 속성이 아니라 Object 프로토타입에 있다.
-    expect(statusOf("constructor")).toBe(STATUS.played);
-    expect(statusOf("toString")).toBe(STATUS.played);
-    expect(statusOf("__proto__")).toBe(STATUS.played);
+  it("실재하지 않는 날짜는 거절 — Date 파싱이 조용히 굴리는 값들", () => {
+    // 형식만 보면 전부 통과한다. new Date('2026-02-31') 은 3/3 으로 굴러가므로
+    // 되돌려 찍은 문자열 비교가 없으면 이 값들이 DB 에 들어간다.
+    expect(isDateString("2026-02-31")).toBe(false);
+    expect(isDateString("2026-02-30")).toBe(false);
+    expect(isDateString("2025-02-29")).toBe(false); // 평년
+    expect(isDateString("2026-04-31")).toBe(false);
+    expect(isDateString("2026-13-01")).toBe(false);
+    expect(isDateString("2026-00-10")).toBe(false);
+    expect(isDateString("2026-07-00")).toBe(false);
+    expect(isDateString("2026-07-32")).toBe(false);
   });
 
-  it("모르는 상태도 played", () => {
-    expect(statusOf("nope")).toBe(STATUS.played);
+  it("형식이 어긋나면 거절", () => {
+    for (const bad of ["2026-7-20", "26-07-20", "2026/07/20", "2026-07-20T00:00:00Z", "", "  "]) {
+      expect(isDateString(bad)).toBe(false);
+    }
+  });
+
+  it("문자열이 아니면 거절", () => {
+    expect(isDateString(null)).toBe(false);
+    expect(isDateString(undefined)).toBe(false);
+    expect(isDateString(20260720)).toBe(false);
+    expect(isDateString(new Date())).toBe(false);
+  });
+
+  it("미래 날짜도 통과한다(발매 예정작을 미리 올릴 수 있다)", () => {
+    expect(isDateString("2099-01-01")).toBe(true);
   });
 });
 
-describe("isStatus", () => {
-  it("알려진 상태만 인정, 프로토타입 키·비문자열은 거절", () => {
-    expect(isStatus("playing")).toBe(true);
-    expect(isStatus("played")).toBe(true);
-    expect(isStatus("constructor")).toBe(false);
-    expect(isStatus("nope")).toBe(false);
-    expect(isStatus(7)).toBe(false);
-    expect(isStatus(null)).toBe(false);
+describe("formatDate", () => {
+  it("점 구분 표기로 바꾼다", () => {
+    expect(formatDate("2026-07-20")).toBe("2026.07.20");
+    expect(formatDate("1999-12-31")).toBe("1999.12.31");
+  });
+});
+
+describe("isDateOrderValid", () => {
+  it("클리어가 플레이보다 뒤면(또는 같으면) 참", () => {
+    expect(isDateOrderValid("2026-07-01", "2026-07-20")).toBe(true);
+    expect(isDateOrderValid("2026-07-20", "2026-07-20")).toBe(true); // 하루만에 클리어
+  });
+
+  it("클리어가 플레이보다 앞서면 거짓", () => {
+    expect(isDateOrderValid("2026-07-20", "2026-07-19")).toBe(false);
+    // 사전순 비교라 연·월 경계도 잡혀야 한다.
+    expect(isDateOrderValid("2026-01-01", "2025-12-31")).toBe(false);
+  });
+
+  it("한쪽이 null 이면 비교할 게 없어 참 — 플레이 없이 클리어만 아는 경우도 허용", () => {
+    expect(isDateOrderValid(null, "2026-07-20")).toBe(true);
+    expect(isDateOrderValid("2026-07-20", null)).toBe(true);
+    expect(isDateOrderValid(null, null)).toBe(true);
   });
 });
 

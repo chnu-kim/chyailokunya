@@ -1,5 +1,5 @@
 /* v1 데이터 모델(ADR-0014). 네 테이블 모두 surrogate 정수 PK — 이식성·외부 식별자 비노출
-   ·균일 조인. enum 값은 core 상수(STATUS_KEYS·ROLES)에서 끌어와 타입·DB CHECK 가 한 원천을
+   ·균일 조인. enum 값은 core 상수(ROLES)에서 끌어와 타입·DB CHECK 가 한 원천을
    공유한다. 초기 마이그레이션엔 무결성 제약(PK·UNIQUE·CHECK·FK)만 넣는다 — 정렬·필터용
    성능 인덱스는 v1(<100행)에서 측정 불가라 검색 feature 이슈로 미룬다(ADR-0014). */
 
@@ -14,7 +14,6 @@ import {
   unique,
 } from "drizzle-orm/sqlite-core";
 import { ROLES } from "@/core/authorities";
-import { STATUS_KEYS } from "@/core/games";
 
 /* 모든 타임스탬프는 epoch ms(정수)로 저장한다 — SQLite 엔 offsetDateTime/timestamptz 가
    없다. KST 는 표시 경계에서 Asia/Seoul 포매터로 보장한다(한국은 DST 없어 고정 +9).
@@ -110,29 +109,35 @@ export const roleAuditLogs = sqliteTable(
   ],
 );
 
-/* 치지직 카테고리 스냅샷 보드(ADR-0015). category API 4필드를 denormalize 해 공개 읽기가
-   외부 API·인증에 무관하게 한다. status·played_at·cleared_at 은 치지직이 주지 않는 우리
-   도메인(플레이 상태·이력): 둘 다 null=예정 / played_at만=플레이중·플레이함 / cleared_at
-   까지=클리어. 삭제는 하드 삭제(deleted_at 없음) — 되돌리기는 클라이언트 지연 커밋이라
-   서버에 삭제 상태를 영속시킬 필요가 없다. */
+/* 게임 보드(ADR-0015). 치지직 category API 스냅샷을 denormalize 해 공개 읽기가 외부 API·
+   인증에 무관하게 한다. played_at·cleared_at 은 치지직이 주지 않는 우리 도메인이고,
+   **이 둘이 상태의 정본**이다 — 별도 status 컬럼은 드롭했다(날짜와 어긋난 상태가 저장
+   가능했다). 클리어 = cleared_at IS NOT NULL.
+
+   두 날짜는 정수 epoch 가 아니라 text 'YYYY-MM-DD' 다: 시각이 아니라 달력의 하루라
+   타임존이 개입하면 KST 자정 근처에서 하루가 밀린다(core/games.ts 주석). 사전순 =
+   시간순이라 ORDER BY 도 그대로 선다.
+
+   category_id 는 nullable — 치지직 검색에 없는 게임을 손으로 넣을 수 있어야 한다(그땐
+   외부 키가 없다). UNIQUE 는 유지한다: SQLite 는 NULL 중복을 허용하므로 "한 치지직
+   카테고리 = 보드 1회"는 그대로 서고 수동 입력만 제약 밖으로 빠진다.
+
+   삭제는 하드 삭제(deleted_at 없음) — 되돌리기는 클라이언트 지연 커밋이라 서버에 삭제
+   상태를 영속시킬 필요가 없다. */
 export const games = sqliteTable(
   "games",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    categoryId: text("category_id").notNull().unique(),
+    categoryId: text("category_id").unique(),
     categoryType: text("category_type", { enum: ["GAME"] }).notNull(),
     categoryValue: text("category_value").notNull(),
     posterImageUrl: text("poster_image_url"),
-    status: text("status", { enum: STATUS_KEYS }).notNull().default("played"),
-    playedAt: integer("played_at"),
-    clearedAt: integer("cleared_at"),
+    playedAt: text("played_at"),
+    clearedAt: text("cleared_at"),
     createdAt: createdAt(),
     lastUpdatedAt: lastUpdatedAt(),
   },
-  (t) => [
-    check("games_category_type", sql`${t.categoryType} = 'GAME'`),
-    check("games_status", sql`${t.status} IN ('playing', 'cleared', 'planned', 'played')`),
-  ],
+  (t) => [check("games_category_type", sql`${t.categoryType} = 'GAME'`)],
 );
 
 /* 자체 세션 refresh 토큰(ADR-0017). access 는 stateless(EdDSA JWT, DB 무관)라 여기 없다 —

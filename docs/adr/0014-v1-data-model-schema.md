@@ -53,6 +53,8 @@ users_roles       역할 "부여(grant)" M:N. 상승 역할만 저장.
   -- superadmin 만 role:manage 를 가짐 → 상승 가드가 구조적.
 
 games             치지직 카테고리 스냅샷 보드. (ADR-0015)
+                  ※ 이 절은 ADR-0019 가 대체했다 — 현행 스키마는 그쪽을 본다.
+                     아래는 v1 최초 설계의 기록이다(status 컬럼·epoch 날짜·category_id NOT NULL).
   id                integer PK
   category_id       text NOT NULL   UNIQUE     -- 치지직 categoryId. 한 카테고리 = 보드 1회
   category_type     text NOT NULL   CHECK(category_type = 'GAME')   -- 보드는 GAME 만
@@ -65,6 +67,7 @@ games             치지직 카테고리 스냅샷 보드. (ADR-0015)
   created_at        integer(ms) NOT NULL       -- 레코드 생성(앱 자동)
   last_updated_at   integer(ms) NOT NULL       -- 레코드 수정(앱 자동)
   -- played_at/cleared_at 둘 다 null=예정, played_at만=플레이중/플레이함, cleared_at까지=클리어.
+  -- ↑ 한 사실을 status 와 날짜에 두 번 적고 있었다. 그 중복이 ADR-0019 의 출발점이다.
 ```
 
 세부 결정:

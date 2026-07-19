@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     images: [OG_IMAGE],
     url: "/games",
     title: "챠이로 쿠냐 — 플레이한 게임",
-    description: "방송에서 플레이한 게임 보드. 상태로 골라보세요.",
+    description: "방송에서 플레이한 게임 보드. 최근에 플레이한 순서로 서 있어요.",
   },
 };
 

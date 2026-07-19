@@ -43,6 +43,13 @@
       "when": 1784390880526,
       "tag": "0005_fast_expediter",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784477657824,
+      "tag": "0006_quick_rage",
+      "breakpoints": true
     }
   ]
 }

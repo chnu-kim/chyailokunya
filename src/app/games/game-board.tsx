@@ -1,15 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ANGLE, axis, PATTERNS, ROT, statusOf, type Status } from "@/core/games";
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { ANGLE, axis, formatDate, PATTERNS, ROT } from "@/core/games";
 import type { GameRow } from "@/db";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
+import {
+  DateFields,
+  GameDialog,
+  messageFor,
+  REQUEST_TIMEOUT_MS,
+  useDatePair,
+  WRITE_UNCERTAIN_MESSAGE,
+} from "./game-dialog";
 
 /* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
-   상태 필터 + 쓰기(추가·삭제)를 한다. 쓰기는 tRPC 뮤테이션(서버 인가가 정본)을 부르고 로컬
+   쓰기(추가·날짜 수정·삭제)를 한다. 쓰기는 tRPC 뮤테이션(서버 인가가 정본)을 부르고 로컬
    상태를 낙관적으로 갱신한다. canWrite/canDelete 는 버튼 노출용 편의일 뿐 — 권한 없이 눌러도
    서버가 FORBIDDEN 으로 막는다(불변식 3). localStorage 다중탭 경합은 서버 권위로 사라졌다.
+
+   상태 필터 줄이 있었다. status 컬럼이 사라지며 같이 없앴다 — 걸러 볼 축이 날짜뿐인데
+   서버 정렬이 이미 플레이한 날 내림차순이라, 필터는 같은 정보를 두 번째 조작으로 되풀이했다.
 
    쓰기 권한이 없으면 추가 슬롯 자리에 **아무것도 그리지 않는다.** 잠긴 칸도, 보드 뒤 각주도
    두지 않는다: "방문자는 자기가 못 하는 걸 알아야 한다"는 근거가 언젠가 권한을 가질 사람에게만
@@ -21,21 +32,9 @@ import { GameComposer } from "./game-composer";
    delete 뮤테이션은 타이머가 만료될 때 처음 나간다. 되돌리면 서버를 아예 건드리지 않으므로
    games 에 deleted_at 이 필요 없다 — 하드 삭제의 근거가 이 흐름이다. */
 
-type Filter = "all" | Status;
-
 /* 자국의 두 단계. undoable = 타이머가 도는 중(되돌릴 수 있다), committing = 삭제 뮤테이션이
    이미 나갔다(되돌릴 수 없으므로 버튼을 잠근다). */
 type GhostState = "undoable" | "committing";
-
-const matches = (g: GameRow, f: Filter) => f === "all" || g.status === f;
-
-const FILTERS: { value: Filter; label: string; odId: string }[] = [
-  { value: "all", label: "전체", odId: "filter-all" },
-  { value: "playing", label: "플레이중", odId: "filter-playing" },
-  { value: "cleared", label: "클리어", odId: "filter-cleared" },
-  { value: "played", label: "플레이함", odId: "filter-played" },
-  { value: "planned", label: "예정", odId: "filter-planned" },
-];
 
 /* 되돌릴 수 있는 창. 토스트 관례(5~7초) 안에서, 키보드로 되돌리기 버튼까지 가서 누를 여유를
    두고 6초. 이 시간이 지나야 서버에 삭제가 나간다. */
@@ -44,6 +43,15 @@ const UNDO_MS = 6000;
 // --rest-rot/--thumb-a 같은 CSS 커스텀 속성을 인라인 style 로 넘길 때의 타입 우회.
 function cssVars(vars: Record<string, string | number>): CSSProperties {
   return vars as CSSProperties;
+}
+
+/* 카드의 날짜 한 줄. **플레이한 날만 싣는다** — 이 보드가 답하는 질문이 "무엇을 언제 플레이했나"
+   라서, 정렬 기준도 카드에 뜨는 날짜도 같은 하나여야 한다. 한때 플레이한 날이 없는 행에 클리어
+   날짜를 대신 실었는데, 그러면 카드마다 다른 축의 날짜가 섞여 정렬이 어긋나 보였다(클리어 날짜가
+   더 늦은데 카드는 뒤에 선다). 클리어는 날짜가 아니라 칩이 맡는다.
+   플레이한 날이 없으면 호출부가 줄 자체를 안 그린다(null 반환). */
+function dateLabel(g: GameRow): string | null {
+  return g.playedAt ? formatDate(g.playedAt) + " 플레이" : null;
 }
 
 export function GameBoard({
@@ -56,9 +64,11 @@ export function GameBoard({
   canDelete: boolean;
 }) {
   const [games, setGames] = useState(initialGames);
-  const [filter, setFilter] = useState<Filter>("all");
   const [announcement, setAnnouncement] = useState("");
   const [composing, setComposing] = useState(false);
+  // 날짜를 고치는 중인 행. 행 전체를 들고 있는 이유: 모달이 제목·포스터로 "무엇을 고치는지"를
+  // 다시 보여줘야 하고, id 만 들면 목록에서 매번 되찾아야 한다.
+  const [editing, setEditing] = useState<GameRow | null>(null);
   /* 지연 커밋 대기 중인 카드(자국으로 렌더). 행 자체는 games 에 남아 있어야 되돌릴 수 있다.
      상태를 Set 둘이 아니라 Map 하나로 두는 이유: "커밋 중"은 늘 "자국"의 부분집합이라 둘을
      따로 들면 불가능한 조합(커밋 중인데 자국 아님)이 타입에 남는다. "committing" 은 뮤테이션이
@@ -106,27 +116,18 @@ export function GameBoard({
     }
   }
 
-  function onFilter(f: Filter, label: string) {
-    setFilter(f);
-    // 아직 안 소비된 포커스 예약을 버린다 — 안 그러면 나중에 그 카드가 다시 렌더될 때
-    // 방금 누른 필터 칩에서 포커스를 낚아챈다.
-    pendingFocus.current = null;
-    // 렌더 본문의 live 를 그대로 읽는다 — 손으로 재현하면 자국 취급 규칙이 바뀔 때 화면과
-    // 안내가 어긋난다(총계는 맞는데 announce 만 틀리는 식).
-    const count = live.filter((g) => matches(g, f)).length;
-    setAnnouncement(
-      f === "all" ? "전체 " + live.length + "개 표시" : label + " " + count + "개 표시",
-    );
-  }
-
   function onAdded(row: GameRow) {
-    // 최신 추가가 위로(구 보드의 prepend). 서버 정본과 같은 정렬.
+    // 최신 추가가 위로(구 보드의 prepend). 서버 정본과 같은 정렬은 아니지만(날짜순) 다음
+    // 새로고침이 맞춰 준다 — 방금 붙인 카드는 눈에 보이는 자리에 있어야 한다.
     setGames((prev) => [row, ...prev]);
     setComposing(false);
-    // 필터가 걸려 있으면 방금 붙인 카드가 화면에 안 나타난다 — "추가됨"이라 알려 놓고 그리드는
-    // 그대로인 모순을 피하려고, 새 행이 현재 필터에 안 걸리면 전체로 되돌린다.
-    setFilter((f) => (f === "all" || f === row.status ? f : "all"));
     setAnnouncement(row.categoryValue + " 추가됨");
+  }
+
+  function onUpdated(row: GameRow) {
+    setGames((prev) => prev.map((g) => (g.id === row.id ? row : g)));
+    setEditing(null);
+    setAnnouncement(row.categoryValue + " 날짜 수정됨");
   }
 
   // 삭제 클릭 = 자국으로 바꾸고 타이머만 건다. 뮤테이션은 여기서 안 나간다(ADR-0014).
@@ -158,7 +159,8 @@ export function GameBoard({
     const undoEl = btnRefs.current.get("undo:" + id);
     const hadFocus = !!undoEl && document.activeElement === undoEl;
     try {
-      await trpc.games.remove.mutate({ id });
+      // 삭제도 상한을 건다 — 안 끊기면 자국이 "지우는 중"으로 굳어 카드가 영영 안 돌아온다.
+      await trpc.games.remove.mutate({ id }, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       setGames((prev) => prev.filter((g) => g.id !== id));
       setGhost(id, null);
       setAnnouncement(name + " 삭제됨");
@@ -172,14 +174,9 @@ export function GameBoard({
   }
 
   // 자국(삭제 대기)은 아직 지워지지 않았지만 사용자에겐 "뗀 것"이라 세지 않는다 — 안 그러면
-  // 6초 뒤 아무것도 안 눌렀는데 총계가 혼자 줄어든다.
+  // 6초 뒤 아무것도 안 눌렀는데 총계가 혼자 줄어든다. 자국 카드 자체는 계속 렌더한다 —
+  // 그리드에서 사라지면 타이머만 남아 되돌릴 수 없는 하드 삭제가 된다.
   const live = games.filter((g) => !ghosts.has(g.id));
-  const shown = live.filter((g) => matches(g, filter));
-  // 자국은 필터와 무관하게 계속 렌더한다 — 필터를 바꿨다고 되돌릴 UI 가 사라지면 타이머만
-  // 남아 되돌릴 수 없는 하드 삭제가 된다(ADR-0014 의 되돌림 창 계약이 깨진다).
-  const list = games.filter((g) => ghosts.has(g.id) || matches(g, filter));
-  const showEmpty = list.length === 0;
-  const boardEmpty = live.length === 0;
 
   return (
     <>
@@ -189,24 +186,19 @@ export function GameBoard({
           <div className="head__row">
             <h1 data-od-id="play-log-title">플레이한 게임</h1>
             <span className="head__count">
-              {filter === "all" ? (
-                <>
-                  총 <b>{live.length}</b>개
-                </>
-              ) : (
-                <>
-                  <b>{shown.length}</b> / {live.length}개 표시
-                </>
-              )}
+              총 <b>{live.length}</b>개
             </span>
           </div>
           <p className="head__lead">
-            챠이로 쿠냐가 방송에서 플레이한 게임 보드입니다. 상태로 골라보세요.
+            챠이로 쿠냐가 방송에서 플레이한 게임 보드입니다. 최근에 플레이한 순서로 서 있어요.
           </p>
         </div>
       </section>
 
       {composing && <GameComposer onAdded={onAdded} onClose={() => setComposing(false)} />}
+      {editing && (
+        <GameDateEditor game={editing} onUpdated={onUpdated} onClose={() => setEditing(null)} />
+      )}
 
       {/* BOARD */}
       <section className="board" aria-labelledby="board-h2">
@@ -215,32 +207,11 @@ export function GameBoard({
             게임 목록
           </h2>
 
-          <div
-            className="filters"
-            role="group"
-            aria-label="상태로 거르기"
-            data-od-id="status-filters"
-          >
-            {FILTERS.map((f) => (
-              <button
-                key={f.value}
-                className="fchip"
-                type="button"
-                aria-pressed={filter === f.value}
-                data-od-id={f.odId}
-                onClick={() => onFilter(f.value, f.label)}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
           <div className="games" data-od-id="game-grid">
             {/* 붙이기는 드물고 사적인 행동이라 상시 폭을 먹는 접수창구 대신, 그리드 첫 칸에
-                빈 폴라로이드 한 장을 꺼내 붙이는 은유. 필터가 걸려도 늘 첫 칸이라 이 상태에
-                게임이 하나도 없어도 붙일 자리가 남는다. 쓸 수 있는 사람에게만 그린다 — 못 쓰는
-                사람에게 남기던 잠긴 칸은 보드 뒤 각주(.board-note)로 내렸다. 버튼 노출은
-                편의일 뿐이고 진짜 방어선은 서버 인가다(불변식 3). */}
+                빈 폴라로이드 한 장을 꺼내 붙이는 은유. 쓸 수 있는 사람에게만 그린다 — 못 쓰는
+                사람에게 남기던 잠긴 칸은 없앴다. 버튼 노출은 편의일 뿐이고 진짜 방어선은
+                서버 인가다(불변식 3). */}
             {canWrite && (
               <button
                 className="addslot"
@@ -257,7 +228,7 @@ export function GameBoard({
                 <span className="addslot__label">게임 추가</span>
               </button>
             )}
-            {list.map((g) => {
+            {games.map((g) => {
               // 뗀 자리 — 커밋 전이라 행은 아직 살아 있다. 기울기는 .game--ghost 가 0 으로
               // 되돌리므로 인라인 --rest-rot 을 주지 않는다(인라인이 클래스를 이긴다).
               if (ghosts.has(g.id)) {
@@ -287,11 +258,14 @@ export function GameBoard({
                 );
               }
 
-              const st = statusOf(g.status);
               // 카드 정체성(기울기·패턴·각도)은 안정 id 해시로 고른다 — 정수 PK 를 문자열로.
               const key = String(g.id);
               const rot = ROT[axis(key, "rot", ROT.length)] ?? ROT[0];
               const ang = ANGLE[axis(key, "ang", ANGLE.length)] ?? ANGLE[0];
+              const label = dateLabel(g);
+              /* 날짜 줄은 플레이한 날만 실으므로 칩이 클리어를 홀로 맡는다 — 플레이한 날을
+                 모르는 채 클리어만 아는 행도 칩으로는 그 사실을 말할 수 있어야 한다. */
+              const showCleared = g.clearedAt !== null;
               return (
                 <div
                   key={g.id}
@@ -311,8 +285,8 @@ export function GameBoard({
                         src={g.posterImageUrl}
                         alt=""
                         loading="lazy"
-                        width={160}
-                        height={120}
+                        width={180}
+                        height={240}
                       />
                     ) : (
                       <>
@@ -324,23 +298,41 @@ export function GameBoard({
                     )}
                   </div>
                   <div className="game__body">
-                    <div className="game__top">
-                      <h3 className="game__name">{g.categoryValue}</h3>
-                      <span className={"chip " + st.cls}>{st.label}</span>
-                    </div>
-                    {/* 삭제는 3차 액션 — 44px 히트 영역이되 투명·작은 글자라 시각 무게가 없다.
-                        휴지통 아이콘은 .game__del::before 가 그린다. 서버가 인가를 다시 검사한다. */}
-                    {canDelete && (
-                      <button
-                        className="game__del"
-                        type="button"
-                        ref={(el) => registerBtn("del:" + g.id, el)}
-                        data-od-id={"game-del-" + g.id}
-                        onClick={() => onRemove(g.id, g.categoryValue)}
-                      >
-                        <span className="sr-only">{g.categoryValue + " "}</span>
-                        삭제
-                      </button>
+                    <h3 className="game__name">{g.categoryValue}</h3>
+                    {(label || showCleared) && (
+                      <p className="game__when" data-od-id={"game-when-" + g.id}>
+                        {label && <span className="game__date">{label}</span>}
+                        {showCleared && <span className="chip chip--ok">클리어</span>}
+                      </p>
+                    )}
+                    {/* 수정·삭제는 3차 액션 — 44px 히트 영역이되 투명·작은 글자라 시각 무게가
+                        없다. 아이콘은 ::before 가 그린다. 서버가 인가를 다시 검사한다. */}
+                    {(canWrite || canDelete) && (
+                      <div className="game__acts">
+                        {canWrite && (
+                          <button
+                            className="game__edit"
+                            type="button"
+                            data-od-id={"game-edit-" + g.id}
+                            onClick={() => setEditing(g)}
+                          >
+                            <span className="sr-only">{g.categoryValue + " "}</span>
+                            날짜 수정
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            className="game__del"
+                            type="button"
+                            ref={(el) => registerBtn("del:" + g.id, el)}
+                            data-od-id={"game-del-" + g.id}
+                            onClick={() => onRemove(g.id, g.categoryValue)}
+                          >
+                            <span className="sr-only">{g.categoryValue + " "}</span>
+                            삭제
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -348,14 +340,14 @@ export function GameBoard({
             })}
           </div>
 
-          {showEmpty && (
+          {/* 빈 상태의 판정 집합은 총계(live)가 아니라 **그리드가 실제로 그리는 집합**(games)이다.
+              자국도 카드로 렌더되므로, live 로 판정하면 마지막 한 장을 뗀 6초 동안 되돌리기가
+              달린 자국 바로 아래에 "등록된 게임이 없어요"가 같이 뜬다 — 아직 안 지운 카드를
+              놓고 없다고 말하는 화면이 된다. 총계는 반대로 live 가 맞다(위 주석). */}
+          {games.length === 0 && (
             <div className="grid-empty" data-od-id="game-grid-empty">
               <span className="t-hand">텅 비었네냥…</span>
-              <span>
-                {boardEmpty
-                  ? "아직 등록된 게임이 없어요."
-                  : "이 상태의 게임이 없어요. 다른 필터를 골라보세요."}
-              </span>
+              <span>아직 등록된 게임이 없어요.</span>
             </div>
           )}
 
@@ -365,5 +357,113 @@ export function GameBoard({
         </div>
       </section>
     </>
+  );
+}
+
+/* 날짜 수정 모달. 고칠 수 있는 건 날짜 두 개뿐이라 제목·포스터는 "무엇을 고치는지" 확인용으로만
+   싣는다(게임 자체를 바꾸려면 떼고 다시 붙인다 — categoryId 가 정본 키라 갈아끼우면 중복
+   방지가 무너진다). 서버 updateGameInput 은 부분 패치가 아니라 두 날짜를 늘 함께 받는다. */
+function GameDateEditor({
+  game,
+  onUpdated,
+  onClose,
+}: {
+  game: GameRow;
+  onUpdated: (row: GameRow) => void;
+  onClose: () => void;
+}) {
+  const { dates, setDates, orderError } = useDatePair({
+    playedAt: game.playedAt ?? "",
+    clearedAt: game.clearedAt ?? "",
+  });
+  const [error, setError] = useState("");
+  // 닫기 신호와 인계할 행. 컴포저와 같은 이유로 성공 즉시 onUpdated 를 부르지 않는다 —
+  // 부모가 같은 커밋에서 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
+  const [closing, setClosing] = useState(false);
+  const [saved, setSaved] = useState<GameRow | null>(null);
+  const [saving, startSave] = useTransition();
+
+  function onSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (orderError) return;
+    startSave(async () => {
+      setError("");
+      try {
+        // 빈 문자열 → null 전처리의 정본은 서버 updateGameInput(Zod)이다 — 여기서 다시 하지 않는다.
+        const row = await trpc.games.update.mutate(
+          {
+            id: game.id,
+            playedAt: dates.playedAt,
+            clearedAt: dates.clearedAt,
+          },
+          // 상한이 없으면 saving 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
+          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
+        );
+        setSaved(row);
+        setClosing(true);
+      } catch (e) {
+        setError(messageFor(e, WRITE_UNCERTAIN_MESSAGE, WRITE_UNCERTAIN_MESSAGE));
+      }
+    });
+  }
+
+  return (
+    <GameDialog
+      title="날짜 수정"
+      odId="date-editor"
+      closing={closing}
+      busy={saving}
+      onClose={() => (saved ? onUpdated(saved) : onClose())}
+    >
+      <form className="composer__detail" onSubmit={onSave}>
+        <p className="composer__hint">비워 두면 “모름”으로 남아요.</p>
+
+        <div className="composer__chosen" data-od-id="date-editor-game">
+          {game.posterImageUrl ? (
+            <img
+              className="composer__poster composer__poster--lg"
+              src={game.posterImageUrl}
+              alt=""
+              width={72}
+              height={96}
+            />
+          ) : (
+            <span className="composer__noposter composer__poster--lg" aria-hidden="true">
+              {game.categoryValue.charAt(0)}
+            </span>
+          )}
+          <span className="composer__chosenname">{game.categoryValue}</span>
+        </div>
+
+        <DateFields dates={dates} onChange={setDates} idPrefix="editor-date" />
+
+        {(orderError || error) && (
+          <p className="err" role="alert">
+            {orderError || error}
+          </p>
+        )}
+
+        <div className="composer__actions">
+          <button
+            className="btn btn--secondary composer__btn"
+            type="button"
+            data-od-id="date-editor-cancel"
+            // 저장이 날아가는 동안은 취소도 막는다 — 닫기와 같은 인계 경쟁이다(GameDialog 주석).
+            disabled={saving}
+            onClick={() => setClosing(true)}
+          >
+            취소
+          </button>
+          <button
+            className="btn btn--primary composer__btn"
+            type="submit"
+            disabled={saving || !!orderError}
+            data-od-id="date-editor-submit"
+          >
+            {saving ? "저장 중…" : "저장"}
+          </button>
+        </div>
+      </form>
+    </GameDialog>
   );
 }
