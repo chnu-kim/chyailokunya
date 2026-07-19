@@ -5,63 +5,13 @@ import { isDateOrderValid } from "@/core/games";
 import type { DatePair } from "@/core/games-composer";
 
 /* 게임 보드의 모달 키트 — 컴포저(추가)와 날짜 수정이 둘 다 쓴다. 두 번째 호출자가 생기면서
-   드러난 seam 이라 여기로 뺐다(ADR-0010 의 JIT 추상화). 담는 건 셋이다: 네이티브 dialog 셸,
-   tRPC 에러 코드 → 한국어 문구, 그리고 플레이/클리어 날짜 한 쌍의 입력.
+   드러난 seam 이라 여기로 뺐다(ADR-0010 의 JIT 추상화). 담는 건 둘이다: 네이티브 dialog 셸과
+   플레이/클리어 날짜 한 쌍의 입력. 실패 문구는 error-message.ts 로 나갔다 — 이 파일이 React 를
+   끌어와 단위 테스트가 안 붙었고, 그래서 "400 에 네트워크 탓 문구가 뜨는" 결함이 테스트 없이
+   프로덕션까지 갔다.
 
    표면이 .paper 인 이유: .polaroid 는 --border-strong 을 안 되돌려 다크에서 입력 테두리가
    크림 위 1.01:1 로 사라진다. .paper 위에선 14.3:1 이라 폼은 반드시 이쪽에 올린다. */
-
-/* 모든 tRPC 호출에 거는 상한. 이 값이 없으면 promise 가 settle 을 안 하는 경우(Workers 응답
-   지연, 프록시가 소켓을 붙잡은 채 놓지 않음)에 useTransition 의 pending 이 영영 안 내려간다 —
-   쓰기 중엔 busy 가 X·배경·Esc·뒤로·취소를 전부 잠그므로 새로고침이 유일한 탈출이 되고, 그건
-   사용자가 방금 입력한 날짜를 버린다. reject 는 기존 catch 가 잡지만 "끝나지 않음"은 아무도
-   안 잡으므로 상한이 유일한 방어선이다.
-
-   15초인 이유: 사용자가 "멈췄다"고 느끼기 전에는 풀려야 하고(그 체감은 대략 10초대 초반부터
-   시작한다), 느린 모바일 회선의 **정상** 왕복은 넘겨야 한다 — 짧게 잡으면 성공할 요청을
-   끊어 아래 "저장됐을 수도 있다" 상태를 우리가 만들어 낸다. */
-export const REQUEST_TIMEOUT_MS = 15_000;
-
-/* AbortSignal.timeout 은 AbortError 가 아니라 **TimeoutError** DOMException 으로 끊는다. 둘 다
-   본다 — 앞으로 사용자 취소(AbortError)를 붙여도 같은 분기로 들어오게. tRPC 는 원인을 감싸
-   던지므로 cause 체인을 끝까지 훑는다(D1 의 UNIQUE 를 찾을 때와 같은 이유). */
-function isAborted(e: unknown): boolean {
-  for (let cur = e; cur; cur = (cur as { cause?: unknown }).cause) {
-    const name = (cur as { name?: string }).name;
-    if (name === "TimeoutError" || name === "AbortError") return true;
-  }
-  return false;
-}
-
-/* tRPC 에러 **코드**로 분기한다 — 서버 문구 매칭(msg.includes("이미"))은 문구를 다듬는 순간
-   조용히 죽는다. 세션 만료·권한 없음은 재시도로 안 풀리므로 실행 가능한 조치를 안내한다. */
-export function messageFor(
-  e: unknown,
-  fallback: string,
-  /* 상한에 걸려 끊겼을 때의 문구. 기본값은 **읽기**(검색) 기준이라 "실패"를 말해도 거짓이
-     아니지만, 쓰기는 호출부가 직접 넘긴다 — 아래 주석을 보라. */
-  timeoutMessage = "네트워크가 느린 것 같아요. 잠시 후 다시 시도해 주세요.",
-): string {
-  if (isAborted(e)) return timeoutMessage;
-  const code = (e as { data?: { code?: string } } | null)?.data?.code;
-  if (code === "CONFLICT") return "이미 보드에 있는 게임이에요.";
-  if (code === "NOT_FOUND") return "보드에 없는 게임이에요. 새로고침해 주세요.";
-  if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
-    return "로그인이 만료됐거나 권한이 없어요. 다시 로그인해 주세요.";
-  return fallback;
-}
-
-/* 쓰기(add·update)가 **코드 없는 에러**로 끝났을 때의 문구. **"실패했어요"라고 단정하지 않는다**
-   — 서버가 코드를 준 게 아니라 왕복 자체가 깨진 것이라, 쓰기가 이미 들어갔는지 우리가 알 수
-   없다. 단정하면 거짓말이 되고, 사용자가 그 말을 믿고 다시 추가했을 때 CONFLICT("이미 보드에
-   있는 게임이에요")를 보는 이유를 설명할 길이 없어진다. 그래서 "확인해 달라"까지가 이 문구의 몫이다.
-
-   상한(timeoutMessage)뿐 아니라 **fallback 으로도 이걸 쓴다.** isAborted 가 abort 를 못 알아보면
-   (tRPC 가 name 없는 모양으로 갈아 던지는 경우) 조용히 fallback 으로 떨어지는데, 거기에 단정하는
-   문구를 두면 정직함이 isAborted 의 정확성에 매달린다. 애매한 경우를 애매하게 말하는 쪽이
-   기본값이어야 한다 — 확정적인 문구는 서버가 코드를 준 분기(CONFLICT·NOT_FOUND·…)의 몫이다. */
-export const WRITE_UNCERTAIN_MESSAGE =
-  "네트워크가 느린 것 같아요. 저장됐을 수도 있으니 새로고침해 확인한 뒤 다시 시도해 주세요.";
 
 /* 네이티브 <dialog>+showModal() 을 쓰는 이유: 포커스 트랩·Esc 닫기·배경 inert·top-layer·
    닫을 때 트리거로 포커스 복원을 전부 브라우저가 준다(직접 만든 백드롭 div 는 이걸 더 나쁘게

@@ -44,14 +44,21 @@ export const addGameInput = withDateOrder(
   z.object({
     /* trim 후 non-empty — 공백만·패딩 값(' abc ')이 빈 카드로 저장되거나 'abc'/' abc ' 로
        category_id UNIQUE 를 우회하는 걸 입력 경계에서 막는다.
-       .max(64) — 치지직 categoryId 실측(짧은 숫자·슬러그)보다 훨씬 넉넉한 여유 상한. list 가
-       공개·무페이지네이션이라 상한 없이는 초대형 행으로 응답 크기를 부풀릴 수 있다.
+
+       .max(200) — 한때 64였는데 **프로덕션에서 실제로 터졌다.** 치지직 categoryId 는 짧은
+       숫자가 아니라 영문 원제를 그대로 옮긴 슬러그다: 운영에 있던 레이튼 HD 두 편이 42·43자라
+       "64면 넉넉하다"고 봤지만, 「레이튼 미스터리 저니」처럼 원제가 긴 게임은 그냥 넘어간다
+       (games.add 가 BAD_REQUEST/too_big 으로 죽었다 — 사용자는 멀쩡한 게임을 못 올렸다).
+       제목에서 나오는 값이니 상한도 제목과 같은 자리에 둔다 — 아래 categoryValue 와 같은 200.
+       상한 자체는 남긴다: list 가 공개·무페이지네이션이라 위조 클라이언트가 초대형 행으로
+       응답 크기를 부풀릴 수 있다.
+
        nullable — 검색에 없어 손으로 넣은 게임엔 치지직 키가 없다. 빈 문자열은 null 로 접는다:
        ''가 그대로 저장되면 두 번째 수동 입력이 UNIQUE 로 충돌한다(NULL 만 중복이 허용된다). */
     categoryId: z
       .preprocess(
         (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-        z.string().trim().min(1).max(64).nullable().default(null),
+        z.string().trim().min(1).max(200).nullable().default(null),
       )
       .describe("치지직 categoryId. 수동 입력 게임은 null"),
     categoryType: z.literal("GAME"),
