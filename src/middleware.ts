@@ -72,7 +72,8 @@ export async function middleware(request: NextRequest) {
     const res = NextResponse.next({ request });
     res.cookies.set(COOKIE_NAME.access, "", clearedCookieOptions());
     res.cookies.set(COOKIE_NAME.refresh, "", clearedCookieOptions());
-    // 세션을 걷는 김에 구 이름 쿠키도 만료 — 로그아웃 확정 응답이 롤백에도 되살아나지 않게.
+    // 세션을 걷는 김에 구 이름 쿠키도 만료 — 로그아웃 확정 응답이 롤백 시 되살아날 창을 좁힌다
+    // (부분 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
     clearLegacyCookies(res);
     return res;
   }
@@ -97,7 +98,8 @@ export async function middleware(request: NextRequest) {
     const res = NextResponse.next();
     res.cookies.set(COOKIE_NAME.access, "", clearedCookieOptions());
     res.cookies.set(COOKIE_NAME.refresh, "", clearedCookieOptions());
-    // 세션을 걷는 김에 구 이름 쿠키도 만료 — 롤백이 옛 세션을 되살리지 못하게.
+    // 세션을 걷는 김에 구 이름 쿠키도 만료 — 롤백 시 옛 세션이 되살아날 창을 좁힌다(부분
+    // 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
     clearLegacyCookies(res);
     return res;
   }
