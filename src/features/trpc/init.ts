@@ -5,7 +5,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { Authority } from "@/core/authorities";
 import type { Db } from "@/db";
-import type { ChzzkCreds } from "../chzzk/client";
+import type { ChzzkCreds } from "@/features/chzzk-http";
 
 /* tRPC 컨텍스트(ADR-0017). actor 는 로그인 주체(channelId·userId, access JWT 에서 검증) — 비로그인
    이면 null. authoritiesOf 는 인가가 필요한 순간에만 역할을 DB 조회한다(access 엔 authorities 를

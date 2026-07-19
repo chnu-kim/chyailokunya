@@ -9,6 +9,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { Authority } from "@/core/authorities";
 import { makeDb } from "@/db";
 import { rejectCrossSiteFetch, rejectForeignOrigin } from "@/features/auth/request-guard";
+import { credsFromEnv } from "@/features/chzzk-http";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
 import { authoritiesForActor, getServerActor } from "../../../server-session";
@@ -31,10 +32,7 @@ async function createContext(): Promise<Context> {
     db,
     actor,
     authoritiesOf,
-    chzzk:
-      env.CHZZK_CLIENT_ID && env.CHZZK_CLIENT_SECRET
-        ? { clientId: env.CHZZK_CLIENT_ID, clientSecret: env.CHZZK_CLIENT_SECRET }
-        : null,
+    chzzk: credsFromEnv(env.CHZZK_CLIENT_ID, env.CHZZK_CLIENT_SECRET),
   };
 }
 
