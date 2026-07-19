@@ -8,6 +8,22 @@ import { addGameInput, updateGameInput } from "./schema";
 const base = { categoryId: "c1", categoryType: "GAME" as const, categoryValue: "엘든링" };
 
 describe("addGameInput", () => {
+  /* 회귀: categoryId 상한이 64였을 때 프로덕션에서 이 게임이 BAD_REQUEST/too_big 으로
+     막혔다. 치지직 categoryId 는 짧은 키가 아니라 영문 원제를 옮긴 슬러그라, 원제가 긴
+     게임은 64를 그냥 넘는다 — 멀쩡한 게임을 못 올렸다. 실제로 막혔던 길이대의 값을 남긴다. */
+  it("원제가 긴 게임의 categoryId(64자 초과)도 통과 — 실제로 막혔던 회귀", () => {
+    const longSlug = "Laytons_Mystery_Journey_Katrielle_and_the_Millionaires_Conspiracy_Deluxe";
+    expect(longSlug.length).toBeGreaterThan(64);
+    const result = addGameInput.safeParse({ ...base, categoryId: longSlug });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.categoryId).toBe(longSlug);
+  });
+
+  it("categoryId 가 상한(200)을 넘으면 거절 — 상한 자체는 남긴다(공개·무페이지네이션 list)", () => {
+    const result = addGameInput.safeParse({ ...base, categoryId: "a".repeat(201) });
+    expect(result.success).toBe(false);
+  });
+
   it("categoryValue 가 상한(200)을 넘으면 거절", () => {
     const result = addGameInput.safeParse({ ...base, categoryValue: "가".repeat(201) });
     expect(result.success).toBe(false);
