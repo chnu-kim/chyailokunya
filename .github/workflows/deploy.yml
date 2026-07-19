@@ -25,9 +25,8 @@ jobs:
     # 구멍을 막는다) + **같은 저장소**(fork 트리거 배제).
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    # CF 자격은 job-level 이 아니라 실제로 쓰는 두 스텝(D1 마이그레이션·배포)에만 준다 —
+    # job env 로 두면 npm ci(postinstall)·OpenNext 빌드 스텝까지 배포 토큰이 노출된다.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,7 +53,13 @@ jobs:
         run: npx opennextjs-cloudflare build
       # 빌드가 성공한 뒤에만 스키마를 원격 D1 에 적용한다(이미 적용된 건 건너뜀 — 멱등).
       - name: 원격 D1 마이그레이션 적용
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler d1 migrations apply chyailokunya --remote
       # 이미 빌드된 .open-next 를 업로드한다(재빌드 없음 — deploy 는 "built app" 을 올린다).
       - name: 배포 (OpenNext, 사전 빌드 산출물)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx opennextjs-cloudflare deploy
