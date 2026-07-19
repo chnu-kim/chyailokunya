@@ -52,7 +52,11 @@ export function axis(id: string, salt: string, n: number): number {
 
 /* ── 치지직 category API 매핑 (ADR-0015) ─────────────────────────────────────
    게임 정보원은 치지직 category API 하나다. 반환 4필드만 쓰고 보드는 GAME 만 담는다.
-   여기선 순수 변환·필터만 한다 — 네트워크·인증은 features/chzzk 가, 저장은 db 가 맡는다. */
+   여기선 순수 타입·필터만 둔다 — 네트워크·인증은 features/chzzk, trim·empty→null
+   정규화·상한·URL 스킴 검증은 쓰기 입력 경계(features/games/schema.ts::addGameInput)
+   가 정본이다. 예전엔 이 파일에 별도 toGameSnapshot 정규화 함수가 있었지만 프로덕션
+   호출자가 없었다(실트래픽은 전부 Zod 경계를 지난다) — 테스트만 보증하고 아무도 안
+   쓰는 interface라 삭제했다. 정규화 정본은 하나만 남긴다. */
 
 export type ChzzkCategory = {
   categoryType: string;
@@ -61,27 +65,7 @@ export type ChzzkCategory = {
   posterImageUrl: string | null;
 };
 
-// games 테이블에 스냅샷으로 박히는 4필드(denormalize). status·날짜는 우리 도메인이라 별도.
-export type GameSnapshot = {
-  categoryId: string;
-  categoryType: "GAME";
-  categoryValue: string;
-  posterImageUrl: string | null;
-};
-
 // 보드는 GAME 카테고리만 담는다(ADR-0015). SPORTS·ETC 는 걸러낸다.
 export function isGameCategory(c: ChzzkCategory): boolean {
   return c.categoryType === "GAME";
-}
-
-/* category → games 스냅샷. GAME 이 아니거나 식별자·이름이 비면 null(호출측이 거른다).
-   poster 의 빈 문자열은 null 로 정규화한다 — DB 는 "없음"을 null 로 표현하고, 카드
-   렌더가 poster 유무로 이니셜 폴백을 가른다. */
-export function toGameSnapshot(c: ChzzkCategory): GameSnapshot | null {
-  if (!isGameCategory(c)) return null;
-  const categoryId = c.categoryId.trim();
-  const categoryValue = c.categoryValue.trim();
-  if (!categoryId || !categoryValue) return null;
-  const poster = (c.posterImageUrl ?? "").trim();
-  return { categoryId, categoryType: "GAME", categoryValue, posterImageUrl: poster || null };
 }

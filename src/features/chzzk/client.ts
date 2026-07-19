@@ -15,7 +15,10 @@ function clampSize(size: number): number {
   return Math.min(50, Math.max(1, Math.trunc(size)));
 }
 
-// 신뢰하지 않는 외부 응답을 ChzzkCategory 로 강제한다. 필수 문자열이 없으면 null(호출측 필터).
+/* 신뢰하지 않는 외부 응답을 ChzzkCategory 로 강제한다. 필수 문자열이 없으면 null(호출측 필터).
+   여기 poster 의 빈 문자열→null 은 검색 결과 표시용 타입 정리일 뿐 저장 정규화가 아니다 —
+   저장 시 정규화(trim·empty→null·상한·스킴 검증)의 정본은 features/games/schema.ts::addGameInput
+   하나다. 이 함수가 반환한 값도 사용자가 고르면 결국 그 경계를 다시 통과한다. */
 function toCategory(raw: unknown): ChzzkCategory | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
