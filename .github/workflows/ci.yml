@@ -8,6 +8,11 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # 손으로 깨울 수 있어야 한다. 실제로 GitHub 이 main 머지 push 에 워크플로를 아예 만들지
+  # 않은 적이 있다(#41 머지, check-runs 0 — Actions·GitHub 둘 다 정상이었다). 그때 CI 를
+  # 깨울 방법이 없어 배포가 멈췄고, main 에 빈 커밋을 올려 우회해야 했다. 이 트리거가 있으면
+  # 이력을 더럽히지 않고 다시 태운다. deploy.yml 도 이 이벤트를 받도록 맞춰 뒀다.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
