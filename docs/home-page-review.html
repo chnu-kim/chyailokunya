@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>홈 페이지 리뷰 — 챠이로 쿠냐</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Gloock&family=Gothic+A1:wght@400;500;700&family=Nanum+Myeongjo:wght@400;700&family=Nanum+Pen+Script&family=Sacramento&display=swap"
+    />
+    <style>
+      /* 색·타입 토큰은 src/app/globals.css 에서 그대로 가져온다. 이 문서는 앱 밖의
+         내부 리뷰 페이지라 빌드에 안 물리지만, 값을 새로 지어내면 리뷰가 리뷰 대상과
+         다른 팔레트로 말하게 된다 — 토큰이 어긋나면 globals.css 를 정본으로 되돌린다. */
+      :root {
+        color-scheme: light;
+        --brand-brown: #76554b;
+        --brand-brown-deep: #604830;
+        --brand-ink: #181818;
+        --brand-pink: #e0a8b0;
+        --brand-taupe: #907878;
+        --brand-line: #dfe3ea;
+
+        --bg: #ffffff;
+        --bg-rule: var(--brand-line);
+        --surface: #ffffff;
+        --surface-2: #f6f3f0;
+        --fg: var(--brand-ink);
+        --fg-muted: #6f5a5a;
+        --fg-on-brown: #f4ece6;
+        --border: #1818180f;
+        --border-strong: var(--brand-ink);
+        --accent: var(--brand-pink);
+        --accent-ink: var(--brand-brown);
+        --focus: #b25a68;
+        --ok: #47613f;
+        --on-ok: var(--fg-on-brown);
+        --warn: #7a5c26;
+        --danger: #9a453d;
+        --tape-amber: rgba(214, 196, 168, 0.72);
+        --tape-ink: var(--brand-brown-deep);
+        --thumb-paper: #f4eee9;
+        --thumb-mark: #e2d6ca;
+
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-5: 24px;
+        --space-6: 32px;
+        --space-7: 48px;
+        --space-8: 64px;
+
+        --text-2xs: 11px;
+        --text-xs: 12px;
+        --text-sm: 14px;
+        --text-base: 16px;
+        --text-lg: 20px;
+        --text-xl: 25px;
+        --text-2xl: 31px;
+        --text-3xl: 39px;
+
+        --radius-sm: 8px;
+        --radius-md: 14px;
+        --radius-pill: 999px;
+        --shadow-tape: 0 1px 2px rgba(96, 72, 48, 0.18);
+        --shadow-card: 0 6px 18px rgba(96, 72, 48, 0.16);
+        --shadow-lift: 0 18px 40px rgba(24, 24, 24, 0.22);
+        --ease-paper: cubic-bezier(0.2, 0.7, 0.2, 1);
+        --dur-base: 220ms;
+
+        --font-display: "Gloock", "Nanum Myeongjo", Georgia, serif;
+        --font-script: "Sacramento", "Nanum Pen Script", "Apple Chancery", cursive;
+        --font-body:
+          "Gothic A1", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+        --font-hand: "Nanum Pen Script", "Gloria Hallelujah", var(--font-body);
+        --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      }
+
+      [data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #15110f;
+        --bg-rule: #2a2320;
+        --surface: #1f1a17;
+        --surface-2: #161210;
+        --fg: #f1e8e2;
+        --fg-muted: #b29d96;
+        --border: #f1e8e21a;
+        --border-strong: #f1e8e2;
+        --accent: #e9b6bd;
+        --accent-ink: #c79b86;
+        --focus: #e9b6bd;
+        --ok: #8fbf87;
+        --on-ok: var(--bg);
+        --warn: #e0b567;
+        --danger: #e88b80;
+        --tape-amber: rgba(122, 104, 82, 0.55);
+        --tape-ink: var(--fg-on-brown);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background-color: var(--bg);
+        color: var(--fg);
+        font-family: var(--font-body);
+        font-size: var(--text-base);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        /* 줄노트 텍스처 — 앱 body 와 같은 32px 피치. 이 문서도 같은 종이 위에 있다. */
+        background-image: repeating-linear-gradient(var(--bg) 0 31px, var(--bg-rule) 31px 32px);
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+        border-radius: 2px;
+      }
+
+      .wrap {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: var(--space-7) var(--space-5) var(--space-8);
+      }
+
+      /* ── 헤더 ─────────────────────────────────────────────── */
+
+      .head {
+        text-align: center;
+        margin-bottom: var(--space-8);
+        position: relative;
+      }
+      .eyebrow {
+        display: inline-block;
+        font-size: var(--text-2xs);
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--fg-muted);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-pill);
+        padding: 5px 14px;
+        margin-bottom: var(--space-4);
+      }
+      .head h1 {
+        font-family: var(--font-script);
+        font-size: clamp(2.75rem, 7vw, 4.25rem);
+        font-weight: 400;
+        line-height: 1.05;
+        margin: 0 0 var(--space-3);
+      }
+      .head p {
+        color: var(--fg-muted);
+        font-size: var(--text-lg);
+        margin: 0;
+      }
+      .meta {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--fg-muted);
+        margin-top: var(--space-4);
+      }
+
+      .theme-toggle {
+        position: absolute;
+        top: 0;
+        right: 0;
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0 var(--space-4);
+        font-family: var(--font-body);
+        font-size: var(--text-xs);
+        color: var(--fg);
+        background: var(--surface);
+        border: 1.5px solid var(--border-strong);
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+      }
+      .theme-toggle:hover {
+        box-shadow: var(--shadow-card);
+      }
+
+      /* ── 종이 부품 ─────────────────────────────────────────── */
+
+      .paper {
+        position: relative;
+        background: var(--surface);
+        border: 1.5px solid var(--border-strong);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-card);
+        padding: var(--space-6);
+      }
+      .tape {
+        position: absolute;
+        top: -11px;
+        left: 50%;
+        transform: translateX(-50%) rotate(-2deg);
+        background: var(--tape-amber);
+        color: var(--tape-ink);
+        font-family: var(--font-hand);
+        font-size: var(--text-sm);
+        line-height: 1;
+        padding: 6px 16px;
+        box-shadow: var(--shadow-tape);
+      }
+
+      h2 {
+        font-family: var(--font-display);
+        font-size: var(--text-2xl);
+        font-weight: 400;
+        line-height: 1.15;
+        margin: var(--space-8) 0 var(--space-5);
+      }
+      h2:first-of-type {
+        margin-top: 0;
+      }
+
+      /* ── 구조 맵 ───────────────────────────────────────────── */
+
+      .tree {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        line-height: 1.9;
+        margin: 0;
+        white-space: pre;
+        overflow-x: auto;
+      }
+      .tree b {
+        font-weight: 700;
+        color: var(--accent-ink);
+      }
+      .tree span {
+        color: var(--fg-muted);
+      }
+
+      /* ── 판정 요약 ─────────────────────────────────────────── */
+
+      .tally {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
+      }
+      .tally div {
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: var(--space-4);
+        text-align: center;
+      }
+      .tally strong {
+        display: block;
+        font-family: var(--font-display);
+        font-size: var(--text-3xl);
+        line-height: 1.1;
+      }
+      .tally small {
+        font-size: var(--text-xs);
+        color: var(--fg-muted);
+      }
+      .tally .t-check strong {
+        color: var(--warn);
+      }
+      .tally .t-good strong {
+        color: var(--ok);
+      }
+      .tally .t-open strong {
+        color: var(--fg-muted);
+      }
+
+      /* ── 지적 항목 ─────────────────────────────────────────── */
+
+      .findings {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: var(--space-6);
+      }
+      .finding {
+        padding: var(--space-6) var(--space-6) var(--space-5);
+      }
+      .finding__head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        margin-bottom: var(--space-3);
+      }
+      .finding h3 {
+        font-family: var(--font-display);
+        font-size: var(--text-xl);
+        font-weight: 400;
+        line-height: 1.2;
+        margin: 0;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .sev {
+        flex: 0 0 auto;
+        font-size: var(--text-2xs);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        border-radius: var(--radius-pill);
+        border: 1px solid currentColor;
+      }
+      .sev--high {
+        color: var(--danger);
+      }
+      .sev--mid {
+        color: var(--warn);
+      }
+      .sev--low {
+        color: var(--fg-muted);
+      }
+      /* 처리된 항목은 채워서 표시한다 — 테두리만 있는 다른 칩과 섞이면 "아직 열려 있다"로
+         읽힌다. 글자색을 테마별로 뒤집는 게 핵심이다: --ok 는 라이트에서 짙은 녹색이지만
+         다크에서는 밝은 녹색이라, 밝은 글자를 양쪽에 쓰면 다크에서 1.8:1 로 사라진다.
+         11px 칩이라 게이트는 4.5:1 — 라이트 5.90:1, 다크 8.91:1 로 둘 다 통과한다. */
+      .sev--done {
+        color: var(--on-ok);
+        background: var(--ok);
+        border-color: var(--ok);
+      }
+      .finding p {
+        margin: 0 0 var(--space-3);
+      }
+      .finding p:last-child {
+        margin-bottom: 0;
+      }
+      .where {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--fg-muted);
+        margin-bottom: var(--space-3);
+      }
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.88em;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .quote {
+        font-family: var(--font-hand);
+        font-size: var(--text-lg);
+        color: var(--fg-muted);
+        border-left: 3px solid var(--accent);
+        padding-left: var(--space-4);
+        margin: 0 0 var(--space-3);
+      }
+      .fix {
+        font-size: var(--text-sm);
+        color: var(--fg-muted);
+        border-top: 1px dashed var(--border-strong);
+        padding-top: var(--space-3);
+        margin-top: var(--space-4);
+      }
+      .fix b {
+        color: var(--fg);
+      }
+
+      /* ── 잘된 것 ───────────────────────────────────────────── */
+
+      .good {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: var(--space-4);
+      }
+      .good li {
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: var(--space-3);
+        font-size: var(--text-sm);
+      }
+      .good svg {
+        width: 18px;
+        height: 18px;
+        margin-top: 3px;
+        color: var(--ok);
+      }
+      .good b {
+        color: var(--fg);
+      }
+      .good span {
+        color: var(--fg-muted);
+      }
+
+      /* ── 발바닥 ────────────────────────────────────────────── */
+
+      .paws {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 18px;
+        color: var(--brand-taupe);
+        margin: var(--space-8) 0;
+        pointer-events: none;
+      }
+      .paws svg {
+        width: 20px;
+        height: 20px;
+      }
+      .paws svg:nth-child(1) {
+        opacity: 0.4;
+        transform: rotate(-10deg) translateY(6px);
+      }
+      .paws svg:nth-child(2) {
+        opacity: 0.58;
+        transform: rotate(3deg) translateY(-5px);
+      }
+      .paws svg:nth-child(3) {
+        opacity: 0.78;
+        transform: rotate(12deg) translateY(5px);
+      }
+
+      footer {
+        text-align: center;
+        font-size: var(--text-xs);
+        color: var(--fg-muted);
+        margin-top: var(--space-8);
+      }
+
+      @media (max-width: 600px) {
+        .wrap {
+          padding: var(--space-6) var(--space-4) var(--space-7);
+        }
+        .theme-toggle {
+          position: static;
+          margin-bottom: var(--space-5);
+        }
+        .tally {
+          grid-template-columns: 1fr;
+        }
+        .paper {
+          padding: var(--space-5);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="head" data-od-id="review-head">
+        <button class="theme-toggle" type="button" data-od-id="theme-toggle">테마 바꾸기</button>
+        <span class="eyebrow">Internal Review</span>
+        <h1>홈 페이지 리뷰</h1>
+        <p>메인 런처 한 장을 코드로 읽고 정리한 것</p>
+        <p class="meta">src/app/page.tsx · src/app/home.css · 2026-07-19</p>
+      </header>
+
+      <!-- 구조 맵 -->
+      <section data-od-id="review-structure">
+        <h2>지금의 구조</h2>
+        <div class="paper">
+          <span class="tape">한 화면</span>
+          <pre class="tree">
+main.home
+└ .wrap
+  ├ <b>.home__hero</b>       <span>폴라로이드 3장 → 칩 → h1 → 소개 한 줄 (+ 쿼카 낙서)</span>
+  ├ <b>.deco-paws</b>        <span>발바닥 3개 — 카드 쪽으로 걸어간 자국</span>
+  └ <b>.cards-outer</b>      <span>카드 2장(소개 · 플레이 게임) + 마스코트 스티커</span></pre>
+          <p style="margin: var(--space-5) 0 0; color: var(--fg-muted); font-size: var(--text-sm)">
+            콘텐츠는 사실상 <b>링크 두 개</b>다. 의도적으로 얇은 런처이므로, 이 페이지의 성패는
+            기능이 아니라 <b>첫 3초 안에 누구인지 전해지는가</b>에 달려 있다.
+          </p>
+        </div>
+      </section>
+
+      <!-- 판정 -->
+      <section data-od-id="review-tally">
+        <h2>판정</h2>
+        <div class="tally">
+          <div class="t-good">
+            <strong>1</strong>
+            <small>처리됨</small>
+          </div>
+          <div class="t-check">
+            <strong>3</strong>
+            <small>실측 확인 필요</small>
+          </div>
+          <div class="t-open">
+            <strong>2</strong>
+            <small>취향 판단 — 열림</small>
+          </div>
+        </div>
+      </section>
+
+      <!-- 지적 항목 -->
+      <section data-od-id="review-findings">
+        <h2>걸리는 것</h2>
+        <ul class="findings">
+          <li class="paper finding" data-od-id="finding-copy">
+            <div class="finding__head">
+              <h3>히어로 문구 — 띄어쓰기만 고쳤다</h3>
+              <span class="sev sev--done">처리됨</span>
+            </div>
+            <p class="where">src/app/page.tsx:85</p>
+            <p class="quote">엉뚱한 매력 있는 챠이로 쿠냐 등장!</p>
+            <p>
+              <code>매력있는</code> → <code>매력 있는</code> 으로 고쳤다. 함께 제기했던 "정보가
+              없다"는 지적은 <b>사용자가 기각했다</b> — 이 자리는 정보를 전달하는 자리가 아니라
+              <b>쿠냐가 어떤 사람인지 분위기만 전하는 자리</b>다.
+            </p>
+            <p>
+              기각이 맞는 판단인 이유도 분명하다. 나이·MBTI·컨텐츠 같은 사실은
+              <code>/landing</code>이 이미 제대로 말하고, 홈은 링크 두 개짜리 런처다. 여기에 프로필
+              요약을 또 넣으면 랜딩과 같은 말을 두 번 하는 셈이고, 손글씨 얼굴에 스펙을 얹으면 톤도
+              어긋난다. 인상을 남기는 것이 이 줄의 일이다.
+            </p>
+            <p class="fix">
+              <b>못박음 —</b> 이 결정은 <code>page.tsx</code>의 해당 줄 위에 주석으로 남겼다. 뒤에
+              오는 사람이 "정보가 없다"며 다시 채우지 않도록.
+            </p>
+          </li>
+
+          <li class="paper finding" data-od-id="finding-order">
+            <div class="finding__head">
+              <h3>이름보다 캡션을 먼저 읽는다</h3>
+              <span class="sev sev--mid">취향 판단</span>
+            </div>
+            <p class="where">src/app/page.tsx:43 · 56 · 70</p>
+            <p>
+              폴라로이드가 <code>h1</code>보다 위에 있어서, 화면 최상단에서 만나는 한글이
+              <code>움뫄</code> / <code>바보</code> / <code>엥?</code> 세 개다. 톤 문제가 아니라 —
+              다꾸 캡션으로는 맞다 — <b>읽는 순서</b> 문제다. 사진이 먼저 나오는 건 의도지만, 그
+              사진의 캡션까지 이름 앞에 놓일 이유는 없다.
+            </p>
+            <p class="fix">
+              <b>선택지 —</b> 캡션을 지금대로 두고 문제로 안 본다 / 캡션을 사진 위 hover 로 옮긴다 /
+              콜라주를 <code>h1</code> 아래로 내린다. 셋 중 어느 쪽도 코드 변경은 작다.
+            </p>
+          </li>
+
+          <li class="paper finding" data-od-id="finding-doodle">
+            <div class="finding__head">
+              <h3>쿠냐가 그린 유일한 그림이 대부분 안 보인다</h3>
+              <span class="sev sev--mid">확인 필요</span>
+            </div>
+            <p class="where">
+              src/app/home.css:352 — @media (min-width: 1280px) and (hover: hover)
+            </p>
+            <p>
+              주석은 "여백이 남을 때만 나오는 덤"이라고 설명하고, 그 논리 자체는 맞다. 다만 결과를
+              세어 보면 <b>1280px 미만 노트북 · 태블릿 · 모바일 전부 제외</b>다. 이 사이트에서 사람
+              손에서 나온 유일한 그림인데 노출이 가장 좁다.
+            </p>
+            <p class="fix">
+              <b>확인 —</b> 의도한 희소성이면 그대로 둔다. 아니라면 하한을 1080px 정도로 내리고
+              <code>left</code> 값을 다시 잡는 선에서 끝난다.
+            </p>
+          </li>
+
+          <li class="paper finding" data-od-id="finding-sticker">
+            <div class="finding__head">
+              <h3>마스코트 스티커가 뷰포트를 넘을 수 있다</h3>
+              <span class="sev sev--mid">확인 필요</span>
+            </div>
+            <p class="where">src/app/home.css:297 — .mascot-sticker { right: -18px }</p>
+            <p>
+              <code>.cards-outer</code>가 <code>max-width: 880px</code>인데 스티커는 그 바깥으로
+              18px 나간다. <code>.wrap</code>의 좌우 패딩이 18px보다 작아지는 폭에서는 스티커가 화면
+              밖으로 나가고, 그 경우 <b>가로 스크롤</b>이 생긴다. 600px 이하에서
+              <code>right: 4px</code>로 되돌리는 규칙은 있지만, 600~880px 구간은 비어 있다.
+            </p>
+            <p class="fix">
+              <b>확인 —</b> 760px 안팎에서 가로 스크롤이 실제로 생기는지 본다. 생기면 그 구간에도
+              <code>right</code> 보정을 넣거나 <code>.wrap</code>에
+              <code>overflow-x: clip</code>으로 막는다.
+            </p>
+          </li>
+
+          <li class="paper finding" data-od-id="finding-snaps">
+            <div class="finding__head">
+              <h3>스냅 콜라주 하한 여유가 20px 남짓</h3>
+              <span class="sev sev--low">확인 필요</span>
+            </div>
+            <p class="where">src/app/home.css:23 — --snap-w: clamp(100px, 28vw, 148px)</p>
+            <p>
+              하한 100px에 걸린 뒤로는 더 줄지 않는다. 가운데 장 1.14배와 −12% 겹침을 넣어 계산하면
+              콜라주 전체는 약 300px이고, 320px 화면에서 <code>.wrap</code> 패딩까지 빼면 여유가
+              20px 안쪽이다. 넘치지는 않지만 <b>여유가 없다</b> — 하한이나 패딩을 건드리면 바로
+              걸린다.
+            </p>
+            <p class="fix">
+              <b>메모 —</b> 지금 고칠 일은 아니고, <code>--snap-w</code> 하한을 올리려 할 때 이
+              계산을 다시 하라는 표시다.
+            </p>
+          </li>
+
+          <li class="paper finding" data-od-id="finding-deco">
+            <div class="finding__head">
+              <h3>장식 5개 — 이미 실질적으로 완화됐다</h3>
+              <span class="sev sev--low">취향 판단</span>
+            </div>
+            <p class="where">발바닥 3 + 마스코트 + 쿼카</p>
+            <p>
+              한 화면 장식이 5개가 되는 건 이 저장소가 지켜 온 선을 넘는 지점이었다. 다만 지금
+              코드로는 쿼카가 1280px 이상에서만 나오므로 <b>대부분의 화면에서는 4개</b>다. 별도 조치
+              없이 완화된 상태고, 발바닥을 3→2로 줄이는 안은 아직 카드로 남겨 둔다.
+            </p>
+          </li>
+        </ul>
+      </section>
+
+      <div class="paws" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <ellipse cx="12" cy="16" rx="5.4" ry="4.4" />
+          <ellipse cx="5.6" cy="10.4" rx="2.3" ry="2.9" />
+          <ellipse cx="10" cy="7.2" rx="2.2" ry="3" />
+          <ellipse cx="14.6" cy="7.2" rx="2.2" ry="3" />
+          <ellipse cx="18.6" cy="10.6" rx="2.3" ry="2.9" />
+        </svg>
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <ellipse cx="12" cy="16" rx="5.4" ry="4.4" />
+          <ellipse cx="5.6" cy="10.4" rx="2.3" ry="2.9" />
+          <ellipse cx="10" cy="7.2" rx="2.2" ry="3" />
+          <ellipse cx="14.6" cy="7.2" rx="2.2" ry="3" />
+          <ellipse cx="18.6" cy="10.6" rx="2.3" ry="2.9" />
+        </svg>
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <ellipse cx="12" cy="16" rx="5.4" ry="4.4" />
+          <ellipse cx="5.6" cy="10.4" rx="2.3" ry="2.9" />
+          <ellipse cx="10" cy="7.2" rx="2.2" ry="3" />
+          <ellipse cx="14.6" cy="7.2" rx="2.2" ry="3" />
+          <ellipse cx="18.6" cy="10.6" rx="2.3" ry="2.9" />
+        </svg>
+      </div>
+
+      <!-- 잘된 것 -->
+      <section data-od-id="review-strengths">
+        <h2>잘 되어 있는 것</h2>
+        <div class="paper">
+          <span class="tape">그대로 두기</span>
+          <ul class="good">
+            <li>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 12.5 9.5 18 20 6.5" />
+              </svg>
+              <p style="margin: 0">
+                <b>쉼 상태를 CSS 변수로 분리한 설계.</b>
+                <span>
+                  각도를 <code>transform</code>에 직접 박았다면 미디어쿼리나 키프레임이 덮을 때
+                  hover·focus lift가 통째로 죽는다. <code>--rest-rot</code> /
+                  <code>--rest-y</code>로 빼 둔 덕에 쿼리는 쉼 상태만 덮고 상호작용 규칙은 하나로
+                  남는다. 폴라로이드·카드·발바닥·낙서 네 군데에서 일관되게 지켜진다.
+                </span>
+              </p>
+            </li>
+            <li>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 12.5 9.5 18 20 6.5" />
+              </svg>
+              <p style="margin: 0">
+                <b>접근성을 눈대중이 아니라 계산으로 했다.</b>
+                <span>
+                  캡션을 20px로 내리면서 WCAG 큰 텍스트 경계(24px)를 넘어가 기준이 3:1 → 4.5:1로
+                  바뀌는 걸 알아채고 <code>--fg-muted</code>로 바꿨다. taupe는 4.08로 미달이었다.
+                </span>
+              </p>
+            </li>
+            <li>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 12.5 9.5 18 20 6.5" />
+              </svg>
+              <p style="margin: 0">
+                <b>카드 안에 "보러가기 →"를 두지 않았다.</b>
+                <span>
+                  카드 전체가 <code>a</code> 요소라 안에 또 링크 라벨을 두면 링크 안의 가짜 링크가
+                  되고, 목적지가 다른 두 카드가 같은 라벨을 달게 된다. 목적지는 제목이 말하고,
+                  눌린다는 신호는 lift와 커서가 맡는다.
+                </span>
+              </p>
+            </li>
+            <li>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 12.5 9.5 18 20 6.5" />
+              </svg>
+              <p style="margin: 0">
+                <b>"손으로 붙였다"가 값으로 뒷받침된다.</b>
+                <span>
+                  폴라로이드 각도가 서로 거울상이 아니고(−5° / 2° / −2.5°), 가운데만 1.14배에 6px
+                  위로 올라앉아 맨 위 장으로 읽힌다. 카드도 같은 규칙(−1.6° / 0.6°). 대칭을 피한
+                  것이 이 표현의 핵심이다.
+                </span>
+              </p>
+            </li>
+            <li>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 12.5 9.5 18 20 6.5" />
+              </svg>
+              <p style="margin: 0">
+                <b>등장 지연이 콘텐츠 뒤에 놓였다.</b>
+                <span>
+                  본문 120→360ms, 발바닥 420·465·510ms, 낙서 560ms. 장식이 본문보다 먼저 나오면 읽을
+                  것도 없는데 눈이 그리로 간다. 전체가
+                  <code>prefers-reduced-motion</code> 가드 안에 있다.
+                </span>
+              </p>
+            </li>
+            <li>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 12.5 9.5 18 20 6.5" />
+              </svg>
+              <p style="margin: 0">
+                <b>쿼카 낙서의 blend 처리.</b>
+                <span>
+                  라이트 <code>multiply</code> / 다크 <code>screen</code>으로 갈라, 낙서가 종이 위에
+                  얹힌 레이어가 아니라 종이에 스며든 것으로 읽힌다. 불투명하게 채웠다면 줄노트를
+                  잘라먹었을 자리다.
+                </span>
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 결론 -->
+      <section data-od-id="review-conclusion">
+        <h2>요약</h2>
+        <div class="paper">
+          <p style="margin: 0 0 var(--space-4)">
+            기술적 완성도는 높다. 특히 CSS 변수로 쉼 상태를 분리한 설계와, 주석이 "무엇을 하는지"가
+            아니라 "왜 이 값이어야 하는지"를 적는 관행이 잘 지켜진다.
+          </p>
+          <p style="margin: 0 0 var(--space-4)">
+            <b>히어로 카피는 띄어쓰기만 고치고 그대로 간다.</b> "정보를 더 넣자"는 제안은 사용자가
+            기각했고, 그 판단이 맞다 — 홈은 프로필을 요약하는 자리가 아니라 인상을 남기는 자리이고,
+            사실 관계는 <code>/landing</code>이 맡는다.
+          </p>
+          <p style="margin: 0">
+            그래서 지금 <b>열려 있는 것은 실측 3건과 취향 2건</b>뿐이다. 브라우저에서 760px 안팎을
+            한 번 보면 그중 둘은 바로 닫힌다.
+          </p>
+        </div>
+      </section>
+
+      <footer>내부 리뷰 문서 · 앱 라우트가 아니다 · noindex</footer>
+    </div>
+
+    <script>
+      // 앱과 같은 계약: localStorage 우선, 없으면 OS 선호. 키 이름도 "theme" 로 맞춰
+      // 이 문서를 앱과 같은 브라우저에서 열면 테마가 이어진다.
+      (function () {
+        var root = document.documentElement;
+        try {
+          var t = localStorage.getItem("theme");
+          if (t !== "light" && t !== "dark") {
+            t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          root.setAttribute("data-theme", t);
+        } catch (e) {}
+
+        document.querySelector(".theme-toggle").addEventListener("click", function () {
+          var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+          root.setAttribute("data-theme", next);
+          try {
+            localStorage.setItem("theme", next);
+          } catch (e) {}
+        });
+      })();
+    </script>
+  </body>
+</html>

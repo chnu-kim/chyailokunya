@@ -77,9 +77,12 @@ export default function Home() {
           <h1 className="t-script rise" data-od-id="home-title" style={rise("240ms")}>
             챠이로 쿠냐
           </h1>
+          {/* 이 한 줄은 정보가 아니라 분위기를 맡는다 — 나이·MBTI·컨텐츠를 여기 채우자는
+              제안은 사용자가 기각했다. 프로필 사실은 /landing 이 말하고, 홈은 "어떤 사람인지"의
+              인상만 남긴다. 손글씨 얼굴(t-hand)이 그 역할의 일부다. */}
           <p className="rise" style={rise("300ms")}>
             <span className="t-hand" style={{ fontSize: "var(--text-xl)" }}>
-              엉뚱한 매력있는 챠이로 쿠냐 등장!
+              엉뚱한 매력 있는 챠이로 쿠냐 등장!
             </span>
           </p>
           <span className="quokka-doodle" aria-hidden="true" />
@@ -100,7 +103,7 @@ export default function Home() {
 
         <div className="cards-outer rise" style={rise("360ms")}>
           <div className="cards" data-od-id="home-nav-cards">
-            {/* 카드 전체가 <a> 다. 안에 "보러가기 →" 를 또 두면 링크 안의 가짜 링크가 되고,
+            {/* 카드 전체가 링크 요소다. 안에 "보러가기 →" 를 또 두면 링크 안의 가짜 링크가 되고,
                 목적지가 다른 두 카드가 같은 라벨을 달게 된다. 목적지 이름은 h2 가 말하고,
                 눌린다는 신호는 hover·focus lift 와 커서가 맡는다. */}
             <Link className="paper navcard" href="/landing" data-od-id="nav-card-about">
