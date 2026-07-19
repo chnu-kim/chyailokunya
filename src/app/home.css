@@ -314,8 +314,23 @@
    부품이 아니라 줄노트 여백에 건다: 아무것에도 안 맞은 채 여백에 있어야 "그려 둔 것"으로
    읽힌다. bottom 음수는 헤드라인을 피하려는 것 — 좌표는 캡처에서 재서 잡았고 위쪽
    헤드라인·문단 크기를 건드리면 눈으로 다시 잡는다. 기본값 none 이 핵심: 여백이 남을 때만
-   나오는 덤이지 늘 있다가 좁아지면 숨는 부품이 아니다. */
+   나오는 덤이지 늘 있다가 좁아지면 숨는 부품이 아니다.
+
+   "종이 위에 그렸다"를 만드는 건 투명도가 아니라 blend 다. 그냥 얹으면 낙서가 줄을
+   가리고 지나가는데, 실제 펜은 줄 위에 그어도 줄이 잉크 사이로 비친다. multiply 는
+   낙서와 body 의 줄노트 그라디언트를 곱해서 그 관계를 그대로 만든다 — 낙서가 종이
+   *위의 레이어*가 아니라 종이에 *스며든 것*이 된다. 히어로에 배경이 없어서 backdrop 이
+   body 까지 내려가는 덕이다. 여기에 배경을 깔면 이 효과는 조용히 죽는다.
+
+   다크는 multiply 를 못 쓴다 — 잉크가 밝은 쪽이라 어두운 종이와 곱하면 낙서가 사라진다.
+   screen 이 그 반전이고, 밝은 줄(#2a2320)이 낙서 옅은 부분으로 비치는 결과는 같다.
+
+   각도는 그 다음이다. 마스코트가 −8deg 인데 낙서만 정확히 수평이면 "붙인 것"으로
+   읽힌다. −3.5deg 는 마스코트를 따라하지 않을 만큼은 다르되 기운 티는 나는 값이다.
+   회전을 --rest-rot 로 빼 둔 건 아래 doodle-in 키프레임이 transform 을 통째로 덮어쓰기
+   때문이다 — 직접 박으면 등장 애니메이션이 각도를 지운다. */
 .quokka-doodle {
+  --rest-rot: -3.5deg;
   display: none;
   position: absolute;
   bottom: -80px;
@@ -325,10 +340,14 @@
   background: url("/assets/quokka-doodle-ink.png") center / contain no-repeat;
   pointer-events: none;
   user-select: none;
-  opacity: 0.88;
+  transform: rotate(var(--rest-rot));
+  opacity: 0.72;
+  mix-blend-mode: multiply;
 }
 [data-theme="dark"] .quokka-doodle {
   background-image: url("/assets/quokka-doodle.png");
+  opacity: 0.78;
+  mix-blend-mode: screen;
 }
 @media (min-width: 1280px) and (hover: hover) {
   .quokka-doodle {
@@ -337,12 +356,16 @@
 }
 
 /* 낙서는 히어로 나머지와 같은 값으로 들어오되 키프레임만 따로 둔다: 공용 rise 는 끝에
-   투명도 1 을 박는데 이 낙서 쉼 투명도는 0.88 이라 1 까지 올랐다 끝에서 툭 떨어진다.
-   끝을 비우면 요소 자신의 값으로 안착한다. */
+   투명도 1 을 박는데 이 낙서 쉼 투명도는 그보다 낮아(라이트 0.72 · 다크 0.78) 1 까지
+   올랐다 끝에서 툭 떨어진다. 끝을 비우면 요소 자신의 값으로 안착한다 — 테마마다 다른
+   두 값을 키프레임이 몰라도 되는 이유이기도 하다.
+
+   translate 와 함께 rotate 를 다시 적는 건 transform 이 통째로 덮이는 속성이라서다.
+   빼먹으면 등장 프레임 동안만 각도가 0 으로 튄다. */
 @keyframes doodle-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: rotate(var(--rest-rot)) translateY(10px);
   }
 }
 
