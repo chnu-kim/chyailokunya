@@ -9,14 +9,8 @@ import {
 } from "@/core/games-composer";
 import type { GameRow } from "@/db";
 import { trpc } from "@/features/trpc/client";
-import {
-  DateFields,
-  dateOrderError,
-  GameDialog,
-  messageFor,
-  REQUEST_TIMEOUT_MS,
-  WRITE_UNCERTAIN_MESSAGE,
-} from "./game-dialog";
+import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
+import { DateFields, dateOrderError, GameDialog } from "./game-dialog";
 
 /* 게임 추가 컴포저(ADR-0015·0017). 두 단계다:
 
@@ -94,7 +88,7 @@ export function GameComposer({
         dispatch({
           type: "searchFailed",
           query: submitted,
-          message: messageFor(e, "검색에 실패했어요. 잠시 후 다시 시도해 주세요."),
+          message: readErrorMessage(e),
         });
       }
     });
@@ -123,7 +117,7 @@ export function GameComposer({
         setAdded(row);
         setClosing(true);
       } catch (e) {
-        setAddError(messageFor(e, WRITE_UNCERTAIN_MESSAGE, WRITE_UNCERTAIN_MESSAGE));
+        setAddError(writeErrorMessage(e));
       }
     });
   }

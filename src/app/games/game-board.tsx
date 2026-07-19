@@ -5,14 +5,8 @@ import { ANGLE, axis, formatDate, PATTERNS, ROT } from "@/core/games";
 import type { GameRow } from "@/db";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
-import {
-  DateFields,
-  GameDialog,
-  messageFor,
-  REQUEST_TIMEOUT_MS,
-  useDatePair,
-  WRITE_UNCERTAIN_MESSAGE,
-} from "./game-dialog";
+import { REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
+import { DateFields, GameDialog, useDatePair } from "./game-dialog";
 
 /* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
    쓰기(추가·날짜 수정·삭제)를 한다. 쓰기는 tRPC 뮤테이션(서버 인가가 정본)을 부르고 로컬
@@ -402,7 +396,7 @@ function GameDateEditor({
         setSaved(row);
         setClosing(true);
       } catch (e) {
-        setError(messageFor(e, WRITE_UNCERTAIN_MESSAGE, WRITE_UNCERTAIN_MESSAGE));
+        setError(writeErrorMessage(e));
       }
     });
   }
