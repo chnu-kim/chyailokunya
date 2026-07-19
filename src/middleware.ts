@@ -19,7 +19,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse, type NextRequest } from "next/server";
 import { makeDb } from "@/db";
-import { COOKIE_NAME } from "@/features/auth/config";
+import { COOKIE_NAME, LEGACY_COOKIE_NAMES } from "@/features/auth/config";
 import {
   accessCookieOptions,
   clearedCookieOptions,
@@ -33,6 +33,14 @@ export const config = {
   matcher: ["/((?!_next/|api/auth/|assets/|favicon|icon).*)"],
 };
 
+/* 레거시 세션 쿠키(구 이름, __Host- 이전)를 응답에서 만료시킨다(config.LEGACY_COOKIE_NAMES 주석).
+   NextResponse 를 만지므로 features 가 아니라 여기(진입점) 에 둔다 — /api/auth 두 라우트는 같은
+   일을 app 레이어 헬퍼(expireLegacyCookies)로 하지만, middleware 는 레이어 경계상 app 을 import
+   할 수 없어(.dependency-cruiser `middleware-below-ui`) 로직을 여기 따로 둔다. */
+function clearLegacyCookies(res: NextResponse) {
+  for (const name of LEGACY_COOKIE_NAMES) res.cookies.set(name, "", clearedCookieOptions());
+}
+
 export async function middleware(request: NextRequest) {
   const { env } = await getCloudflareContext({ async: true });
   // 키는 쌍으로만 의미가 있다. public 만 빠지면 access 검증이 **영원히 실패**해 모든 요청이
@@ -43,7 +51,16 @@ export async function middleware(request: NextRequest) {
   // 쿠키를 먼저 본다 — 트래픽 대부분인 비로그인 요청이 쓰지도 않을 JWK 파싱을 내지 않게.
   const access = request.cookies.get(COOKIE_NAME.access)?.value;
   const refresh = request.cookies.get(COOKIE_NAME.refresh)?.value;
-  if (!access && !refresh) return NextResponse.next();
+  if (!access && !refresh) {
+    // 배포 후 __Host- 쿠키가 없는 요청은 전부 여기로 떨어진다 — 익명 방문자와 "구 이름 쿠키만
+    // 남은" 사용자가 섞인다. 후자면(구 쿠키가 하나라도 있으면) 응답에 만료를 실어, 수동 브라우징
+    // 에서도 다음 요청부터 구 쿠키가 정리되게 한다. 익명 트래픽엔 불필요한 Set-Cookie 를 붙이지
+    // 않으려고 존재할 때만 만료시킨다. 이 이른 반환이 레거시 전용 사용자의 유일한 통과 지점이라,
+    // 아래 access-valid·refresh-success 정상 경로는 그들에게 도달하지 않는다(그 경로는 만지지 않음).
+    const res = NextResponse.next();
+    if (LEGACY_COOKIE_NAMES.some((name) => request.cookies.has(name))) clearLegacyCookies(res);
+    return res;
+  }
 
   /* 로그아웃 마커가 있으면 세션 쿠키를 믿지 않는다. 로그아웃 직전에 회전 중이던 요청의 응답이
      나중에 도착해 access 를 되심을 수 있는데, access 는 무상태라 그대로면 최대 ACCESS_TTL 동안
@@ -55,6 +72,8 @@ export async function middleware(request: NextRequest) {
     const res = NextResponse.next({ request });
     res.cookies.set(COOKIE_NAME.access, "", clearedCookieOptions());
     res.cookies.set(COOKIE_NAME.refresh, "", clearedCookieOptions());
+    // 세션을 걷는 김에 구 이름 쿠키도 만료 — 로그아웃 확정 응답이 롤백에도 되살아나지 않게.
+    clearLegacyCookies(res);
     return res;
   }
 
@@ -78,6 +97,8 @@ export async function middleware(request: NextRequest) {
     const res = NextResponse.next();
     res.cookies.set(COOKIE_NAME.access, "", clearedCookieOptions());
     res.cookies.set(COOKIE_NAME.refresh, "", clearedCookieOptions());
+    // 세션을 걷는 김에 구 이름 쿠키도 만료 — 롤백이 옛 세션을 되살리지 못하게.
+    clearLegacyCookies(res);
     return res;
   }
 
