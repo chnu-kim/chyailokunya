@@ -6,6 +6,7 @@ import { SiteNav } from "@/components/ui/site-nav";
 import { SiteFooter } from "@/components/ui/site-footer";
 import { getServerActor } from "./server-session";
 import { OG_IMAGE, OG_LOCALE, OG_SITE_NAME } from "./site-meta";
+import { buildThemeInitScript } from "@/components/ui/theme-contract";
 
 // og:image·og:url 은 절대 URL 이어야 한다 — X·Slack 은 상대 경로를 무시해 이미지 없는
 // 카드가 나간다. metadataBase 가 페이지별 상대 경로를 이 도메인으로 절대화한다. 컷오버는
@@ -33,12 +34,8 @@ export const viewport: Viewport = {
 
 // 첫 페인트 전에 테마를 확정해 라이트 모드 깜빡임을 없앤다 — localStorage 우선, 없으면
 // OS 선호. 구 site.js 의 "인라인 스크립트가 먼저 칠하고 토글은 결과만 읽는다" 계약.
-// 토글(theme-toggle.tsx)이 쓰는 키("theme")와 반드시 일치한다.
-const themeInit = `(function(){try{
-var t=localStorage.getItem("theme");
-if(t!=="light"&&t!=="dark"){t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
-document.documentElement.setAttribute("data-theme",t);
-}catch(e){}})();`;
+// 키·속성 상수는 theme-contract.ts 가 정본 — 토글·useTheme 도 같은 곳에서 가져온다.
+const themeInit = buildThemeInitScript();
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // middleware 가 진입점에서 access 를 갱신해 두므로 여기선 세션을 읽어 nav 로그인 상태만
