@@ -2,7 +2,8 @@
 #
 # e2e 는 이 파일이 아니라 `.dev.vars.e2e` 를 쓴다 — Playwright 가 dev 서버를 띄우기 전에
 # scripts/e2e-dev-vars.mjs 가 테스트 전용 세션 키로 자동 생성한다(손대지 않아도 된다).
-# 지우면 다음 실행에서 새로 만들어진다. 왜 `.dev.vars` 를 안 쓰는지는 AGENTS.md 지뢰 목록.
+# 지울 땐 dev 서버도 같이 내린다: 살아 있는 서버는 부팅 때 읽은 옛 키로 계속 검증해서,
+# 새 키로 서명한 세션이 전부 거절된다. 왜 `.dev.vars` 를 안 쓰는지는 ADR-0021.
 NEXTJS_ENV=development
 
 # 치지직 category API(client_credentials) — seed(scripts/seed.mjs)·컴포저 카테고리 검색이 쓴다.
