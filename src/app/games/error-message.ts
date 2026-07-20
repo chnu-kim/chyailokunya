@@ -105,3 +105,32 @@ export function writeErrorMessage(e: unknown): string {
      코드 목록의 완전성에 매달리지 않도록, 모를 때의 기본값은 항상 이쪽이다. */
   return "저장됐는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
 }
+
+/* 삭제 실패. writeErrorMessage 를 그대로 쓰면 안 된다 — 그 문구는 전부 **저장** 기준이라
+   삭제를 누른 사용자에게 뜻이 정확히 뒤집혀 전달된다("저장됐을 수도 있으니 새로고침해
+   확인해 주세요"). 삭제가 이 갈래를 못 받은 건 역사 때문이다: 지연 커밋 시절엔 실패가
+   자국 안 announcement 로만 흘러 이 함수에 닿은 적이 없었고, ADR-0020 이 즉시 커밋으로
+   바꾸며 처음으로 사용자 눈앞에 뜨게 됐다.
+
+   조작 명사만 바꾼 게 아니라 **도달 가능한 코드 집합이 다르다** — 그래서 verb 파라미터가
+   아니라 별도 함수다. remove 는 CONFLICT 를 낼 수 없고, 없는 id 는 오류가 아니라
+   `deleted:false` 성공이라 NOT_FOUND 도 안 온다(service.removeGame 의 멱등성 주석).
+   그 둘의 문구("이미 보드에 있는 게임이에요"·"보드에 없는 게임이에요")를 삭제판에 두면
+   도달하지도 않을 거짓말을 유지보수하게 된다. 분기 구조와 판단 근거는 위와 같다 —
+   isAborted / sharedMessage / REJECTED_BEFORE_WRITE 를 그대로 공유한다. */
+export function deleteErrorMessage(e: unknown): string {
+  // 멈춘 건 기다림이지 요청이 아니다 — 서버에 닿았는지도, 지워졌는지도 모른다.
+  if (isAborted(e))
+    return "응답이 너무 오래 걸려서 기다리기를 멈췄어요. 삭제됐을 수도 있으니 새로고침해 확인해 주세요.";
+
+  const code = codeOf(e);
+  const shared = sharedMessage(code);
+  if (shared) return shared;
+
+  // 쓰기 전에 거절된 게 확실한 코드 — 삭제에선 인가 실패(위 shared)와 입력 검증뿐이다.
+  if (code && REJECTED_BEFORE_WRITE.has(code))
+    return "삭제하지 못했어요. 잠시 후 다시 시도해 주세요.";
+
+  // 모를 때의 기본값(INTERNAL_SERVER_ERROR·연결 실패). 원인을 말하지 않고 확인 방법만 준다.
+  return "삭제됐는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
+}

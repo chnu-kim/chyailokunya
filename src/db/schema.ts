@@ -122,8 +122,10 @@ export const roleAuditLogs = sqliteTable(
    외부 키가 없다). UNIQUE 는 유지한다: SQLite 는 NULL 중복을 허용하므로 "한 치지직
    카테고리 = 보드 1회"는 그대로 서고 수동 입력만 제약 밖으로 빠진다.
 
-   삭제는 하드 삭제(deleted_at 없음) — 되돌리기는 클라이언트 지연 커밋이라 서버에 삭제
-   상태를 영속시킬 필요가 없다. */
+   삭제는 하드 삭제(deleted_at 없음) — 확인 다이얼로그가 파괴 **전**에 멈추므로 서버에 닿은
+   삭제는 이미 의도된 삭제고 되돌릴 대상이 없다(ADR-0020 이 "지연 커밋이라 영속할 필요 없다"는
+   옛 근거를 대체했다). 소프트 삭제를 안 쓰는 이유는 그대로다: v1 에 복구 휴지통·삭제 감사
+   요구가 없는데 모든 조회가 WHERE deleted_at IS NULL 을 영구히 지불한다. */
 export const games = sqliteTable(
   "games",
   {

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /* 게임 보드는 D1 에서 서버가 읽어 렌더한다(Phase 3). 데이터는 globalSetup 이 심은 결정적
-   픽스처 5장(날짜 조합 골고루, poster null). 추가·수정·삭제 UI 는 쓰기 권한이 있어야 뜨므로
+   픽스처 8장(날짜 조합 골고루, poster null, 기본 뷰포트 5열이라 두 행). 추가·수정·삭제 UI 는 쓰기 권한이 있어야 뜨므로
    여기선 읽기만 스모크한다 — 쓰기의 "서버 권위"는 tRPC 단위테스트가 증명한다(이슈 #5).
 
    상태 필터 스모크가 여기 있었다. status 컬럼과 함께 UI 에서 사라졌고, 그 자리를 날짜 표시
@@ -13,8 +13,9 @@ test("게임: D1 에서 읽어 렌더 · 날짜 표시", async ({ page }) => {
   await page.goto("/games");
 
   await expect(page.getByRole("heading", { level: 1, name: "플레이한 게임" })).toBeVisible();
-  // 서버가 D1 에서 읽어온 픽스처 5장.
-  await expect(page.locator(CARDS)).toHaveCount(5);
+  // 서버가 D1 에서 읽어온 픽스처 8장. 5열 뷰포트라 두 행이 되고, 그래야 시각 스냅샷이
+  // 행 높이 균일화(.games 의 grid-auto-rows)를 실제로 본다 — 한 행이면 그 축이 안 잡힌다.
+  await expect(page.locator(CARDS)).toHaveCount(8);
   await expect(page.getByRole("heading", { name: "엘든 링" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "마인크래프트" })).toBeVisible();
 
@@ -49,6 +50,9 @@ test("게임: D1 에서 읽어 렌더 · 날짜 표시", async ({ page }) => {
     "마인크래프트",
     "리틀 나이트메어",
     "엘든 링",
+    "레이튼 교수와 최후의 시간여행 모바일 HD 리마스터",
+    "셀레스테",
+    "스타듀 밸리",
     "직접 넣은 게임",
     "할로우 나이트",
   ]);
