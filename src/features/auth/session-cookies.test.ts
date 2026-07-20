@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clearLoggedOutMarker,
   clearOauthStateCookie,
+  clearReturnToCookie,
   clearSessionCookies,
   dropSessionFromRequest,
   expireLegacyCookies,
@@ -10,8 +11,10 @@ import {
   hasLoggedOutMarker,
   plantLoggedOutMarker,
   plantOauthStateCookie,
+  plantReturnToCookie,
   plantSessionCookies,
   readOauthStateCookie,
+  readReturnToCookie,
   readSessionCookies,
   type CookieOptions,
 } from "./session-cookies";
@@ -115,6 +118,20 @@ describe("OAuth state 쿠키", () => {
     ]);
     expect(readOauthStateCookie(fakeJar({ "__Host-ck_oauth_state": "nonce-1" }))).toBe("nonce-1");
     expect(readOauthStateCookie(fakeJar({}))).toBeUndefined();
+  });
+});
+
+describe("복귀 경로(return_to) 쿠키", () => {
+  it("state 와 같은 10분 TTL·같은 속성으로 왕복한다(이슈 #25)", () => {
+    const sink = fakeSink();
+    plantReturnToCookie(sink, "/landing");
+    clearReturnToCookie(sink);
+    expect(sink.calls).toEqual([
+      { name: "__Host-ck_return_to", value: "/landing", options: { ...BASE, maxAge: 10 * 60 } },
+      { name: "__Host-ck_return_to", value: "", options: { ...BASE, maxAge: 0 } },
+    ]);
+    expect(readReturnToCookie(fakeJar({ "__Host-ck_return_to": "/games" }))).toBe("/games");
+    expect(readReturnToCookie(fakeJar({}))).toBeUndefined();
   });
 });
 

@@ -40,6 +40,11 @@ export const COOKIE_NAME = {
      "로그아웃했는데 로그인 상태"). 이 마커가 있으면 세션 쿠키를 무시·삭제해 그 창을 닫는다.
      수명은 access TTL 과 같다 — 되살아날 수 있는 access 의 최대 수명이 딱 그만큼이다. */
   loggedOut: "__Host-ck_lo",
+  /* 로그인 후 복귀 경로. URL 에 실어 치지직을 왕복시키지 않고 우리 쿠키에 두는 이유: 왕복하는
+     값은 공급자 로그·리퍼러에 남고, 무엇보다 콜백 쿼리는 공격자가 통째로 짤 수 있다(state 는
+     쿠키 대조로 막히지만 복귀 경로까지 쿼리에 있으면 검증할 대상이 하나 늘 뿐이다).
+     수명은 state 와 같은 STATE_TTL — 같은 한 번의 OAuth 왕복 동안만 살면 된다. */
+  returnTo: "__Host-ck_return_to",
 } as const;
 
 /* 구 이름(__Host- 프리픽스 이전) 쿠키. auth-touching 응답마다 명시적으로 만료시켜, 배포를

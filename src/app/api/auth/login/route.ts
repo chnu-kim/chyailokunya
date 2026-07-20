@@ -4,9 +4,11 @@
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
-import { plantOauthStateCookie } from "@/features/auth/session-cookies";
+import { safeReturnTo } from "@/core/auth";
+import { plantOauthStateCookie, plantReturnToCookie } from "@/features/auth/session-cookies";
+import { KNOWN_PAGE_PATHS } from "@/features/routes";
 
-export async function GET() {
+export async function GET(req: Request) {
   const { env } = getCloudflareContext();
   if (!env.CHZZK_CLIENT_ID || !env.AUTH_URL) {
     return new NextResponse("로그인이 아직 설정되지 않았어요", { status: 503 });
@@ -23,5 +25,17 @@ export async function GET() {
 
   const res = NextResponse.redirect(authUrl);
   plantOauthStateCookie(res, state);
+  /* 어디서 로그인을 눌렀는지를 여기서 **검증해서** 심는다 — 쿠키에 검증된 값만 들어가야
+     "이 쿠키는 믿을 수 있다"가 성립한다. 검증 실패는 조용히 `/`(core.safeReturnTo).
+
+     **`return_to` 가 없어도 반드시 심는다(무조건 덮어쓰기).** 기본값이면 안 심는 게 절약처럼
+     보이지만 그러면 이런 일이 난다: `/games` 에서 로그인을 눌러 쿠키가 `/games` 로 심긴 뒤
+     치지직 동의 화면에서 이탈 → 쿠키는 10분 산다 → `/` 로 돌아와 다시 로그인 → 조건부 심기면
+     쿠키가 여전히 `/games` → 누른 적 없는 `/games` 로 착지한다. 매 로그인이 이전 시도의
+     잔여를 덮는 것이 이 쿠키의 계약이다. */
+  plantReturnToCookie(
+    res,
+    safeReturnTo(new URL(req.url).searchParams.get("return_to"), KNOWN_PAGE_PATHS),
+  );
   return res;
 }

@@ -109,6 +109,22 @@ export function readOauthStateCookie(jar: CookieJar): string | undefined {
   return jar.get(COOKIE_NAME.state)?.value;
 }
 
+/* 로그인 후 복귀 경로 왕복(이슈 #25). login 이 검증된 경로를 심고 callback 이 — 성공이든
+   실패든 — 읽고 걷는다. state 와 수명·왕복 구간이 같지만 별도 쿠키다: state 는 CSRF nonce 라
+   값이 대조 대상이고 이건 리다이렉트 대상이라, 한 쿠키에 이어 붙이면 파싱 실수 하나가 두
+   보안 속성을 동시에 무너뜨린다. 걷는 걸 빠뜨리면 다음 로그인이 남의 경로로 튄다. */
+export function plantReturnToCookie(sink: CookieSink, path: string): void {
+  sink.cookies.set(COOKIE_NAME.returnTo, path, withTtl(STATE_TTL_MS));
+}
+
+export function clearReturnToCookie(sink: CookieSink): void {
+  sink.cookies.set(COOKIE_NAME.returnTo, "", cleared());
+}
+
+export function readReturnToCookie(jar: CookieJar): string | undefined {
+  return jar.get(COOKIE_NAME.returnTo)?.value;
+}
+
 /* 레거시 세션·OAuth 쿠키(구 이름 ck_at·ck_rt·ck_oauth_state·ck_lo, __Host- 프리픽스 이전)를
    응답에서 만료시킨다. auth 상태를 건드리는 응답(로그인 성공/실패·로그아웃·미들웨어의 세션
    정리)에 실어, 배포를 롤백했을 때 브라우저에 남은 구 쿠키가 옛 세션을 되살릴 창을 좁힌다 —
