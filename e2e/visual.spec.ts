@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { signIn } from "./session";
 
 /* 시각 스냅샷 베이스라인 — 3페이지 × 라이트/다크. 이 사이트는 prefers-color-scheme 가 아니라
    data-theme 로 테마를 정하므로, 첫 페인트 전 인라인 스크립트가 읽는 localStorage("theme")를
@@ -39,3 +40,31 @@ for (const p of PAGES) {
     });
   }
 }
+
+/* 로그인 상태는 오래 시각 베이스라인이 0 장이었다(이슈 #23) — 헤더 재편 때 계정 영역을 크게
+   고치고도 스냅샷이 한 장도 안 흔들렸다. 이제 세션 fixture 가 있으니 한 장 찍는다.
+
+   페이지가 아니라 nav 만, 라이트만 찍는다. 로그인이 바꾸는 건 헤더의 계정 영역 하나뿐이라
+   본문까지 담으면 무관한 diff(폰트·이미지)가 이 한 장을 흔들 뿐이고, 다크는 같은 토큰
+   경로를 타서 위 6장이 이미 덮는다. 폭은 1280 — 이름이 안 잘리는 계약이 사는 폭이다
+   (nav-touch-target.spec.ts 의 채널명 단언과 같은 자리). */
+test("시각: nav 로그인 상태 · light", async ({ page, baseURL }) => {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("theme", "light");
+    } catch {
+      // 위 스냅샷들과 같은 이유로 무해하다.
+    }
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await signIn(page.context(), baseURL!);
+
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator(".nav__signout")).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+
+  await expect(page.locator(".nav")).toHaveScreenshot("nav-signed-in-light.png", {
+    animations: "disabled",
+  });
+});
