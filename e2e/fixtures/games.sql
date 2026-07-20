@@ -34,3 +34,25 @@ VALUES
   (6, 'e2e-longtitle',       'GAME', '레이튼 교수와 최후의 시간여행 모바일 HD 리마스터', NULL, '2026-02-10', NULL, 1700000004000, 1700000004000),
   (7, 'e2e-celeste',         'GAME', '셀레스테',        NULL, '2026-01-20', '2026-01-29', 1700000005000, 1700000005000),
   (8, 'e2e-stardew',         'GAME', '스타듀 밸리',     NULL, '2026-01-05', NULL,         1700000006000, 1700000006000);
+
+-- 쓰기 권한자 1명. access 는 무상태라 세션만으론 DB 를 안 보지만, 인가는 **매번 역할을
+-- 조회**하므로(ADR-0017) 이 행들이 없으면 로그인해도 authorities 가 비어 member 로 떨어진다.
+--
+-- 세 행이 다 필요한 건 조회가 **userId 가 아니라 channelId 로** 들어오기 때문이다
+-- (server-session.authoritiesForActor → listRolesForChannel). access 클레임엔 userId 도
+-- 있지만 인가 경로는 그걸 안 쓰므로, oauth_accounts 가 channelId → user_id 를 이어 주지
+-- 않으면 users_roles 에 행이 있어도 안 걸린다. provider_user_id 는 e2e/session.ts 의
+-- E2E_USER.channelId 와 글자 그대로 같아야 한다.
+--
+-- 이게 있어야 하는 이유: 로그아웃 상태의 `/games` 본문에는 **인터랙티브 요소가 하나도 없다**.
+-- 추가·수정·삭제가 전부 canWrite/canDelete 뒤라, 권한 없이 좁은 폭을 재면 이 페이지에서
+-- 터치 타깃 검사가 0건이 된다 — 검사한 척만 하는 초록이다(narrow-body.spec.ts).
+-- superadmin 이 아니라 admin 인 건 game:write·game:delete 만 필요하고 role:manage 는
+-- 이 스펙의 관심사가 아니어서다 — 픽스처가 필요 이상의 권한을 들고 있지 않게 한다.
+DELETE FROM users_roles;
+DELETE FROM oauth_accounts;
+DELETE FROM users;
+INSERT INTO users (id, created_at, last_updated_at) VALUES (1, 1700000000000, 1700000000000);
+INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, channel_name, created_at, last_updated_at)
+VALUES (1, 1, 'chzzk', 'e2e-channel-0000', '챠이로 쿠냐', 1700000000000, 1700000000000);
+INSERT INTO users_roles (user_id, role, created_at) VALUES (1, 'admin', 1700000000000);
