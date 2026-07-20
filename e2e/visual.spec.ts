@@ -82,10 +82,18 @@ test("시각: nav 로그인 상태 · light", async ({ page, baseURL }) => {
    그걸 못 본다. 대비 계산이 잡는 축이지만 계산은 사람이 안 돌리면 안 돌아간다.
 
    범위는 카드 하나가 아니라 **.games 격자 전체**다. 액션 줄이 카드를 50px 높이는데,
-   액션 줄이 없는 .addslot(게임 추가)과 기준선이 어긋나는지는 격자를 봐야 드러난다
-   (grid-auto-rows:1fr 이 맞춰 주는 걸 이번에 실측으로 확인했지만, 그건 지금 참인 것이지
-   계약이 아니다). 픽스처가 결정적이라(e2e/fixtures/games.sql, poster null) 격자를 넓게
-   잡아도 흔들리지 않는다. */
+   액션 줄이 없는 .addslot(게임 추가)과 기준선이 어긋나는지는 격자를 봐야 드러난다.
+   .addslot 은 이제 align-self:start 로 늘어나기를 거부하므로(games.css) 카드 키가 서로
+   다른 게 정상이다 — 라벨과 .game__name 의 기준선 대응은 그래도 유지된다(실측 어긋남
+   0.32px). 픽스처가 결정적이라(e2e/fixtures/games.sql, poster null) 격자를 넓게 잡아도
+   흔들리지 않는다.
+
+   **라이트 한 장은 카드 키 변화를 못 잡는다 — 이 베이스라인의 알려진 맹점이다.** .addslot 이
+   줄면서 드러나는 자리가 라이트에선 흰 종이(#fff) → 거의 흰 노트 배경이라 픽셀 차가
+   Playwright 기본 threshold 0.2(YIQ) 아래로 떨어져 **낡은 베이스라인이 초록으로 통과했다**
+   (다크는 크림 섬 → 검정이라 21254px 로 즉시 빨개졌다). 실제로 이번에 라이트 파일을 지우고
+   다시 구워야 했다. 카드 기하를 바꿨는데 다크만 빨개지면 라이트가 무사한 게 아니라 못 본
+   것이다 — 두 장 다 지우고 재생성해라. */
 for (const theme of ["light", "dark"] as const) {
   test(`시각: games 쓰기 권한 · ${theme}`, async ({ page, baseURL }) => {
     await page.addInitScript((t) => {
