@@ -23,6 +23,7 @@ export function GameDialog({
   busy = false,
   describedBy,
   alert = false,
+  closeButton = true,
   onClose,
   children,
 }: {
@@ -48,8 +49,8 @@ export function GameDialog({
   busy?: boolean;
   /* 제목과 **함께** 읽힐 설명 요소의 id. 공백으로 여럿 나열할 수 있다(IDREF 목록).
 
-     왜 필요한가: showModal() 뒤 포커스는 DOM 첫 포커서블인 .composer__close 로 가므로,
-     aria-labelledby 만 걸면 스크린리더가 읽는 건 "제목 · 대화상자 · 닫기 버튼"이 전부다.
+     왜 필요한가: showModal() 뒤 포커스는 DOM 첫 포커서블(X 가 있으면 .composer__close,
+     없으면 본문 첫 컨트롤)로 가므로, aria-labelledby 만 걸면 스크린리더가 읽는 건 "제목 · 대화상자 · 닫기 버튼"이 전부다.
      본문에 무엇이 걸려 있는지(어느 게임인지, 되돌릴 수 있는지)는 사용자가 직접 훑어야
      알게 되는데, 파괴 확인에선 그게 유일한 안전장치다. describedBy 로 이어 두면 열리는
      순간 함께 낭독된다. 포스터는 alt="" 라 아무것도 안 싣는다 — 이름을 따로 가리켜야 한다. */
@@ -59,6 +60,14 @@ export function GameDialog({
      설명을 낭독하는 근거가 된다(describedBy 와 한 쌍이다). 네이티브 <dialog>+showModal 이
      주는 포커스 트랩·Esc·배경 inert·top-layer 는 role 과 무관하게 그대로다. */
   alert?: boolean;
+  /* 모서리 X 를 그릴지. **본문에 "취소"가 있으면 끈다** — 같은 일을 하는 손잡이 둘이 한 화면에
+     있으면 사용자는 차이를 찾느라 멈춘다("X 는 취소와 다른 건가?"). 닫는 길은 X 를 빼도 셋이
+     남는다: 취소 버튼 · Esc · 배경 클릭.
+     켜 두는 건 취소가 없는 다이얼로그뿐이다(컴포저의 2차 버튼은 "뒤로"라 검색 단계로 돌아갈
+     뿐 닫지 않는다 — 거기선 X 가 유일한 닫기다).
+     부수 효과가 하나 있고 그게 파괴 확인에선 이득이다: 첫 포커서블이 X 에서 "취소"로 바뀌어
+     열리자마자 **안전한 쪽**에 포커스가 선다. */
+  closeButton?: boolean;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -126,22 +135,24 @@ export function GameDialog({
         pressedOutside.current = false;
       }}
     >
-      <button
-        className="composer__close"
-        type="button"
-        aria-label="닫기"
-        disabled={busy}
-        onClick={close}
-      >
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <path
-            d="M4 4l8 8M12 4l-8 8"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-        </svg>
-      </button>
+      {closeButton && (
+        <button
+          className="composer__close"
+          type="button"
+          aria-label="닫기"
+          disabled={busy}
+          onClick={close}
+        >
+          <svg aria-hidden="true" viewBox="0 0 16 16">
+            <path
+              d="M4 4l8 8M12 4l-8 8"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      )}
 
       <div className="composer__body">
         <h2 className="composer__title" id={titleId}>

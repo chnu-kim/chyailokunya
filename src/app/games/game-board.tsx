@@ -307,10 +307,15 @@ function GameDeleteConfirm({
 
   return (
     <GameDialog
-      title="보드에서 뗄까요?"
+      /* 이 화면만 **합쇼체**다. 보드 나머지는 다정한 해요체지만, 되돌릴 수 없는 확인에서
+         장난기는 신뢰를 깎는다 — 격식이 "이건 진짜다"를 말한다(AGENTS 톤 규칙의 명시적 예외). */
+      title="삭제하시겠습니까?"
       odId="game-delete"
       closing={closing}
       busy={removing}
+      /* 본문에 "취소"가 있으므로 모서리 X 를 끈다 — 같은 일을 하는 손잡이 둘은 사용자를
+         멈춰 세운다. 덤으로 첫 포커서블이 "취소"가 되어 파괴가 아닌 쪽에 포커스가 선다. */
+      closeButton={false}
       /* 제목만으론 "무엇을 떼는지"도 "되돌릴 수 없다"도 안 읽힌다 — 카드 N 장이 전부 같은
          문장으로 열린다. 게임 이름과 안내 문구를 이어 열리는 순간 함께 낭독시킨다. 감싸는
          상자를 새로 만들지 않고 두 id 를 나열하는 이유: 포스터·이니셜은 장식이라(alt=""·
@@ -340,7 +345,7 @@ function GameDeleteConfirm({
       </div>
 
       <p className="composer__hint" id="game-delete-hint">
-        떼면 되돌릴 수 없어요. 다시 붙이려면 검색부터 다시 해요.
+        삭제하면 되돌릴 수 없습니다. 다시 추가하려면 검색부터 다시 하셔야 합니다.
       </p>
 
       {error && (
@@ -429,6 +434,8 @@ function GameDateEditor({
       odId="date-editor"
       closing={closing}
       busy={saving}
+      // 삭제 확인과 같은 이유로 X 를 끈다 — 본문에 "취소"가 있다(GameDialog 의 closeButton).
+      closeButton={false}
       onClose={() => (saved ? onUpdated(saved) : onClose())}
     >
       <form className="composer__detail" onSubmit={onSave}>
