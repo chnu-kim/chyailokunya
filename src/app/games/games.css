@@ -105,20 +105,28 @@
    .sticker 가 캐릭터 컷아웃을 배경에서 뗄 때 쓰는 것과 같은 수 — drop-shadow 는 box-shadow 와
    달리 알파 실루엣을 따라가므로 집게의 굽은 윤곽을 그대로 딴다.
 
-   **선택자가 .polaroid.game 인 이유(0-3-0)와 마지막 그림자가 있는 이유는 하나다:
+   **선택자가 긴 이유(0-4-0)와 마지막 그림자가 있는 이유는 하나다:
    filter 는 누적이 아니라 교체다.** chrome.css 가 이 요소에 이미 filter 를 두 번 건다 —
    .polaroid > .clip 의 입체 그림자(0-2-0)와 [data-theme="dark"] .polaroid > .clip 의
    크림 halo(0-3-0). 마크업이 "polaroid game" 이라 셋이 같은 요소에 붙는다.
    .game > .clip(0-2-0)로 쓰면 **다크에선 0-3-0 에 져서 윤곽이 아예 안 걸리고**(이 변경이
    고치려는 바로 그 증상이 다크에서 그대로 남는다), 라이트에선 동률+나중이라 이기지만
    입체 그림자를 통째로 지운다. 실측으로 둘 다 확인했다.
-   그래서 0-3-0 으로 올려 두 테마 모두 이기고, 지워질 입체 그림자를 이 filter 안에 다시 싣는다.
+   그래서 특이도를 올려 두 테마 모두 이기고, 지워질 입체 그림자를 이 filter 안에 다시 싣는다.
    다크의 크림 halo 는 이 흰 윤곽이 대신한다 — 흐림 1.5px 보다 하드 1px 네 방향이 세다.
+
+   **부모 .games 까지 넣어 0-4-0 을 만드는 건 동률을 없애려는 것이다.** .polaroid.game 만으로도
+   0-3-0 이라 다크 규칙과 같은데, 동률은 소스 순서로 갈리고 이 둘은 **서로 다른 CSS 청크**에
+   떨어진다(chrome 은 layout, games 는 page). 지금은 App Router 가 layout CSS 를 먼저 내
+   우리가 이기지만, 그 순서가 뒤집히면 다크 윤곽이 조용히 죽는다 — 그리고 **그걸 잡아 줄
+   게이트가 없다**: 이 결합을 보는 건 시각 스냅샷뿐인데 베이스라인이 darwin 전용이라 CI 에
+   없다(AGENTS.md). 링크 순서에 안 기대게 특이도로 끝낸다.
+   대가는 카드가 .games 밖에 서면 이 규칙이 안 붙는다는 것 — 보드 격자가 카드의 유일한 집이다.
    **chrome.css 의 저 두 규칙을 고칠 땐 여기도 같이 본다.**
 
    장식이라 대비 게이트 대상은 아니다(aria-hidden) — 이건 정보가 아니라 일관성 문제다. */
-.polaroid.game > .clip,
-.polaroid.addslot > .clip {
+.games .polaroid.game > .clip,
+.games .polaroid.addslot > .clip {
   filter: drop-shadow(1px 0 0 var(--sticker-edge)) drop-shadow(-1px 0 0 var(--sticker-edge))
     drop-shadow(0 1px 0 var(--sticker-edge)) drop-shadow(0 -1px 0 var(--sticker-edge))
     drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
