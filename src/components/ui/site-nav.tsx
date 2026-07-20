@@ -21,14 +21,9 @@ import { ThemeToggle } from "./theme-toggle";
    되돌릴 수 있는 액션 하나를 감추자고 그 비용을 치르지 않는다. */
 export function SiteNav({ user }: { user: { name: string } | null }) {
   const pathname = usePathname();
-  // 빈 채널명도 슬롯을 비우지 않는다 — 아바타가 항상 한 글자를 그려야 좁은 화면에서
-  // 로그인 여부의 시각 단서가 사라지지 않는다(≤560px 에선 이름이 clip 되고 배지만 남는다).
+  // 빈 채널명이어도 라벨을 비우지 않는다 — 이름 슬롯이 통째로 사라지면 로그인 상태에서
+  // 계정 영역이 로그아웃 버튼 하나로 보여 "누구로 로그인했는지"를 물을 수조차 없다.
   const label = user ? user.name || "로그인됨" : "";
-  // 코드포인트 단위로 자른다 — slice(0,1)·charAt(0) 은 이모지가 든 채널명의 서로게이트
-  // 쌍을 반쪽만 남겨 U+FFFD 로 렌더한다. 폴백 라벨("로그인됨")일 때 첫 글자를 쓰지 않는
-  // 이유: 배지에 '로' 만 남으면 사람 이름의 첫 글자로 읽혀 실제 채널명처럼 오독된다.
-  // 비언어 문자로 두면 "이름을 못 받았다"가 그대로 읽힌다.
-  const initial = user?.name ? (Array.from(user.name)[0] ?? "?") : "?";
   return (
     <header className="nav" data-od-id="site-nav">
       <div className="nav__inner">
@@ -63,20 +58,15 @@ export function SiteNav({ user }: { user: { name: string } | null }) {
           <ThemeToggle />
           {user ? (
             <form className="nav__auth" action="/api/auth/logout" method="post" data-od-id="logout">
-              {/* title 을 달지 않는다 — clip 대상이 래퍼가 아니라 .nav__user-name 으로
-                  좁아진 뒤로 이름은 어느 폭에서도 접근성 트리에 남는다. 이름 없는 generic
-                  에 붙은 title 은 description 이 되어 VoiceOver 가 이름을 두 번 읽을 수
-                  있고, 툴팁은 정작 이 폭대의 터치 기기에서 띄울 수 없다. */}
-              <span className="nav__user">
-                {/* 옆 이름을 그대로 중복하므로 aria-hidden — 스크린리더는 .nav__user-name 을
-                    읽는다(좁은 폭에서 clip 되어도 접근성 트리엔 남는다). 560px 이하에서
-                    시각 사용자에게 남는 건 이 배지의 원형이 아니라 그 안 글자 하나다
-                    (칩 채움은 1.23:1 — chrome.css .nav__user-avatar 주석). */}
-                <span className="nav__user-avatar" aria-hidden="true">
-                  {initial}
-                </span>
-                <span className="nav__user-name">{label}</span>
-              </span>
+              {/* 채널명 첫 글자 이니셜 배지를 뺐다 — 치지직 users/me 가 프로필 이미지를 안 줘서
+                  글자로 대신 그린 것이었는데, 진짜 아바타가 아닌 이니셜은 신원 정보를 하나도
+                  더하지 않고 바로 옆 이름의 첫 글자를 크게 반복할 뿐이다(그래서 aria-hidden
+                  이었다 — 접근성 트리엔 애초에 아무것도 안 실렸다). 진짜 프로필 이미지가
+                  생기면 그때 이 자리에 이미지를 넣는다(이슈 #26).
+                  title 은 달지 않는다 — clip 대상이 .nav__user-name 자신이라 이름은 어느
+                  폭에서도 접근성 트리에 남는다. title 은 description 이 되어 VoiceOver 가
+                  이름을 두 번 읽을 수 있고, 툴팁은 정작 이 폭대의 터치 기기에서 못 띄운다. */}
+              <span className="nav__user-name">{label}</span>
               <button className="nav__signout" type="submit">
                 로그아웃
               </button>

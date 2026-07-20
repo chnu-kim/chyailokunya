@@ -52,8 +52,11 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameRo
   return row ?? null;
 }
 
-/* 하드 삭제(ADR-0014, deleted_at 없음). 없는 id 삭제는 오류가 아니라 deleted:false —
-   클라이언트 지연 커밋이 늦게 도착해도 안전하고, 되돌리기는 서버 상태 없이 클라이언트가 쥔다. */
+/* 하드 삭제(ADR-0014 의 결론, 근거는 ADR-0020 — 확인이 파괴 전에 오므로 되돌릴 대상이 없다).
+   없는 id 삭제를 오류가 아니라 deleted:false 로 두는 건 멱등성 때문이다: 확인 모달이 열려 있는
+   사이 다른 탭·다른 관리자가 같은 카드를 먼저 지웠을 수 있고, 그땐 목표 상태가 이미 달성된
+   것이라 사용자가 손쓸 수 없는 오류를 띄우면 안 된다(라우터가 이 값을 그대로 성공 페이로드로
+   흘려보내는 이유다). */
 export async function removeGame(db: Db, id: number): Promise<{ deleted: boolean }> {
   const rows = await db.delete(games).where(eq(games.id, id)).returning({ id: games.id });
   return { deleted: rows.length > 0 };

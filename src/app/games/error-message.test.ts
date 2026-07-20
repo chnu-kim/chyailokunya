@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isAborted, readErrorMessage, writeErrorMessage } from "./error-message";
+import {
+  deleteErrorMessage,
+  isAborted,
+  readErrorMessage,
+  writeErrorMessage,
+} from "./error-message";
 
 /* 이 문구들은 사용자가 다음에 무엇을 할지 정하는 근거다 — 틀리면 멀쩡한 데이터를 지우거나
    안 되는 일을 계속 재시도하게 만든다. 실제로 프로덕션에서 400 에 "네트워크가 느린 것
@@ -91,6 +96,58 @@ describe("writeErrorMessage — 확인 안 된 것은 말하지 않는다", () =
     const msg = writeErrorMessage(trpc("INTERNAL_SERVER_ERROR"));
     expect(msg).toContain("확인하지 못했어요");
     expect(msg).not.toContain("저장되지 않았");
+  });
+});
+
+/* 삭제는 ADR-0020 전까지 이 파일에 닿은 적이 없었다(실패가 자국 안 announcement 로만 흘렀다).
+   즉시 커밋으로 바뀌며 writeErrorMessage 를 그대로 재사용했는데, 그 문구는 전부 저장 기준이라
+   "삭제됐을 수도 있으니"가 참인 자리에 "저장됐을 수도 있으니"가 떴다 — 사용자가 다음에 무엇을
+   할지 정하는 문장에서 조작 자체가 뒤바뀐 것이다. 위 writeErrorMessage 블록이 저장 어휘를
+   **정답으로** 못박고 있어 게이트가 이걸 결함으로 읽을 수 없었으므로, 삭제판도 같은 수준으로
+   전수 검사한다(readErrorMessage 가 "저장"을 훑는 것과 같은 규칙). */
+describe("deleteErrorMessage — 삭제는 저장이 아니다", () => {
+  it.each(SERVER_ANSWERED)("%s: 삭제 문구에 저장 어휘가 섞이지 않는다", (code) => {
+    expect(deleteErrorMessage(trpc(code))).not.toContain("저장");
+  });
+
+  it("중단·연결 실패도 저장 어휘를 쓰지 않는다", () => {
+    expect(deleteErrorMessage(wrapped(timeout()))).not.toContain("저장");
+    expect(deleteErrorMessage(new Error("연결 끊김"))).not.toContain("저장");
+  });
+
+  it.each(SERVER_ANSWERED)("%s: 서버가 답했으므로 네트워크를 원인으로 지목하지 않는다", (code) => {
+    expect(deleteErrorMessage(trpc(code))).not.toContain("네트워크");
+  });
+
+  it("상한에 걸리면 삭제 여부를 모른다고 말하고 확인 방법을 준다", () => {
+    const msg = deleteErrorMessage(wrapped(timeout()));
+    expect(msg).toContain("삭제됐을 수도");
+    expect(msg).toContain("새로고침");
+  });
+
+  it("INTERNAL_SERVER_ERROR·연결 실패는 어느 단계에서 죽었는지 모르므로 단정하지 않는다", () => {
+    for (const e of [trpc("INTERNAL_SERVER_ERROR"), new Error("연결 끊김")]) {
+      const msg = deleteErrorMessage(e);
+      expect(msg).toContain("삭제됐는지 확인하지 못했어요");
+      expect(msg).toContain("새로고침");
+    }
+  });
+
+  /* remove 는 CONFLICT 를 못 내고, 없는 id 는 오류가 아니라 deleted:false 성공이라 NOT_FOUND 도
+     안 온다 — 도달 불가한 코드에 전용 문구를 두면 거짓말을 유지보수하게 된다. 남은 갈래는
+     "쓰기 전에 거절됨" 하나로 모은다. */
+  it("삭제에 도달 불가한 코드에 추가 문구를 만들지 않는다", () => {
+    expect(deleteErrorMessage(trpc("CONFLICT"))).toBe(
+      "삭제하지 못했어요. 잠시 후 다시 시도해 주세요.",
+    );
+    expect(deleteErrorMessage(trpc("NOT_FOUND"))).toBe(
+      "삭제하지 못했어요. 잠시 후 다시 시도해 주세요.",
+    );
+  });
+
+  it("인가 실패는 쓰기와 같은 문구를 쓴다 — 할 일이 같다", () => {
+    expect(deleteErrorMessage(trpc("FORBIDDEN"))).toBe(writeErrorMessage(trpc("FORBIDDEN")));
+    expect(deleteErrorMessage(trpc("UNAUTHORIZED"))).toBe(writeErrorMessage(trpc("UNAUTHORIZED")));
   });
 });
 

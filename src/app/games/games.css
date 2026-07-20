@@ -5,8 +5,11 @@
   --trash: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14'/%3E%3C/svg%3E");
   --pencil: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L20 8l-4-4L4 16v4zM14 6l4 4'/%3E%3C/svg%3E");
 }
+/* 아래 패딩이 24 가 아니라 32 인 이유: 설명 한 줄(제목·총계와 같은 말을 되풀이하던 .head__lead)
+   이 빠지면서 제목 줄과 첫 카드 사이가 24px 로 붙었는데, 카드 집게가 카드 위로 10px 튀어나와
+   실효 간격이 14px 밖에 안 된다. 32 면 22px 이 남아 집게가 제목 줄에 닿지 않는다. */
 .head {
-  padding: var(--space-7) 0 var(--space-5);
+  padding: var(--space-7) 0 var(--space-6);
 }
 .head__row {
   display: flex;
@@ -26,12 +29,6 @@
   font-size: var(--text-xl);
   color: var(--fg);
 }
-.head__lead {
-  color: var(--fg-muted);
-  margin: var(--space-3) 0 0;
-  max-width: 60ch;
-}
-
 .board {
   padding-bottom: var(--space-9);
 }
@@ -47,19 +44,45 @@
 .games {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  /* stretch(그리드 기본)는 **한 행 안**에서만 높이를 맞춘다 — 행마다 자기 행에서 가장 높은
+     카드를 따라가므로, 클리어 칩이 있는 카드가 든 행과 없는 행의 종이 길이가 갈렸다
+     (실측 vw480 35px · vw360 53px). 카드가 흰 사진지라 그 차이는 테두리로 그대로 보인다.
+     높이가 auto 인 그리드에서 1fr 암시적 행은 가장 큰 행의 max-content 로 수렴하므로 모든
+     행이 같은 높이가 된다(실측: 세 값 → 한 값). 아래 .game__when 의 auto 마진은 이걸 못
+     대신한다 — 마진은 한 카드 안에서만 밀 뿐 행 간에는 맞출 대상이 없다.
+     e2e 픽스처는 5장이라 한 행에 다 들어가 이 축이 스냅샷에 안 잡힌다 — 카드가 늘어야
+     드러나는 종류의 어긋남이라 눈이 아니라 계산으로 잡는다. */
+  grid-auto-rows: 1fr;
   gap: var(--space-7) var(--space-5);
 }
 /* .polaroid 가 사진지 표면 + 다크 토큰 섬을 준다. 쉼 각도를 --rest-rot 으로 부르는 건
-   index·landing 과 같은 규약(리터럴 대신 변수 — 미디어쿼리가 각도만 덮게). */
+   index·landing 과 같은 규약(리터럴 대신 변수 — 미디어쿼리가 각도만 덮게).
+   flex 컬럼인 이유: 카드는 세로로 쌓인 덩이 둘(썸네일·본문)이고, 본문이 남는 높이를 먹어야
+   날짜 줄을 바닥으로 밀 수 있다. 그리드가 한 행의 카드를 같은 높이로 늘리므로(stretch 가
+   기본) 이름이 한 줄인 카드와 두 줄인 카드의 날짜가 같은 기준선에 선다. */
 .game {
   margin: 0;
   padding: 12px 12px 14px;
   box-shadow: var(--shadow-card);
   --rest-rot: 0deg;
   transform: rotate(var(--rest-rot));
+  display: flex;
+  flex-direction: column;
   transition:
     transform var(--dur-base) var(--ease-paper),
     box-shadow var(--dur-base);
+}
+/* 집게는 chrome.css 기본이 오른쪽 위(right:24px)인데 보드 카드에선 그 자리를 수정·삭제
+   오버레이가 쓴다 — 두 부품이 같은 모서리에서 겹치므로 집게를 위쪽 가운데로 옮긴다.
+   중앙 정렬 방식은 .tape 와 같다(left:50% + translateX(-50%)).
+   **가운데로 옮겨도 x 충돌은 안 없어진다** — 액션 판이 92px 라 카드 중앙을 넘어오므로
+   집게와 늘 20px 겹친다. 세로로 떼어 놓는 게 실제 해법이고 그 값은 .game__acts 의 top 에
+   있다(둘 중 하나를 옮길 땐 반드시 같이 다시 잰다). */
+.game > .clip,
+.addslot > .clip {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
 }
 .game:hover {
   transform: rotate(0deg) translateY(-3px);
@@ -77,9 +100,14 @@
 /* ---- Add slot — 보드 첫 칸의 빈 폴라로이드 -----------------------------
    컴포저가 사이드바에서 여기로 내려온 이유: 붙이기는 드물고 사적인 행동인데 폭의 31.7%
    를 상시 점유했다. 빈 종이를 한 장 꺼내 붙이는 게 은유지 접수창구가 아니다. 빗금·종이톤이
-   --thumb-* 인 이유: 히어로 슬롯·게임 썸네일이 이미 쓰는 "아직 아무것도 없다" 언어다. */
+   --thumb-* 인 이유: 히어로 슬롯·게임 썸네일이 이미 쓰는 "아직 아무것도 없다" 언어다.
+
+   은유대로 .polaroid 를 입는다(마크업이 클래스를 준다) — 사진지 면·다크 토큰 섬·집게 halo 를
+   게임 카드와 똑같이 받아야 "같은 종이 한 장"으로 읽힌다. 패딩·본문 오프셋도 .game 과 같은
+   값이어야 첫 칸만 기준선이 어긋나지 않는다. */
 .addslot {
-  display: block;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   margin: 0;
   padding: 12px 12px 14px;
@@ -88,6 +116,9 @@
   text-align: left;
   cursor: pointer;
   box-shadow: var(--shadow-card);
+  /* 버튼은 UA 가 넘침을 자를 수 있는 요소다 — 집게가 카드 위로 10px 튀어나오므로 명시적으로
+     열어 둔다(.game 은 div 라 기본값이 이미 visible). */
+  overflow: visible;
   transition:
     transform var(--dur-base) var(--ease-paper),
     box-shadow var(--dur-base);
@@ -123,12 +154,15 @@
   color: var(--brand-ink);
   opacity: 0.55;
 }
+/* .game__name 과 같은 글꼴·크기·줄높이에 같은 2줄 상자(2.4em)를 준다 — 라벨이 한 줄이라도
+   자리를 두 줄 차지해야 첫 칸 카드의 아래 여백이 게임 카드와 어긋나지 않는다. */
 .addslot__label {
   display: block;
   margin: 12px 4px 0;
   font-family: var(--font-display);
   font-size: var(--text-lg);
   line-height: 1.2;
+  min-height: 2.4em;
 }
 
 /* 쓰기 권한이 없을 때 보여주던 것이 여기 두 번 있었다: 그리드 첫 칸의 잠긴 폴라로이드,
@@ -414,6 +448,32 @@ dialog.composer[open]::backdrop {
   flex: 1 1 0;
   justify-content: center;
 }
+/* 삭제 확인의 확정 버튼. 모양은 .btn--primary 와 같은 종이-컷(같은 라운드·컷 그림자·패딩)이라
+   액션 줄의 무게 위계는 그대로 두고 면 색만 파괴를 말한다 — 이 줄에서 "오른쪽이 확정"이라는
+   규칙이 흔들리면 안 된다.
+   글자가 --bg 인 이유: --danger 는 라이트에서 짙은 벽돌(#9a453d), 다크에서 밝은 연어(#e88b80)라
+   면의 명도가 테마마다 뒤집힌다. --bg 는 정확히 같은 방향으로 뒤집히는 토큰이라 한 선언으로
+   양쪽을 넘는다 — 라이트 6.38:1 / 다크 7.54:1(14px 라 4.5:1 게이트). 같은 수를 chrome.css 의
+   btn--secondary 다크 hover 가 이미 쓴다. 면 자체도 .paper 표면 위 라이트 6.38:1 / 다크
+   6.92:1 이라 UI 3:1 여유. */
+.composer__btn--danger {
+  background: var(--danger);
+  color: var(--bg);
+  border: 1.5px solid var(--danger);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-cut);
+  padding: 11px 20px;
+}
+/* --shadow-cut 의 잉크를 그대로 키운다(생 rgba 대신 토큰에서 파생 — btn--primary 의 hover 와
+   같은 그림자다). */
+.composer__btn--danger:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 4px 0 color-mix(in srgb, var(--brand-ink) 90%, transparent);
+}
+.composer__btn--danger:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 color-mix(in srgb, var(--brand-ink) 90%, transparent);
+}
 
 /* 좁은 화면에선 바텀 시트 — 엄지가 닿는 곳에 붙고, 위쪽 여백으로 뒤 보드가 계속 보인다. */
 @media (max-width: 560px) {
@@ -430,65 +490,9 @@ dialog.composer[open]::backdrop {
   }
 }
 
-/* ---- Ghost — 사진을 뗀 자리 --------------------------------------------
-   삭제는 확인 창을 띄우는 대신 **지연 커밋**이다([ADR-0014]): 타이머가 만료되기 전엔 delete
-   뮤테이션을 보내지 않으므로 되돌리기가 서버 상태를 전혀 건드리지 않는다 — games 에 deleted_at
-   이 없는 근거가 이것이다. 되돌리기는 그리드 위 별도 바가 아니라 카드가 있던 그 자리에 남긴다.
-   각도 0 인 이유: 이건 붙어 있는 종이가 아니라 자국이다. */
-.game--ghost {
-  --rest-rot: 0deg;
-  box-shadow: var(--shadow-tape);
-}
-.game--ghost .game__thumb {
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 9px,
-    var(--thumb-mark) 9px 18px
-  );
-}
-
-/* 카드가 자국으로 바뀌는 순간 — 살짝 가라앉으며 나타나면 뗀 자리라는 게 동작으로 읽힌다.
-   "방금 생긴 유령"에만 건다: 클래스가 붙는 순간 한 번만 돌고 이후 리렌더엔 다시 돌지 않는다.
-   backwards 인 이유는 .rise 와 같다(forwards 면 transform 이 박힌다). */
-@media (prefers-reduced-motion: no-preference) {
-  .game--settling {
-    animation: ghost-settle var(--dur-base) var(--ease-paper) backwards;
-  }
-}
-@keyframes ghost-settle {
-  from {
-    opacity: 0;
-    transform: rotate(var(--rest-rot)) scale(1.02);
-  }
-  to {
-    opacity: 1;
-    transform: rotate(var(--rest-rot));
-  }
-}
-.game__ghost-msg {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--fg-muted);
-  overflow-wrap: anywhere;
-}
-.game__undo {
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: var(--text-sm);
-  cursor: pointer;
-  background: transparent;
-  color: var(--fg);
-  min-height: 44px;
-  padding: 6px 12px;
-  border: 1.5px solid var(--fg);
-  border-radius: var(--radius-xs);
-}
-/* --bg 가 아니라 --fg-on-ink 인 이유: 사진지 섬 안이라 --fg 는 두 테마 잉크지만 --bg 는
-   다크에서 charcoal 이다. 잉크 배경에 charcoal 글자를 얹으면 다크에서 라벨이 사라진다. */
-.game__undo:hover {
-  background: var(--fg);
-  color: var(--fg-on-ink);
-}
+/* 삭제를 기다리는 자국(.game--ghost)과 되돌리기 버튼이 여기 있었다. 삭제가 6초 지연 커밋에서
+   확인 다이얼로그로 바뀌며(ADR-0020) 카드가 "뗀 것도 아직 있는 것도 아닌" 상태를 통과하지
+   않게 됐다 — 그릴 자국이 없다. */
 
 /* 게임 커버 아트는 전부 남의 저작물이라 실을 수 없고 AI 로 "비슷한 걸" 만드는 건 더 나쁘다.
    그래서 썸네일은 정직한 플레이스홀더 — 해시가 패턴 4종을 고르고 그 위에 이니셜이 앉는다.
@@ -555,12 +559,22 @@ dialog.composer[open]::backdrop {
   height: 100%;
   object-fit: cover;
 }
+/* 남는 높이를 본문이 먹어야 날짜 줄이 바닥에 붙는다(.game 의 flex 주석). min-height:0 은
+   flex 자식 기본값(auto)이 콘텐츠 아래로 안 줄어드는 걸 푸는 상투구다. */
 .game__body {
   margin: 12px 4px 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 /* min-width:0 + anywhere 가 둘 다 필요하다 — 게임명은 사용자 입력이라 끊을 데 없는 라틴
    한 덩어리(Cyberpunk2077)가 들어올 수 있고, flex 자식 기본 min-width:auto 는 그 폭 아래로
    안 줄어 칩을 카드 밖으로 밀어낸다. */
+/* 제목은 **2줄 고정**이다. 이름 길이가 카드마다 달라 아래 날짜 줄의 세로 위치가 카드마다
+   흔들리던 걸 여기서 끊는다: 넘치면 말줄임, 모자라면 빈 줄이 자리를 지킨다. 2.4em 은
+   line-height 1.2 × 2줄이라 1줄짜리 이름도 2줄짜리와 같은 상자를 차지한다 — 줄높이를 고치면
+   이 값도 같이 고친다. -webkit- 접두 3종(box·box-orient·line-clamp)은 한 벌이라 따로 못 쓴다. */
 .game__name {
   font-family: var(--font-display);
   font-size: var(--text-lg);
@@ -568,19 +582,39 @@ dialog.composer[open]::backdrop {
   color: var(--fg);
   min-width: 0;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  min-height: 2.4em;
 }
 /* 상태 칩과 장르·플랫폼 정의 목록이 여기 있었다. status 컬럼이 사라지고 장르·
    플랫폼은 치지직 category API 가 안 주므로(ADR-0015) 둘 다 걷어냈다 — 남은 사실은 날짜뿐이다.
+   날짜가 둘 다 없는 카드는 이 줄 자체가 렌더되지 않는다 — 빈 상자로 높이를 맞추면
+   "날짜 없음"이 있는 척 읽힌다.
 
-   날짜 줄: 텍스트 + 클리어 칩이 한 줄에 안 들어가면 칩이 아래로 내려가야 한다. wrap 이 없으면
-   칩(flex:0 0 auto)은 안 줄고 날짜 텍스트만 짓눌린다. 날짜가 둘 다 없는 카드는 이 줄 자체가
-   렌더되지 않는다 — 빈 상자가 남으면 카드마다 이름 아래 여백이 달라진다. */
+   **세로로 쌓되 날짜가 아래다.** 날짜와 칩은 기본 데스크톱 폭에 한 줄로 못 선다 — 5열에서
+   카드 195px → 이 줄에 161px 인데 날짜 112 + gap + 칩 55 = 175px 이 필요하다. 한때 이 줄은
+   한 줄 flex + wrap 이었고 그래서 칩이 둘째 줄로 감겼는데, 아래 auto 마진이 고정하는 건
+   **줄 전체의 바닥**이라 바닥을 칩이 차지하고 날짜가 한 줄 위로 떴다 — 같은 행에서 칩 있는
+   카드와 없는 카드의 날짜가 실측 34px 어긋났다(갱신 전 베이스라인 스냅샷의 "리틀 나이트메어"가
+   그 증거다). 순서를 뒤집으면 DOM 순서(날짜 → 칩)를 그대로 둔 채 날짜가 늘 마지막 줄이 되어
+   기준선이 카드마다 같아진다 — 실측 34px → 0px(vw1280·1000·760·480·360 전부).
+   wrap 을 끄는 것도 한 벌이다: 감길 수 있으면 그 보장이 다시 깨진다. 읽는 순서는 안 바뀐다
+   (뒤집히는 건 시각 순서뿐이라 스크린리더는 계속 "날짜 → 클리어"로 읽는다).
+
+   margin-top:auto 가 남는 높이를 먹어 이 줄을 카드 바닥으로 내린다. 행 간 높이는 auto 마진이
+   아니라 .games 의 grid-auto-rows 가 맡는다. 최소 간격을 margin 으로 주면 auto 에 먹히니
+   padding 으로 박는다. */
 .game__when {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: var(--space-2) 0 0;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin: auto 0 0;
+  padding-top: var(--space-2);
 }
 /* 14px 이라 4.5:1 게이트다 — --fg-muted 는 사진지 위 라이트 6.39:1 / 다크 크림 섬 5.22:1.
    여기서 한 단계 더 줄이면 게이트는 그대로인데 여유가 사라지므로 크기를 내리지 않는다. */
@@ -593,84 +627,123 @@ dialog.composer[open]::backdrop {
 .game__when .chip {
   flex: 0 0 auto;
 }
-/* 수정·삭제는 나란히. 카드가 좁아(최소 168px) 라벨 둘이 한 줄에 안 들어갈 수 있으므로 wrap. */
+/* ---- 카드 액션 — 썸네일 위 오버레이 -------------------------------------
+   수정·삭제는 카드 본문에 라벨 두 개짜리 줄로 있었다. 겹치기로 옮긴 이유는 game-board 주석에.
+
+   **대비가 이 부품의 전부다.** 얹히는 바닥이 --thumb-paper 크림이 아니라 **임의의 포스터
+   이미지**라, 단색 면 하나로는 어떤 색을 골라도 무너지는 표지가 존재한다(흰 면은 흰 표지 위
+   1.00:1, 잉크 면은 검은 표지 위 1.18:1). 그래서 잉크 면 + 흰 테두리 두 겹으로 간다: 둘 사이가
+   17.76:1 이라 표지가 밝으면 면이, 어두우면 테두리가 반드시 UI 3:1 을 넘긴다. .sticker 가
+   캐릭터 컷아웃을 배경에서 떼는 데 쓰는 것과 같은 수(--sticker-edge).
+   여기 쓰는 네 토큰(--brand-ink · --sticker-edge · --fg-on-ink, 그리고 섬 안에서 되돌려지는
+   --danger)은 전부 라이트·다크가 같은 값이라 아래 계산은 한 번으로 두 테마를 덮는다. */
 .game__acts {
+  position: absolute;
+  /* 오른쪽은 카드 패딩 12 + 썸네일 안쪽 6. 모서리에 딱 붙이면 썸네일 1px 테두리와 이 판의
+     테두리가 한 선으로 뭉쳐 버튼이 사진의 일부처럼 읽힌다.
+     위는 그 유도를 못 쓴다 — 같은 18 을 주면 집게와 세로로 겹친다. 집게는 카드 패딩 박스
+     기준 -10..36 이고(chrome.css 의 top:-10px + height:46px) 게임 카드에선 위쪽 가운데라
+     x 도 20px 겹치는데, 이 판(44 + 테두리 2×2 = 48px)이 불투명 잉크 면이라 페인트도
+     히트테스트도 판이 이겼다(집게 다리 좌표의 elementFromPoint 가 .game__acts 를 준다).
+     46px 집게가 28px 로 잘려, 판이 없는 .addslot 의 온전한 집게와 다른 부품으로 읽혔다.
+     36 + 숨 5 = 41 이면 겹침이 0 이고(실측 18px → 0px), 판 바닥 89px 는 최소 열(vw360)의
+     썸네일 바닥 169px 안쪽이라 사진 밖으로 안 나간다. hover:none 기기는 이 판을 상시
+     노출하므로(아래 미디어쿼리) 겹치면 모바일에선 영구적이었다.
+     집게에 z-index 를 주는 우회는 쓰지 않는다 — 집게가 버튼 위로 올라가면 겹치는 20px 띠
+     에서 포인터를 가로챈다. */
+  top: 41px;
+  right: 18px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: var(--space-2);
-}
-/* 수정은 삭제와 같은 3차 무게지만 파괴적이지 않다 — 색만 --danger 대신 --fg-muted
-   (사진지 위 라이트 6.39:1 / 다크 크림 섬 5.22:1, 12px 4.5:1 게이트 통과). */
-.game__edit {
-  background: transparent;
-  cursor: pointer;
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: var(--text-xs);
-  color: var(--fg-muted);
-  padding: 6px 10px;
-  border: 1px solid transparent;
+  background: var(--brand-ink);
+  /* 2px 인 이유(1.5 가 아니라): 이 테두리가 어두운 표지 위에서 대비를 지키는 유일한 수단인데
+     1.5px 는 DPR 1 화면에서 1px 로 스냅돼 실이 된다. .sticker 의 --sticker-w 도 같은 2px 다. */
+  border: 2px solid var(--sticker-edge);
   border-radius: var(--radius-sm);
-  /* 44px 히트 영역인데 시각 무게는 없다: 박스는 커지되 버튼은 투명·12px 라 3차 액션으로 읽힌다. */
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition:
-    background var(--dur-base),
-    border-color var(--dur-base),
-    color var(--dur-base);
+  /* 버튼 hover 채움이 판의 둥근 모서리를 네모로 덮지 않게 자른다. */
+  overflow: hidden;
+  box-shadow: var(--shadow-tape);
+  /* 쉼 상태에선 숨는다 — 사진 위에 상시 얹힌 검은 판은 카드가 답해야 할 질문(무슨 게임인가)을
+     먼저 가린다. display·visibility 가 아니라 opacity 인 게 핵심이다: 접근성 트리와 탭 순서에
+     남아야 focus-within 이 걸린다(감추면 포커스를 못 받아 영영 안 나타나는 자기참조 교착). */
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-paper);
+}
+.game:hover .game__acts,
+.game__acts:focus-within {
+  opacity: 1;
+}
+/* hover 가 없는 기기엔 "떠올릴" 손이 없다 — 상시 노출이 유일하게 도달 가능한 상태다. */
+@media (hover: none) {
+  .game__acts {
+    opacity: 1;
+  }
+}
+.game__edit,
+.game__del {
+  /* 44×44 터치 하한. 아이콘은 15px 지만 히트 영역은 손가락이 기준이다. 둘을 한 판에 담아
+     각자 정확히 44 를 갖게 했다 — 따로 떼어 놓고 히트 영역만 키우면 두 영역이 겹쳐
+     파괴 액션이 수정 자리에서도 눌린다. */
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  /* 잉크 면 위 글리프 15.21:1. 쉼 상태에서 삭제를 색으로 구분하지 않는 이유: 사진지 섬 안이라
+     --danger 가 라이트 벽돌(#9a453d)로 되돌려져 잉크 면 위 1.85:1 로 죽는다. 구분은 아이콘
+     모양(연필·휴지통)과 접근 이름이 맡고, 색은 hover 에서만 갈린다. */
+  color: var(--fg-on-ink);
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+/* 포커스 링을 판 **안쪽**에 그린다 — 밖에 그리면 뒤가 임의의 포스터라 링 대비를 보장할 수
+   없다. 안쪽이면 뒤가 항상 이 판의 면인데, 그 면이 **셋**이다: 쉼(잉크) · 수정 hover
+   (흰 18% → #424242) · 삭제 hover(--danger, 섬이 두 테마 모두 #9a453d 로 고정). 기본
+   --focus(#b25a68)는 잉크 위 3.85:1 로 통과하지만 나머지 둘에서 2.18:1 · 1.38:1 로 죽어
+   UI 3:1 하한을 깬다 — 그리고 hover 는 마우스 사용자가 이 판을 발견하는 유일한 경로라
+   hover+focus-visible 은 실제로 겹친다(포인터를 얹은 채 Tab, 또는 모달을 Esc 로 닫아
+   트리거로 포커스가 돌아올 때). 그래서 판이 이미 쓰는 테마 독립 흰색으로 간다:
+   잉크 17.76:1 · #424242 10.05:1 · #9a453d 6.38:1 로 세 면이 전부 여유를 갖는다.
+
+   **선택자를 0-2-0 으로 줄이지 마라.** chrome.css 의 [data-theme="dark"] .polaroid
+   :focus-visible(0-3-0)이 사진지 섬 안 링을 로즈로 되돌리는데, 그 예외의 근거는 "뒤가
+   크림"이고 이 판은 잉크 면이라 해당하지 않는다. .game__edit:focus-visible(0-2-0)로 쓰면
+   다크에서 그 규칙에 져 링이 #b25a68 로 남는다(실측). */
+.game .game__acts .game__edit:focus-visible,
+.game .game__acts .game__del:focus-visible {
+  outline-color: var(--sticker-edge);
+  outline-offset: -3px;
+}
+/* 이음매 — 판 하나에 버튼이 둘 들었다는 걸 보이게 한다. 정보가 아니라 장식이라 대비 게이트 없음. */
+.game__edit + .game__del {
+  border-left: 1px solid color-mix(in srgb, var(--sticker-edge) 30%, transparent);
+}
+.game__edit::before,
+.game__del::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  background: currentColor;
 }
 .game__edit::before {
-  content: "";
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
-  background: currentColor;
   -webkit-mask: var(--pencil) center/contain no-repeat;
   mask: var(--pencil) center/contain no-repeat;
 }
-/* hover 에서 --fg 로 올린다 — 사진지 위 두 테마 모두 잉크라 14.5:1 이상. */
-.game__edit:hover {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-  border-color: color-mix(in srgb, var(--fg) 28%, transparent);
-}
-.game__del {
-  background: transparent;
-  cursor: pointer;
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: var(--text-xs);
-  color: var(--danger);
-  padding: 6px 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  /* 44px 히트 영역인데 시각 무게는 없다: 박스는 커지되 버튼은 투명·12px 라 3차 액션으로 읽힌다. */
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition:
-    background var(--dur-base),
-    border-color var(--dur-base);
-}
 .game__del::before {
-  content: "";
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
-  background: currentColor;
   -webkit-mask: var(--trash) center/contain no-repeat;
   mask: var(--trash) center/contain no-repeat;
 }
-/* 다크 .polaroid 섬(크림 #efe7df) 위에선 hover 채움이 12%면 danger 글자가 4.44:1 로
-   미달한다(12px 라 4.5 필요) — 8% 로 낮춰 4.67:1 을 지킨다. hover 신호는 테두리가 맡는다.
-   라이트는 흰 위라 어느 쪽이든 여유. */
+/* hover 는 면을 밝혀 "어느 칸에 있는지"를 말한다 — 흰 18% 섞인 면(#424242) 위 글리프 8.61:1.
+   이 면 값은 위 포커스 링 계산이 쓰는 것과 같은 수다 — 한쪽만 고치지 마라. */
+.game__edit:hover {
+  background: color-mix(in srgb, var(--sticker-edge) 18%, transparent);
+}
+/* 파괴 액션만 hover 에서 면 자체가 --danger 로 바뀐다 — 그 위 글리프 5.47:1, 흰 테두리와는
+   6.38:1 이라 둘 다 통과한다. 색이 늦게 오는 건 의도다: 쉼 상태의 빨강은 사진 위에서 경고가
+   아니라 얼룩으로 읽힌다. */
 .game__del:hover {
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: var(--danger);
 }
 
 .grid-empty {
@@ -691,7 +764,7 @@ dialog.composer[open]::backdrop {
   .head h1 {
     font-size: var(--text-3xl);
   }
-  /* 2열이 되어도 각도는 남긴다 — 최악 360px 에서 카드 144px, 썸네일이 3/4 로 서면서 카드
-     높이가 ~290px 이 됐고 최대 1.4° 면 모서리가 3.5px 밀리는데 열 gap 24px 이라 안 침범한다.
-     썸네일 비율이나 1열로 내리면 이 계산을 다시 한다. */
+  /* 2열이 되어도 각도는 남긴다 — 최악 360px 에서 카드 144px, 썸네일(3/4)+2줄 제목+날짜 줄로
+     카드 높이가 ~275px 이고 최대 1.2° 면 모서리가 (275/2)·sin1.2° ≈ 2.9px 밀리는데 열 gap
+     24px 이라 안 침범한다. 썸네일 비율·ROT 폭·1열 전환 중 하나라도 바뀌면 이 계산을 다시 한다. */
 }

@@ -45,8 +45,12 @@ export function isDateOrderValid(playedAt: string | null, clearedAt: string | nu
 }
 
 /* 기울기·종이결·썸네일 패턴은 카드의 정체성이지 목록 위치가 아니다. 인덱스로 고르면
-   하나 추가·삭제할 때마다 보드 전체가 다시 기울어진다 — id 해시로 안정적으로 고른다. */
-export const ROT = ["-1.4deg", "0.8deg", "-0.6deg", "1.3deg", "-1deg", "0.5deg"] as const;
+   하나 추가·삭제할 때마다 보드 전체가 다시 기울어진다 — id 해시로 안정적으로 고른다.
+   폭이 ±1.4° 였다가 ±1.2° 로 좁아졌다: 포스터가 비어 패턴+이니셜만 있던 시절엔 기울기가
+   "손으로 붙인 종이"를 혼자 말했지만, 실제 표지가 들어온 뒤로는 그림이 그 일을 대신하고
+   각도는 정렬이 어긋난 노이즈로 먼저 읽힌다. 종수(6)는 줄이지 않는다 — 값이 적어지면
+   같은 각도의 카드가 눈에 띄게 뭉친다. */
+export const ROT = ["-1.2deg", "0.7deg", "-0.5deg", "1.1deg", "-0.9deg", "0.4deg"] as const;
 export const ANGLE = ["135deg", "45deg", "160deg", "20deg", "110deg", "70deg"] as const;
 export const PATTERNS = 4; // games.css 의 .game__thumb[data-p="0..3"]
 

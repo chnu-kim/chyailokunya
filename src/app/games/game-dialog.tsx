@@ -21,6 +21,8 @@ export function GameDialog({
   odId,
   closing,
   busy = false,
+  describedBy,
+  alert = false,
   onClose,
   children,
 }: {
@@ -44,6 +46,19 @@ export function GameDialog({
      못 닫는 쪽이 정직하다. 잠금은 네트워크 왕복 한 번 동안뿐이고, 이유는 버튼의
      "추가 중…"/"저장 중…" 과 aria-busy 가 말한다. */
   busy?: boolean;
+  /* 제목과 **함께** 읽힐 설명 요소의 id. 공백으로 여럿 나열할 수 있다(IDREF 목록).
+
+     왜 필요한가: showModal() 뒤 포커스는 DOM 첫 포커서블인 .composer__close 로 가므로,
+     aria-labelledby 만 걸면 스크린리더가 읽는 건 "제목 · 대화상자 · 닫기 버튼"이 전부다.
+     본문에 무엇이 걸려 있는지(어느 게임인지, 되돌릴 수 있는지)는 사용자가 직접 훑어야
+     알게 되는데, 파괴 확인에선 그게 유일한 안전장치다. describedBy 로 이어 두면 열리는
+     순간 함께 낭독된다. 포스터는 alt="" 라 아무것도 안 싣는다 — 이름을 따로 가리켜야 한다. */
+  describedBy?: string;
+  /* role="alertdialog" 로 올린다. 되돌릴 수 없는 확인에만 켠다 — 이 role 은 "설명을 읽지
+     않고 확정하면 복구가 없다"는 종류의 다이얼로그를 위한 것이고, AT 가 열림과 동시에
+     설명을 낭독하는 근거가 된다(describedBy 와 한 쌍이다). 네이티브 <dialog>+showModal 이
+     주는 포커스 트랩·Esc·배경 inert·top-layer 는 role 과 무관하게 그대로다. */
+  alert?: boolean;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -93,7 +108,9 @@ export function GameDialog({
     <dialog
       className="composer paper"
       ref={dialogRef}
+      role={alert ? "alertdialog" : undefined}
       aria-labelledby={titleId}
+      aria-describedby={describedBy}
       data-od-id={odId}
       aria-busy={busy || undefined}
       onClose={onClose}

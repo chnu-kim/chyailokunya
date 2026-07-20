@@ -5,6 +5,9 @@
 
 > **보완:** 여기서 Phase 4 로 미룬 **역할 변경 감사 로그**는 [ADR-0018](./0018-role-audit-and-elevation-guard.md)
 > 이 `role_audit_logs` 테이블로 실현했다.
+>
+> **뒤집힘:** 삭제의 "되돌리기 = 클라이언트 지연 커밋"은 [ADR-0020](./0020-delete-confirm-dialog-replaces-undo-window.md)
+> 이 **확인 다이얼로그**로 바꿨다. **하드 삭제 결론은 유지**되고 근거만 갈렸다.
 
 ## 맥락
 
@@ -89,8 +92,13 @@ games             치지직 카테고리 스냅샷 보드. (ADR-0015)
 - **games = 치지직 카테고리 스냅샷** ([ADR-0015](./0015-chzzk-category-as-game-source.md)). freetext
   `name`·`genre`·`platform` 을 제거하고 category API 4필드를 denormalize. `status`·`played_at`
   ·`cleared_at` 은 우리 도메인(치지직이 주지 않는 플레이 상태·이력). 삭제는 **하드 삭제**
-  (`deleted_at` 없음) — 되돌리기는 클라이언트 "지연 커밋"(타이머 만료 전엔 delete 뮤테이션을
-  안 보냄)이라 서버에 삭제 상태를 영속시킬 필요가 없다.
+  (`deleted_at` 없음) — ~~되돌리기는 클라이언트 "지연 커밋"(타이머 만료 전엔 delete 뮤테이션을
+  안 보냄)이라 서버에 삭제 상태를 영속시킬 필요가 없다.~~
+  (**[ADR-0020](./0020-delete-confirm-dialog-replaces-undo-window.md) 이 뒷절을 뒤집었다** — 지연
+  커밋·ghost·되돌리기는 카드마다 타이머·포커스 인계라는 상태 기계를 요구했고 얻는 건 "6초 안에
+  마음 바꾸기" 하나였다. 실수 방어를 파괴 **전**의 **확인 다이얼로그**로 옮겨 상태를 안 남긴다.
+  **하드 삭제라는 결정은 그대로**고 근거만 바뀐다: 확인이 앞에 오므로 서버에 도달한 삭제는 이미
+  의도된 삭제다. 아래 "소프트 삭제 기각" 근거는 이 변경과 무관하게 유효하다.)
 - **타임스탬프.** SQLite/D1 엔 `offsetDateTime`/`timestamptz` 타입이 없다. 그래서 **instant 를
   epoch ms(정수)로 저장**하고 **KST 는 표시 경계에서 `Asia/Seoul` 포매터**로 보장한다(한국은
   DST 가 없어 고정 +9). `created_at`/`last_updated_at` 은 앱 사이드 자동 생성(`$defaultFn`

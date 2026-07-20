@@ -190,7 +190,7 @@ export function GameComposer({
         </form>
       ) : (
         <>
-          <p className="composer__hint">치지직 게임 카테고리를 검색해 보드에 붙여요.</p>
+          <p className="composer__hint">게임을 검색합니다.</p>
 
           <form className="composer__search" onSubmit={onSearch}>
             <input
