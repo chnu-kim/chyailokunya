@@ -192,18 +192,28 @@ export function GameBoard({
                   </div>
                   <div className="game__body">
                     <h3 className="game__name">{g.categoryValue}</h3>
+                    {/* 칩이 날짜 **앞**이다. 이 줄은 세로로 쌓이고 날짜가 늘 마지막 줄이어야
+                        카드 간 기준선이 맞는데(games.css), 그 순서를 CSS 역전이 아니라 DOM 으로
+                        만든다 — 역전은 보이는 순서와 읽는 순서를 갈라 놓는다. */}
                     {(label || showCleared) && (
                       <p className="game__when" data-od-id={"game-when-" + g.id}>
-                        {label && <span className="game__date">{label}</span>}
                         {showCleared && <span className="chip chip--ok">클리어</span>}
+                        {label && <span className="game__date">{label}</span>}
                       </p>
                     )}
                   </div>
-                  {/* 수정·삭제는 썸네일 우상단에 겹쳐 뜬다. 카드 본문에 라벨 줄로 있던 걸 옮긴
-                      이유: 그 줄은 44px 하한이고 좁은 카드(최소 168px 열)에선 라벨 둘이 감겨
-                      88px 이 됐는데, 감기는지 아닌지가 카드마다 달라 본문 높이가 제각각이었다.
-                      겹치면 본문에는 사실(이름·날짜)만 남아 높이를 흔드는 축이 하나 줄고,
-                      그 자리를 사진이 되찾는다.
+                  {/* 수정·삭제는 썸네일 우상단에 겹쳐 뜬다. **사용자가 지목한 배치이고, 기준선
+                      문제의 해결책은 아니다** — 정직하게 적어 둔다. 카드 본문에 라벨 줄로 있을 때
+                      그 줄이 좁은 카드에서 감겨 88px 이 되긴 했지만, 카드 간 높이는 .games 의
+                      grid-auto-rows 와 .game__when 의 auto 마진이 이미 독립적으로 맞춘다 —
+                      라벨 줄을 본문에 그대로 둬도 기준선은 어긋나지 않는다. 옮겨서 얻는 건
+                      본문이 사실(이름·날짜)만 지고 그 자리를 사진이 되찾는 것이다.
+
+                      **대가는 발견 가능성이다.** 라벨이 sr-only 로 내려가고 판이 쉼 상태에서
+                      숨으므로, 마우스 사용자에게 "이 카드를 고칠 수 있다"는 사실은 hover 하기
+                      전까지 존재하지 않는다. 상시 보이는 3차 액션 줄에서 물러난 것이 맞다 —
+                      쓰기 권한자가 소수(admin·superadmin)라 이 대가를 지는 사람이 적다는 게
+                      받아들인 근거다. 권한 모델이 넓어지면(이슈 #22) 다시 저울에 올린다.
 
                       DOM 에서 본문 **뒤**에 두는 건 의도다 — 위치는 absolute 가 정하므로 읽는
                       순서(제목 → 날짜 → 액션)와 탭 순서를 시각 순서와 따로 최적화할 수 있다.
