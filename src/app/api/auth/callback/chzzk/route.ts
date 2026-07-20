@@ -1,12 +1,13 @@
 /* 치지직 OAuth 콜백(ADR-0017). state 이중제출 검증 → 코드 교환 → 신원 조회 → users/oauth
-   upsert(+표시명 스냅샷) → 부트스트랩 → 자체 세션(access+refresh 쿠키) 발급 → /games 리다이렉트.
+   upsert(+표시명 스냅샷) → 부트스트랩 → 자체 세션(access+refresh 쿠키) 발급 → 로그인을 누른
+   페이지로 복귀(return_to 쿠키, 이슈 #25).
    치지직 토큰은 신원확인 1회에만 쓰고 버린다(저장 안 함, ADR-0006). 어떤 실패든 /?login=failed
    로 안전하게 되돌린다(내부 오류를 노출하지 않는다). */
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { shouldBootstrapSuperadmin } from "@/core/auth";
+import { safeReturnTo, shouldBootstrapSuperadmin } from "@/core/auth";
 import { makeDb } from "@/db";
 import { exchangeCodeForTokens, fetchChzzkUser } from "@/features/auth/chzzk-api";
 import { sessionKeys } from "@/features/auth/keys";
@@ -16,9 +17,11 @@ import { issueSession, type SessionTokens } from "@/features/auth/session";
 import {
   clearLoggedOutMarker,
   clearOauthStateCookie,
+  clearReturnToCookie,
   expireLegacyCookies,
   plantSessionCookies,
   readOauthStateCookie,
+  readReturnToCookie,
 } from "@/features/auth/session-cookies";
 import { credsFromEnv } from "@/features/chzzk-http";
 
@@ -35,6 +38,8 @@ export async function GET(req: Request) {
   const fail = () => {
     const res = NextResponse.redirect(new URL("/?login=failed", origin));
     clearOauthStateCookie(res);
+    // 복귀 경로도 같이 걷는다 — 남기면 다음 로그인이 이번 시도의 경로로 튄다(state 와 같은 이유).
+    clearReturnToCookie(res);
     // 로그인 흐름을 탄 브라우저의 구 이름 쿠키를 만료 — 롤백 시 옛 세션이 되살아날 창을
     // 좁힌다(부분 완화, 완전 차단 아님 — 한계는 config.ts 의 LEGACY_COOKIE_NAMES 주석 참고).
     expireLegacyCookies(res);
@@ -43,7 +48,8 @@ export async function GET(req: Request) {
 
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const savedState = readOauthStateCookie(await cookies());
+  const jar = await cookies();
+  const savedState = readOauthStateCookie(jar);
 
   // CSRF: 쿼리 state 와 쿠키 state 대조. 공격자는 우리 httpOnly 쿠키를 못 심으므로 위조 콜백이 막힌다.
   if (!code || !state || !savedState || state !== savedState) return fail();
@@ -76,9 +82,13 @@ export async function GET(req: Request) {
   }
   if (!session) return fail();
 
-  const res = NextResponse.redirect(new URL("/games", origin));
+  /* 로그인을 누른 페이지로 돌려보낸다. 쿠키는 우리가 검증해서 심은 값이지만 여기서 한 번 더
+     좁힌다 — 이 쿠키가 어디서 왔는지를 이 파일만 읽고 알 수 없고, 리다이렉트 직전이 오픈
+     리다이렉트가 실제로 터지는 자리다. 쿠키가 없으면(구 로그인 링크·만료) `/` 로 간다. */
+  const res = NextResponse.redirect(new URL(safeReturnTo(readReturnToCookie(jar)), origin));
   plantSessionCookies(res, session);
   clearOauthStateCookie(res);
+  clearReturnToCookie(res);
   // 로그아웃 마커를 걷는다 — 안 지우면 방금 로그인한 세션이 마커에 막혀 계속 비로그인으로 보인다.
   clearLoggedOutMarker(res);
   // 새 __Host- 세션으로 로그인 확정 — 남아 있던 구 이름 쿠키를 만료시켜 롤백 시 되살아날 창을

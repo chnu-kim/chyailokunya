@@ -4,9 +4,10 @@
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
-import { plantOauthStateCookie } from "@/features/auth/session-cookies";
+import { safeReturnTo } from "@/core/auth";
+import { plantOauthStateCookie, plantReturnToCookie } from "@/features/auth/session-cookies";
 
-export async function GET() {
+export async function GET(req: Request) {
   const { env } = getCloudflareContext();
   if (!env.CHZZK_CLIENT_ID || !env.AUTH_URL) {
     return new NextResponse("로그인이 아직 설정되지 않았어요", { status: 503 });
@@ -23,5 +24,9 @@ export async function GET() {
 
   const res = NextResponse.redirect(authUrl);
   plantOauthStateCookie(res, state);
+  /* 어디서 로그인을 눌렀는지를 여기서 **검증해서** 심는다 — 쿠키에 들어간 뒤엔 신뢰할 수 있는
+     값이어야 콜백이 리다이렉트 직전에 다시 고민하지 않는다(콜백도 한 번 더 좁히지만 그건
+     방어심화지 1차 방어선이 아니다). 검증 실패는 조용히 `/` 로 떨어진다(core.safeReturnTo). */
+  plantReturnToCookie(res, safeReturnTo(new URL(req.url).searchParams.get("return_to")));
   return res;
 }

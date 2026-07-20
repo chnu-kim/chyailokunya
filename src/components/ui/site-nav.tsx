@@ -73,7 +73,14 @@ export function SiteNav({ user }: { user: { name: string } | null }) {
             </form>
           ) : (
             <div className="nav__auth">
-              <a className="nav__signin" href="/api/auth/login" data-od-id="login">
+              {/* 로그인 후 지금 보던 페이지로 돌아오게 현재 경로를 실어 보낸다(이슈 #25).
+                  경로는 서버가 화이트리스트로 좁히므로(core.safeReturnTo) 여기선 그대로 넘긴다 —
+                  클라이언트 검증은 사용자가 URL 을 손대면 그만이라 방어선이 아니다. */}
+              <a
+                className="nav__signin"
+                href={`/api/auth/login?return_to=${encodeURIComponent(pathname)}`}
+                data-od-id="login"
+              >
                 {/* 공급자 이름은 430px 이하에서 시각적으로만 접힌다(chrome.css) — 접근
                     이름은 어느 폭에서도 "치지직 로그인" 이라 스크린리더가 어디로 가는지
                     안다. 공백을 span 안에 두는 게 그 계약이다: 밖에 두면 접히는 순간
