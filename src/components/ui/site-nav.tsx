@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NAV_LINKS } from "@/features/routes";
 import { ThemeToggle } from "./theme-toggle";
 
 /* 공유 상단 네비게이션. usePathname 으로 현재 라우트에 aria-current="page" 를 건다 —
@@ -35,21 +36,21 @@ export function SiteNav({ user }: { user: { name: string } | null }) {
         </Link>
         <span className="brand__tag">VTUBER</span>
         <span className="nav__spacer" />
+        {/* 링크를 손으로 나열하지 않고 NAV_LINKS 에서 그린다 — 이 목록이 로그인 후 복귀
+            허용목록(KNOWN_PAGE_PATHS)과 같은 파일에 살아야 페이지를 추가할 때 한쪽만 고치는
+            일이 안 생긴다. 갈라져 있으면 새 페이지에서 로그인한 사람만 조용히 `/` 로
+            떨어지고 게이트는 전부 초록이다(routes.ts 주석). */}
         <nav className="nav__links" aria-label="주 메뉴">
-          <Link
-            className="nav__link"
-            href="/landing"
-            aria-current={pathname === "/landing" ? "page" : undefined}
-          >
-            소개
-          </Link>
-          <Link
-            className="nav__link"
-            href="/games"
-            aria-current={pathname === "/games" ? "page" : undefined}
-          >
-            게임
-          </Link>
+          {NAV_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              className="nav__link"
+              href={link.href}
+              aria-current={pathname === link.href ? "page" : undefined}
+            >
+              {link.label}
+            </Link>
+          ))}
         </nav>
         {/* 외형 설정(토글)과 계정을 한 덩어리로 묶는다 — 링크와의 간격(--space-4, 16px)이
             덩어리 안 간격(--space-2, 8px)보다 넓어 "이동 / 내 것" 두 그룹으로 읽힌다.

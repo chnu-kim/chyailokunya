@@ -6,6 +6,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 import { safeReturnTo } from "@/core/auth";
 import { plantOauthStateCookie, plantReturnToCookie } from "@/features/auth/session-cookies";
+import { KNOWN_PAGE_PATHS } from "@/features/routes";
 
 export async function GET(req: Request) {
   const { env } = getCloudflareContext();
@@ -24,9 +25,17 @@ export async function GET(req: Request) {
 
   const res = NextResponse.redirect(authUrl);
   plantOauthStateCookie(res, state);
-  /* 어디서 로그인을 눌렀는지를 여기서 **검증해서** 심는다 — 쿠키에 들어간 뒤엔 신뢰할 수 있는
-     값이어야 콜백이 리다이렉트 직전에 다시 고민하지 않는다(콜백도 한 번 더 좁히지만 그건
-     방어심화지 1차 방어선이 아니다). 검증 실패는 조용히 `/` 로 떨어진다(core.safeReturnTo). */
-  plantReturnToCookie(res, safeReturnTo(new URL(req.url).searchParams.get("return_to")));
+  /* 어디서 로그인을 눌렀는지를 여기서 **검증해서** 심는다 — 쿠키에 검증된 값만 들어가야
+     "이 쿠키는 믿을 수 있다"가 성립한다. 검증 실패는 조용히 `/`(core.safeReturnTo).
+
+     **`return_to` 가 없어도 반드시 심는다(무조건 덮어쓰기).** 기본값이면 안 심는 게 절약처럼
+     보이지만 그러면 이런 일이 난다: `/games` 에서 로그인을 눌러 쿠키가 `/games` 로 심긴 뒤
+     치지직 동의 화면에서 이탈 → 쿠키는 10분 산다 → `/` 로 돌아와 다시 로그인 → 조건부 심기면
+     쿠키가 여전히 `/games` → 누른 적 없는 `/games` 로 착지한다. 매 로그인이 이전 시도의
+     잔여를 덮는 것이 이 쿠키의 계약이다. */
+  plantReturnToCookie(
+    res,
+    safeReturnTo(new URL(req.url).searchParams.get("return_to"), KNOWN_PAGE_PATHS),
+  );
   return res;
 }

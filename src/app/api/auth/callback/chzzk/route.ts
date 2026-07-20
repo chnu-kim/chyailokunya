@@ -24,6 +24,7 @@ import {
   readReturnToCookie,
 } from "@/features/auth/session-cookies";
 import { credsFromEnv } from "@/features/chzzk-http";
+import { KNOWN_PAGE_PATHS } from "@/features/routes";
 
 export async function GET(req: Request) {
   const { env } = getCloudflareContext();
@@ -82,10 +83,15 @@ export async function GET(req: Request) {
   }
   if (!session) return fail();
 
-  /* 로그인을 누른 페이지로 돌려보낸다. 쿠키는 우리가 검증해서 심은 값이지만 여기서 한 번 더
-     좁힌다 — 이 쿠키가 어디서 왔는지를 이 파일만 읽고 알 수 없고, 리다이렉트 직전이 오픈
-     리다이렉트가 실제로 터지는 자리다. 쿠키가 없으면(구 로그인 링크·만료) `/` 로 간다. */
-  const res = NextResponse.redirect(new URL(safeReturnTo(readReturnToCookie(jar)), origin));
+  /* 로그인을 누른 페이지로 돌려보낸다. 쿠키가 없으면(구 로그인 링크·10분 초과) `/` 로 간다.
+
+     여기서 한 번 더 좁히는 건 **공격자를 막으려는 게 아니다** — 이 쿠키는 `__Host-` + httpOnly라
+     남이 심을 수 없다. 막는 대상은 둘이다: (a) 검증 없이 심는 경로가 나중에 생기는 것,
+     (b) 허용목록이 좁아진 뒤 도착한 10분 전 쿠키(그 사이 페이지를 뺐다면 없는 곳으로 보낸다).
+     같은 함수를 두 번 부르는 것이라 safeReturnTo 자체의 버그는 이걸로 안 막힌다. */
+  const res = NextResponse.redirect(
+    new URL(safeReturnTo(readReturnToCookie(jar), KNOWN_PAGE_PATHS), origin),
+  );
   plantSessionCookies(res, session);
   clearOauthStateCookie(res);
   clearReturnToCookie(res);

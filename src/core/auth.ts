@@ -15,17 +15,21 @@ export function shouldBootstrapSuperadmin(
   return channelId.trim() === target;
 }
 
-/* 로그인 후 복귀 경로 화이트리스트. 이 사이트의 페이지는 셋뿐이라(`/`·`/landing`·`/games`)
-   "상대경로처럼 보이는가"를 검사하는 대신 **알려진 경로와 통째로 대조**한다 — 패턴 검사는
-   `//evil.example`(프로토콜 상대 URL)·`/\evil.example`·`/%2f%2fevil.example` 처럼 브라우저가
-   외부로 해석하는 형태를 하나씩 막아야 하고, 한 줄만 빠져도 오픈 리다이렉트가 된다.
-   목록 대조는 빠뜨릴 구멍이 없다. 페이지가 늘면 여기에 추가한다. */
-const RETURN_TO_ALLOWED = ["/", "/landing", "/games"] as const;
-
-/* 신뢰할 수 없는 return_to(쿼리·쿠키)를 안전한 내부 경로로 좁힌다. 목록에 없으면 조용히
+/* 신뢰할 수 없는 return_to(쿼리·쿠키)를 허용된 내부 경로로 좁힌다. 목록에 없으면 조용히
    기본값 `/` — 사용자가 위조 링크를 눌렀는지 알 필요가 없고, 에러를 띄우면 로그인 자체가 막힌다.
-   쿼리스트링·프래그먼트는 통째로 버린다: 세 페이지 다 URL 상태를 쓰지 않아 보존할 게 없다. */
-export function safeReturnTo(raw: string | null | undefined): string {
+   허용목록은 인자로 받는다(정본은 features/routes.KNOWN_PAGE_PATHS) — core 는 판정만 하고
+   상수는 호출자가 넘긴다는 이 저장소 관례이고(auth/config.ts 주석·session.ts 의 capMs·graceMs),
+   무엇보다 목록이 여기 살면 nav 가 그걸 못 읽는다(routes.ts 주석 참고).
+
+   **왜 패턴 검사가 아니라 목록 대조인가.** 값을 정화하는 게 아니라 **버린다** — 반환값은 언제나
+   목록에 있던 문자열 그 자체라 공격자 바이트가 출력에 한 글자도 닿지 않는다. `new URL` 로
+   외부 URL 을 걸러내는 방법도 오픈 리다이렉트 자체는 막지만, 그건 *외부*만 막고 **우리 내부의
+   나쁜 목적지**를 그대로 통과시킨다: `/api/auth/logout`(로그인하자마자 로그아웃)·
+   `/api/auth/login`(리다이렉트 루프)·없는 경로(로그인 성공 직후 404). 목록 대조는 둘 다 막는다.
+   허용목록을 버리고 파서 검사로 갈아탈 땐 이 내부 목적지들을 따로 막아야 한다.
+
+   쿼리스트링·프래그먼트는 통째로 버린다: 세 페이지 다 URL 에 상태를 두지 않아 보존할 게 없다. */
+export function safeReturnTo(raw: string | null | undefined, allowed: readonly string[]): string {
   const candidate = (raw ?? "").trim();
-  return (RETURN_TO_ALLOWED as readonly string[]).includes(candidate) ? candidate : "/";
+  return allowed.includes(candidate) ? candidate : "/";
 }
