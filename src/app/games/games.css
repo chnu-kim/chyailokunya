@@ -78,11 +78,32 @@
    내려가면서 그 충돌은 사라졌다.** 그래도 가운데를 유지하는 이유는 따로다: 이 규칙이
    .addslot 과 한 몸이라 .game 만 기본값으로 되돌리면 나란히 선 두 카드의 집게가 갈린다.
    중앙 정렬 방식은 .tape 와 같다(left:50% + translateX(-50%)). */
+/* **집게가 사진 앞에 선다.** 기본값으론 뒤로 갔다 — .clip 이 카드의 첫 자식이고
+   .game__thumb 이 position:relative 라, 둘 다 z-index auto 면 위치 지정 요소끼리 DOM 순서로
+   칠해져 나중인 썸네일이 집게를 덮는다. 그래서 다리가 사진 윗변에서 잘리고 집게가 아니라
+   **걸이 고리**로 읽혔다. 종이를 집는 물건이 종이 뒤에 있을 수는 없다.
+
+   z-index 를 주는 걸 한때 금지했는데, 그건 썸네일 위에 수정·삭제 버튼이 있어 겹치는 띠에서
+   집게가 포인터를 가로채기 때문이었다. 액션이 사진 밑으로 내려가 그 이유가 사라졌다 —
+   지금 썸네일 영역엔 인터랙티브 요소가 없다. 그래도 pointer-events 는 끈다: 장식이
+   히트테스트에 참여할 이유가 애초에 없고(aria-hidden), 나중에 썸네일이 눌리게 되면
+   이 규칙을 다시 찾아오지 않아도 되게 한다.
+
+   윤곽을 두르는 이유는 **얹히는 바닥이 임의의 표지**라서다. 잉크 다리만 두면 어두운 표지가
+   통째로 삼켜, 표지 색에 따라 집게 모양이 갈린다(실측: 검은 표지 위에서 다리가 사라져
+   현행과 같아진다). .sticker 가 캐릭터 컷아웃을 배경에서 뗄 때 쓰는 것과 같은 수다 —
+   drop-shadow 는 box-shadow 와 달리 알파 실루엣을 따라가므로 집게의 굽은 윤곽을 그대로 딴다.
+   --sticker-edge 는 두 테마 모두 #ffffff 라 이 판단은 한 번으로 두 테마를 덮는다.
+   장식이라 대비 게이트 대상은 아니다(aria-hidden) — 이건 정보가 아니라 일관성 문제다. */
 .game > .clip,
 .addslot > .clip {
   right: auto;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 1;
+  pointer-events: none;
+  filter: drop-shadow(1px 0 0 var(--sticker-edge)) drop-shadow(-1px 0 0 var(--sticker-edge))
+    drop-shadow(0 1px 0 var(--sticker-edge)) drop-shadow(0 -1px 0 var(--sticker-edge));
 }
 .game:hover {
   transform: rotate(0deg) translateY(-3px);
