@@ -70,8 +70,14 @@ export default function Home() {
               <figcaption>엥?</figcaption>
             </figure>
           </div>
-          {/* 이름은 바로 아래 h1 이 말한다. 이 칩이 더할 게 있다면 "공식이 아니다" 뿐이다. */}
-          <span className="chip chip--ink t-caps rise" style={rise("180ms")}>
+          {/* 이름은 바로 아래 h1 이 말한다. 이 칩이 더할 게 있다면 "공식이 아니다" 뿐이다.
+              그래서 잉크 채움 변형을 안 쓴다 — 채우면 선으로 그린 손글씨 제목 옆에서 이
+              hero 의 유일한 꽉 찬 덩어리가 돼 부제가 제목보다 무거워진다. 외곽선은 배지
+              형태를 남기고 무게만 뺀다(껍데기까지 벗기면 남는 건 이 저장소가 템플릿 지문으로
+              보고 걷어낸 영어 eyebrow 다). 12px 이라 4.5 가 필요한데 이 hero 는 줄노트 위에
+              앉으니 최악은 종이가 아니라 줄이다 — 라이트 줄 위 4.96 / 종이 위 6.39, 다크 줄
+              위 6.00 / 배경 위 7.29. 테두리도 같은 색이라 3:1 위다. */}
+          <span className="chip t-caps rise" style={rise("180ms")}>
             Unofficial Fan Site
           </span>
           <h1 className="t-script rise" data-od-id="home-title" style={rise("240ms")}>
