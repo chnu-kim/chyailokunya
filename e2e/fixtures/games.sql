@@ -49,6 +49,18 @@ VALUES
 -- 터치 타깃 검사가 0건이 된다 — 검사한 척만 하는 초록이다(narrow-body.spec.ts).
 -- superadmin 이 아니라 admin 인 건 game:write·game:delete 만 필요하고 role:manage 는
 -- 이 스펙의 관심사가 아니어서다 — 픽스처가 필요 이상의 권한을 들고 있지 않게 한다.
+--
+-- **주의: 이 블록은 로컬 개발 D1 의 로그인 신원도 지운다.** 전엔 games 만 지웠다. e2e 를 한 번
+-- 돌리면 dev 로 로그인해 만들어 둔 계정과 부여받은 역할이 날아간다 — superadmin 은 다음 로그인
+-- 때 SUPERADMIN_CHANNEL_ID 부트스트랩으로 되살아나지만 손으로 준 admin 은 안 돌아온다.
+-- 되살리려면 로그인을 다시 해 신원을 만들고 superadmin 으로 역할을 다시 부여한다.
+--
+-- 삭제 순서는 FK 를 거스르지 않게 **자식부터**다. role_audit_logs 가 먼저인 게 핵심인데,
+-- 이 테이블만 users.id 를 **cascade 없이** 참조하기 때문이다(refresh_tokens·security_events 는
+-- onDelete: cascade 라 저절로 지워진다). append-only 감사 로그라 그렇게 설계된 것이고, 그래서
+-- 로컬에서 역할 관리를 한 번이라도 써 본 개발자는 여기서 FOREIGN KEY constraint failed 로
+-- **globalSetup 이 죽는다** — narrow-body 뿐 아니라 스모크·시각 전체가 시작조차 못 한다(실측).
+DELETE FROM role_audit_logs;
 DELETE FROM users_roles;
 DELETE FROM oauth_accounts;
 DELETE FROM users;

@@ -55,10 +55,42 @@ test.describe("본문 가로 넘침", () => {
    `.sr-only` 는 1px 상자에 가둬 두는 게 정의라 언제나 넘친다(실측 +103px). 접근성 장치를
    레이아웃 결함으로 세면 이 스펙은 영원히 빨갛다.
 
+   **두 가지를 본다. 자기 상자만 재면 이 사이트의 잘림을 거의 다 놓친다.**
+
+   (1) 자기 넘침 — `scrollWidth > clientWidth`.
+   (2) **가장 가까운 클리핑 조상의 상자를 넘는가** — `getBoundingClientRect` 로 가로만 비교.
+
+   (1) 만 두면 `white-space: nowrap` 이면서 **동시에** 자기 폭이 제한된 좁은 경우에만 걸린다.
+   이 사이트 본문은 그렇게 안 생겼다: 글자는 `overflow-wrap: anywhere` 로 감기고
+   (games.css:590) 폭 제한은 조상이 건다. (2) 가 그 경로를 맡는다 — 실측으로 조상이
+   오려 내는 회귀를 `span.game__date div.game__body 밖으로 +12px` 처럼 짚어 낸다.
+
+   **잘림이 아닌 회귀는 여기가 아니라 위 describe 가 잡는다. 그 분담을 알고 있어야 한다.**
+   `.game__name` 에 nowrap 만 주면 상자가 429px 로 부푸는데, 이 보드의 그리드 트랙은
+   `1fr 1fr`(= `minmax(auto, 1fr)`)라 **트랙이 같이 늘어난다** — 아무것도 안 잘리므로 (1)·(2)
+   둘 다 정당하게 통과하고, 대신 문서가 늘어나 가로 넘침 축이 2건으로 잡는다(음성 대조 실행함).
+   여기서 그걸 같이 잡으려 들면 "글자가 제 상자 안에 드는가"가 아닌 것을 재게 된다.
+
+   **세로는 안 잰다.** `-webkit-line-clamp` 로 두 줄에서 자르는 게 이 보드의 **계약**이라
+   (games.css:591-595, 픽스처 6번이 일부러 긴 이름으로 그걸 덮는다) `scrollHeight >
+   clientHeight` 를 결함으로 세면 의도한 설계가 빨개진다. 그래서 세로 잘림이 새로 생기는
+   변경은 여전히 사람이 본다 — SKILL.md §6.3 에 그렇게 적어 뒀다.
+
    허용 오차 1px 은 소수점 레이아웃이 정수로 반올림될 때의 흔들림 몫이다. 실패 시 무엇이
    넘쳤는지 셀렉터·수치를 같이 뱉는다 — "어딘가 넘쳤다"만으로는 못 고친다. */
 async function clippedText(page: Page): Promise<string[]> {
   return page.evaluate(() => {
+    const scrolls = (v: string) => v === "auto" || v === "scroll";
+    const clips = (v: string) => v === "hidden" || v === "clip";
+
+    // 클래스 이름 읽기 — SVG 요소의 className 은 문자열이 아니라 SVGAnimatedString 이다.
+    const name = (el: Element) => {
+      const id = el.getAttribute("data-od-id");
+      if (id) return `${el.tagName.toLowerCase()}[${id}]`;
+      const cls = typeof el.className === "string" ? el.className : el.getAttribute("class");
+      return `${el.tagName.toLowerCase()}${cls ? `.${cls.trim().split(/\s+/).join(".")}` : ""}`;
+    };
+
     const out: string[] = [];
     for (const el of document.querySelectorAll("main *")) {
       // 자식 요소를 가진 상자는 레이아웃 컨테이너다 — 위 주석의 이유로 건너뛴다.
@@ -69,14 +101,26 @@ async function clippedText(page: Page): Promise<string[]> {
          좁은 폭 회귀를 하나도 못 알려 주면서 이 스펙만 영원히 빨갛게 만든다. */
       if (!el.textContent?.trim()) continue;
       if (el.classList.contains("sr-only")) continue;
-      // clientWidth 0 은 인라인·치환 요소(svg, img)라 이 판정이 의미 없다.
-      const over = el.scrollWidth - el.clientWidth;
-      if (el.clientWidth === 0 || over <= 1) continue;
-      // 스스로 스크롤하겠다고 선언한 상자는 넘침이 정상이다.
+
       const ox = getComputedStyle(el).overflowX;
-      if (ox === "auto" || ox === "scroll") continue;
-      const id = el.getAttribute("data-od-id");
-      out.push(`${el.tagName.toLowerCase()}${id ? `[${id}]` : `.${el.className}`} +${over}px`);
+      // (1) 자기 넘침. clientWidth 0 은 인라인·치환 요소라 이 판정이 의미 없다.
+      const over = el.scrollWidth - el.clientWidth;
+      if (el.clientWidth > 0 && over > 1 && !scrolls(ox)) {
+        out.push(`${name(el)} 자기 상자 +${over}px`);
+        continue;
+      }
+
+      // (2) 클리핑 조상을 넘는가. 스크롤 가능한 조상은 잘림이 아니라 스크롤이므로 제외한다.
+      const box = el.getBoundingClientRect();
+      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        const s = getComputedStyle(p);
+        if (scrolls(s.overflowX)) break;
+        if (!clips(s.overflowX)) continue;
+        const pb = p.getBoundingClientRect();
+        const cut = Math.max(pb.left - box.left, box.right - pb.right);
+        if (cut > 1) out.push(`${name(el)} ${name(p)} 밖으로 +${Math.round(cut)}px`);
+        break;
+      }
     }
     return out;
   });
@@ -124,8 +168,13 @@ test.describe("감축 경로 — 경계", () => {
       await page.goto(r.path);
       expect(await trackCount(page, r.selector), `${r.boundary}px 는 접혀야 한다`).toBe(1);
 
-      // +1px 쪽이 이 스펙의 이빨이다. 접힌 쪽만 보면 브레이크포인트를 **더 넓게** 옮겨도
-      // 통과한다 — 두 폭을 같이 봐야 값이 정확히 여기임이 고정된다.
+      /* +1px 쪽이 이 스펙의 이빨이다. 접힌 쪽만 보면 브레이크포인트를 **더 넓게** 옮겨도
+         통과하고, `display:grid` 를 지우면 computed 값이 `none` 이라 트랙 1개로 읽혀
+         접힌 쪽 단언마저 통과한다 — 두 폭을 같이 봐야 둘 다 막힌다.
+
+         ±1px 대조는 **뷰포트 폭 = 미디어쿼리 폭**을 전제한다. 헤드리스 크로미움은 오버레이
+         스크롤바라 그게 성립하지만, 스크롤바가 폭을 먹는 환경에서 돌리면 경계가 한 칸
+         밀려 무너진다. 이 스펙을 다른 브라우저로 옮길 땐 여기부터 확인한다. */
       await page.setViewportSize({ width: r.boundary + 1, height: 800 });
       expect(await trackCount(page, r.selector), `${r.boundary + 1}px 는 2열이어야 한다`).toBe(2);
     });
@@ -242,6 +291,8 @@ test.describe("composer 바텀시트", () => {
       await signIn(page.context(), baseURL!);
       await page.goto("/games");
       await expectSignedIn(page);
+      // 아래에서 상자를 재므로 폰트 확정을 기다린다 — 다른 describe 와 같은 이유다.
+      await page.evaluate(() => document.fonts.ready);
 
       await page.locator('[data-od-id="composer-open"]').click();
       const dialog = page.locator("dialog.composer");
