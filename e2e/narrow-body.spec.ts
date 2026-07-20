@@ -254,9 +254,9 @@ test.describe("본문 터치 타깃", () => {
    canDelete 뒤라 로그아웃 상태로 좁은 폭을 재면 이 페이지의 터치 타깃 검사가 0 건이 된다
    (검사한 척만 하는 초록이다). 그래서 픽스처가 user 1 에 admin 을 부여한다(e2e/fixtures/games.sql).
 
-   수정·삭제 판은 쉼 상태에서 opacity:0 + pointer-events:none 이라 hover 로 띄운 뒤 눌러야
-   한다. boundingBox() 는 opacity 와 무관하게 상자를 주므로 **크기는 hover 없이도** 재진다 —
-   반대로 말하면 크기만 재고 넘어가면 "보이지도 않는데 통과"가 되므로 덮임은 hover 뒤에 본다. */
+   수정·삭제는 **상시 보인다** — 사진 밑 크림 여백에 in-flow 로 서므로 hover 로 띄울 필요가
+   없다. 한때 썸네일 위 오버레이라 opacity:0 + pointer-events:none 이었고 그때는 hover 가
+   필수였는데, 배치를 내리면서 그 조건이 사라졌다(games.css 의 액션 블록 주석). */
 test.describe("본문 터치 타깃 — 쓰기 권한", () => {
   for (const width of NARROW) {
     test(`${width}px /games: 추가·수정·삭제가 44 하한을 지킨다`, async ({ page, baseURL }) => {
@@ -268,13 +268,38 @@ test.describe("본문 터치 타깃 — 쓰기 권한", () => {
 
       await expectTouchTarget(page.locator('[data-od-id="composer-open"]'), "게임 추가");
 
-      const card = page.locator('[data-od-id="game-card-1"]');
-      await card.hover();
       for (const id of ["game-edit-1", "game-del-1"]) {
         await expectTouchTarget(page.locator(`[data-od-id="${id}"]`), id);
       }
-      // 판이 카드 밖으로 밀리면 잘려서 실제로는 못 누른다 — 눌러서 확인한다.
-      await page.locator('[data-od-id="game-del-1"]').click({ timeout: 3000 });
+
+      // 액션 버튼은 광학 정렬 때문에 텍스트 칼럼 밖으로 13px 씩 빠져 있다(games.css). 그건
+      // 의도지만 **카드 밖으로는 못 나간다** — 나가면 잘려서 실제로 못 누른다. 카드 상자를
+      // 기준으로 못박는다. 페이지 전체 넘침 스펙이 못 보는 카드 단위 자리다.
+      const edit = page.locator('[data-od-id="game-edit-1"]');
+      const del = page.locator('[data-od-id="game-del-1"]');
+      const [cardBox, editBox, delBox] = await Promise.all([
+        page.locator('[data-od-id="game-card-1"]').boundingBox(),
+        edit.boundingBox(),
+        del.boundingBox(),
+      ]);
+      for (const [name, b] of [
+        ["수정", editBox],
+        ["삭제", delBox],
+      ] as const) {
+        expect(b!.x, `${width}px: ${name} 이 카드 왼쪽으로 샜다`).toBeGreaterThanOrEqual(
+          cardBox!.x - 0.5,
+        );
+        expect(b!.x + b!.width, `${width}px: ${name} 이 카드 오른쪽으로 샜다`).toBeLessThanOrEqual(
+          cardBox!.x + cardBox!.width + 0.5,
+        );
+      }
+
+      // 파괴 액션 이격. margin-left:auto 가 삭제를 오른쪽 끝으로 밀어 오식 여유를 만든다 —
+      // 이 값이 무너지면 되돌릴 수 없는 삭제가 수정 옆에 붙는다.
+      expect(delBox!.x - editBox!.x, `${width}px: 수정·삭제 간격`).toBeGreaterThanOrEqual(44);
+
+      // 덮여 있으면 크기가 맞아도 못 누른다 — 눌러서 확인한다.
+      await del.click({ timeout: 3000 });
       await expect(page.locator('[data-od-id="game-delete-cancel"]')).toBeVisible();
     });
   }
