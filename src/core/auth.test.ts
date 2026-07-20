@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { safeReturnTo, shouldBootstrapSuperadmin } from "./auth";
 
-// 실제 사이트 목록(features/routes.KNOWN_PAGE_PATHS)과 같은 값. core 는 목록을 소유하지
-// 않으므로 여기서 넘긴다 — 목록 자체가 라우트와 어긋나지 않는지는 routes.test.ts 가 본다.
+/* 실제 사이트 목록(features/routes.KNOWN_PAGE_PATHS)과 같은 값을 손으로 베낀 것. core 는
+   목록을 소유하지 않으므로 인자로 넘긴다 — `src/core` 에서 `src/features` 를 import 하면
+   `core-is-pure` 가 error 로 죽고, 순수 함수는 애초에 임의 목록으로 검증하는 게 옳다.
+   이 사본이 진짜 목록·실제 라우트와 어긋나는지는 여기가 아니라 `e2e/routes.spec.ts` 가 본다
+   (파일시스템을 읽어야 해서 workerd 안인 이 풀에선 못 한다). */
 const ALLOWED = ["/", "/landing", "/games"];
 
 describe("shouldBootstrapSuperadmin", () => {
