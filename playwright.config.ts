@@ -24,11 +24,18 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: "on-first-retry",
   },
+  /* dev 서버를 띄우기 전에 e2e 세션 키를 심는다(scripts/e2e-dev-vars.mjs 주석이 정본).
+     globalSetup 에 둘 수 없다 — Playwright 는 webServer(플러그인)를 globalSetup 보다 먼저
+     띄우므로 그때 심은 키는 이미 부팅한 서버가 못 읽는다. NEXT_DEV_WRANGLER_ENV=e2e 는
+     wrangler 가 `.dev.vars` 대신 `.dev.vars.e2e` 를 읽게 하는 스위치다(개발자의 `.dev.vars`
+     를 안 건드리려고). wrangler.jsonc 에 env.e2e 섹션이 없어 경고가 두 줄 뜨는데 정상이다 —
+     섹션을 만들면 오히려 d1 바인딩이 딸려오지 않는다. */
   webServer: {
-    command: `npm run dev -- --port ${PORT}`,
+    command: `node scripts/e2e-dev-vars.mjs && npm run dev -- --port ${PORT}`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: { NEXT_DEV_WRANGLER_ENV: "e2e" },
   },
   projects: [
     {

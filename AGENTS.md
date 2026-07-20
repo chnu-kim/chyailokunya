@@ -58,7 +58,13 @@ npm run db:seed        # 게임 시드(`-- --remote` 로 원격)
 ```
 
 3000 이 남의 dev 서버로 막혀 있으면 `PORT=3100 npm run e2e` — playwright.config 가 env PORT
-를 읽는다(기본 3000, CI 는 그대로).
+를 읽는다(기본 3000, CI 는 그대로). 단 **남의 dev 서버를 재사용하면 로그인 상태 테스트는
+깨진다** — 그 서버는 e2e 세션 키를 안 읽었다(아래 지뢰). 실패 메시지가 그렇게 말해 준다.
+
+로그인 상태가 필요한 스펙은 `e2e/session.ts` 의 `signIn(context, baseURL)` 로 세션을 심고
+`expectSignedIn(page)` 로 세션이 섰는지 먼저 못박는다(안 하면 비로그인으로 조용히 통과한다).
+치지직 OAuth 를 태우지 않고 access 쿠키를 직접 서명하지만 진짜 서버 경로가 돈다 —
+근거와 함정은 [ADR-0021](./docs/adr/0021-e2e-session-fixture-signed-access-cookie.md).
 
 CI(`.github/workflows/ci.yml`)가 PR·main 에서 `format · lint · typecheck · boundaries · unit ·
 drizzle-kit check · build · **배포 빌드(opennextjs-cloudflare)**` 게이트와 **e2e 스모크**(별도
@@ -229,6 +235,15 @@ Phase 4(인증)에서 밟은 것:
   `src/middleware.ts` 를 쓴다(deprecation 경고 감수). OpenNext 가 Node proxy 를 지원하면 옮긴다.
   일반화하면: **런타임·번들러 계약을 건드리는 변경은 `npx opennextjs-cloudflare build` 로
   확인한다.** CI 게이트에 이 빌드가 들어 있다(`배포 빌드` 스텝).
+
+- **`wrangler.jsonc` 에 `env.*` 섹션을 추가하면 e2e 가 통째로 죽는다.** e2e 는 dev 서버에
+  테스트 세션 키를 먹이려고 환경명 `e2e` 를 쓰는데([ADR-0021](./docs/adr/0021-e2e-session-fixture-signed-access-cookie.md)),
+  정의되지 않은 환경명을 wrangler 가 **경고로 넘기는 건 그 파일에 `env` 키가 하나도 없을 때뿐**
+  이다. 아무 env 섹션이나 생기면 같은 상황이 에러로 승격돼 dev 서버가 안 뜨고, Playwright 엔
+  "webServer 가 안 떴다"로만 보인다. `env.e2e` 를 만들어 막으려 하지 마라 — 환경은
+  `d1_databases` 를 상속하지 않아 DB 바인딩이 사라진다. 경고 주석이 `wrangler.jsonc` 본문에 있다.
+  로그인 상태 e2e 의 나머지 배선(왜 process.env 로는 안 되는지, 왜 webServer 커맨드에서
+  심는지, 왜 `https://localhost` url 인지)은 전부 ADR-0021 에 있다.
 
 ## 접근성 기준 (협상 대상 아님)
 

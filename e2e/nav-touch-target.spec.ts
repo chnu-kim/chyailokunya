@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { E2E_USER, expectSignedIn, signIn } from "./session";
 
 /* nav 크롬의 터치 타깃 회귀 방지. --nav-h 는 "12+12 패딩 + 44 자식 + 1.5 보더"로 유도되는데
    브랜드만 콘텐츠 높이(25px)로 남아 그 전제를 어기고 있었다. 44 하한은 실측상 nav 높이를
@@ -39,23 +40,19 @@ test.describe("nav 브랜드 터치 타깃", () => {
   }
 });
 
-/* 로그인 상태는 e2e 픽스처가 없어(쓰기 UI 는 역할이 있어야 뜬다) 마크업 주입으로 만든다.
-   이 상태를 안 본 게 결함을 숨긴 원인이었다: 브랜드 폭은 형제가 남긴 잔여값이라 로그아웃
-   320px 에서 44.02px 로 걸쳐 있다가 로그인하면 32.56px 로 떨어졌는데, 로그아웃만 도는
-   e2e 는 통과했다. 긴 채널명은 6em 상한에 걸려 ellipsis 되지만 형제 폭 압박은 최대가 된다. */
-const SIGNED_IN = `<span class="nav__user-name">아주아주긴채널이름입니다정말로</span><button class="nav__signout" type="button">로그아웃</button>`;
+/* 로그인 상태. 이 상태를 안 본 게 결함을 숨긴 원인이었다: 브랜드 폭은 형제가 남긴 잔여값이라
+   로그아웃 320px 에서 44.02px 로 걸쳐 있다가 로그인하면 32.56px 로 떨어졌는데, 로그아웃만
+   도는 e2e 는 통과했다.
 
+   세션은 e2e/session.ts 가 서명한 access 쿠키로 만든다 — 한때 여기서 `.nav__auth` 에
+   마크업을 주입했지만, 그건 컴포넌트가 그 마크업을 낸다는 보장이 없었다(이슈 #23). */
 test.describe("nav 브랜드 — 로그인 상태", () => {
   for (const width of [320, 390]) {
-    test(`${width}px: 로그인해도 브랜드가 44×44 를 지킨다`, async ({ page }) => {
+    test(`${width}px: 로그인해도 브랜드가 44×44 를 지킨다`, async ({ page, baseURL }) => {
       await page.setViewportSize({ width, height: 800 });
+      await signIn(page.context(), baseURL!);
       await page.goto("/");
-
-      await page.evaluate((html) => {
-        const auth = document.querySelector(".nav__auth");
-        if (!auth) throw new Error(".nav__auth 없음 — nav 마크업이 바뀌었다");
-        auth.innerHTML = html;
-      }, SIGNED_IN);
+      await expectSignedIn(page);
 
       const box = (await page.locator(".nav .brand").boundingBox())!;
       expect(box.width).toBeGreaterThanOrEqual(44);
@@ -66,9 +63,100 @@ test.describe("nav 브랜드 — 로그인 상태", () => {
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
       expect(overflow).toBeLessThanOrEqual(0);
-      await page.getByRole("button", { name: /모드/ }).click({ timeout: 3000 });
+
+      await expectToggleHittable(page);
     });
   }
+});
+
+/* 토글이 정말 눌리는지 — 인증 슬롯 넘침이 토글을 덮었던 회귀가 이 자리다.
+
+   두 겹으로 본다. elementFromPoint 는 "중심점의 최상위 요소가 토글 안인가"를 직접 묻고 덮은
+   게 무엇인지까지 알려 주고, click() 은 **결과**(data-theme 가 뒤집혔는가)까지 확인한다 —
+   결과를 안 보면 클릭은 actionability 타임아웃 외에 아무것도 증명하지 않아 위 판정과 중복이다.
+   덮임 판정은 className 완전 일치가 아니라 closest() 의 null 여부로 한다: 토글에 클래스가
+   하나 붙는 것만으로 "덮였다"는 실패가 나면 메시지가 원인을 거짓으로 가리킨다. */
+async function expectToggleHittable(page: Page): Promise<void> {
+  const toggle = page.getByRole("button", { name: "다크 모드" });
+  const t = (await toggle.boundingBox())!;
+  const covering = await page.evaluate(
+    (p) => {
+      const el = document.elementFromPoint(p.x, p.y);
+      return el?.closest(".theme-toggle") ? null : (el?.className ?? "없음");
+    },
+    { x: t.x + t.width / 2, y: t.y + t.height / 2 },
+  );
+  expect(covering, `토글 중심을 다른 요소가 덮었다: ${covering}`).toBeNull();
+
+  const before = await page.locator("html").getAttribute("data-theme");
+  await toggle.click({ timeout: 3000 });
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme", before!);
+}
+
+/* 561px 는 이름이 **보이면서 형제를 미는 유일한 밴드**다(≤560 은 clip 이라 이름 길이가
+   레이아웃에 영향을 못 주고, 700 이상은 VTUBER 배지가 돌아와 압박의 주인이 바뀐다).
+   chrome.css 의 699px 배지 접기 근거가 정확히 이 폭의 실측("배지를 접으면 브랜드 100.5px,
+   안 접으면 20.2px")이라, 저장소에서 가장 정교하게 유도된 로그인 상태 계약이 여기 산다.
+   병적으로 긴 채널명을 쓰는 이유도 그것이다 — 6em 상한에 걸려 말줄임되지만 슬롯은 상한만큼
+   꽉 차, 브랜드가 지는 압박이 이 폭에서 최대가 된다.
+
+   이빨: `.nav__user-name` 의 max-width 를 지우면 이 테스트만 실패한다(음성 대조 실행함) —
+   긴 이름을 막는 유일한 장치가 그 상한이고, 그걸 확인할 수 있는 폭이 여기뿐이다. 반대로
+   699px 배지 접기를 지워도 이 테스트는 통과한다: 이니셜 배지를 걷어낸 뒤 접지 않은 브랜드가
+   ~54px 라(chrome.css 의 그 규칙 주석이 직접 계산해 둔 값) 44 하한을 여전히 넘긴다. */
+test.describe("nav 브랜드 — 로그인 상태·긴 채널명", () => {
+  test("561px: 이름이 상한까지 차도 브랜드와 토글이 산다", async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 561, height: 800 });
+    await signIn(page.context(), baseURL!, { channelName: "아주아주긴채널이름입니다정말로" });
+    await page.goto("/");
+    await expectSignedIn(page);
+
+    // 폭을 재기 전에 웹폰트 확정을 기다린다(아래 1280 테스트 주석이 정본).
+    await page.evaluate(() => document.fonts.ready);
+
+    // 이름은 잘리되(상한이 살아 있다는 뜻) 접근성 트리엔 온전히 남는다.
+    const name = page.locator(".nav__user-name");
+    await expect(name).toHaveText("아주아주긴채널이름입니다정말로");
+    expect(await name.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeGreaterThan(0);
+
+    const box = (await page.locator(".nav .brand").boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+    await expectToggleHittable(page);
+  });
+});
+
+/* 데스크톱 폭에선 이름이 말줄임되면 안 된다. .nav__user-name 의 max-width 는 6em 인데, 그
+   값은 "사이트 주인공 이름(공백 포함 6자)이 온전히 들어가는 최소 단"으로 유도됐다 —
+   5em 이던 시절 1280px 에서까지 "챠이로 …"로 잘렸다. 그래서 fixture 기본 채널명이 그
+   경계값이고(E2E_USER), 상한을 줄이면 이 단언이 바로 깨진다.
+   1280 은 시각 베이스라인이 찍히는 폭이기도 하다. */
+test.describe("nav 채널명 — 로그인 상태", () => {
+  test("1280px: 채널명이 말줄임되지 않는다", async ({ page, baseURL }) => {
+    await signIn(page.context(), baseURL!);
+    await page.goto("/");
+    await expectSignedIn(page);
+
+    /* 폰트 확정을 기다린다. font-display:swap 이라 폴백으로 먼저 그려지는데, 이 단언은 한글
+       6자의 **폭**을 재므로 폴백 폭으로 재면 양쪽으로 다 틀린다: 폴백이 좁으면 5em 회귀에도
+       통과하고(잡으려던 걸 놓친다), 넓으면 멀쩡한 상태에서 실패한다. 마진이 12px 뿐이라
+       완충이 없다. 시각 스냅샷이 같은 이유로 fonts.ready 를 기다린다. */
+    await page.evaluate(() => document.fonts.ready);
+
+    const name = page.locator(".nav__user-name");
+    await expect(name).toHaveText(E2E_USER.channelName);
+    /* 여유가 1px 인 건 의도다. 실측: 이 이름의 콘텐츠 폭 ≈72px, 상한 6em=84px 라 지금은
+       차이가 0 이고, 상한을 5em(70px)으로 되돌리면 2 가 된다(음성 대조 실행함). scrollWidth·
+       clientWidth 는 정수로 반올림되니 0 을 요구하면 소수점 폭에서 흔들릴 수 있고, 2 를 허용하면
+       5em 회귀를 못 잡는다 — 그 사이가 1 뿐이다. 이 값을 올리려면 재측정부터. */
+    const clipped = await name.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(clipped).toBeLessThanOrEqual(1);
+  });
 });
 
 /* skip-link 는 포커스 전엔 화면 밖이라 "키보드 전용이니 44 는 면제"로 오해되기 쉽다.
