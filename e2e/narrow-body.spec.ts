@@ -305,6 +305,42 @@ test.describe("본문 터치 타깃 — 쓰기 권한", () => {
   }
 });
 
+/* `.addslot`(빈 종이)은 게임 카드 키를 따라 늘어나지 않는다 — `align-self: start`(games.css).
+   격자가 `grid-auto-rows: 1fr` 라 기본값 stretch 로 두면 액션 줄이 카드를 50px 키운 만큼
+   빈 종이 안쪽에 아무것도 없는 여백이 생긴다. 그 회귀를 **로컬 시각 스냅샷만** 잡고 있었고
+   (다크만 빨개진다, 라이트는 흰 종이 → 흰 배경이라 threshold 아래) 베이스라인은 darwin
+   전용이라 CI 에 없다 — 리눅스 CI 가 보는 자리는 여기뿐이라 여기에 못박는다.
+
+   **키는 `offsetHeight` 로 잰다.** 카드가 `--rest-rot` 로 기울어 `getBoundingClientRect` 는
+   회전 AABB 를 준다(560 아래에선 회전이 풀리지만, 폭에 따라 재는 법이 달라지면 그 자체가
+   다음 사람의 함정이다).
+
+   하한 50 은 관측값이 아니라 **유도값**이다 — 액션 줄이 카드에 더하는 높이(44 버튼 + 6 마진)
+   그대로다. 실측 차는 320 에서 135, 390 에서 114 로 훨씬 크지만, 그 여유는 썸네일 비율과
+   이름 줄 수에서 오는 거라 픽스처가 바뀌면 흔들린다. stretch 로 되돌리면 차가 0 이 되므로
+   이 하한으로도 이빨은 난다. */
+test.describe("빈 종이 키", () => {
+  for (const width of NARROW) {
+    test(`${width}px /games: 빈 종이가 카드 키를 따라가지 않는다`, async ({ page, baseURL }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await signIn(page.context(), baseURL!);
+      await page.goto("/games");
+      await expectSignedIn(page);
+      await page.evaluate(() => document.fonts.ready);
+
+      const heights = await page.evaluate(() => ({
+        add: (document.querySelector(".addslot") as HTMLElement).offsetHeight,
+        game: (document.querySelector(".games .game") as HTMLElement).offsetHeight,
+      }));
+
+      expect(
+        heights.game - heights.add,
+        `${width}px: 빈 종이(${heights.add})가 카드(${heights.game}) 키까지 늘어났다`,
+      ).toBeGreaterThanOrEqual(50);
+    });
+  }
+});
+
 /* composer 는 560 이하에서 바텀시트가 된다(games.css:479). 다이얼로그는 열려야 존재하므로
    위 넘침 스펙이 못 보는 자리다 — 좁은 폭에서 화면 밖으로 나가거나 날짜 필드가 안 감기면
    여기서 걸린다. 560 은 바텀시트가 켜지는 **경계 자신**이라, 이 폭이 통과하면 그 아래는
