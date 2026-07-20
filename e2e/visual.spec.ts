@@ -71,3 +71,47 @@ test("시각: nav 로그인 상태 · light", async ({ page, baseURL }) => {
     animations: "disabled",
   });
 });
+
+/* 게임 보드의 **쓰기 권한 상태**. 위 games 두 장은 로그아웃이라 수정·삭제 액션이 DOM 에
+   아예 없다 — 그 줄이 세 번(툴바 판 → 원형 칩 → 사진 밑 잉크 자국) 갈아엎히는 동안 시각
+   회귀가 매번 초록이었는데, 잘 돌아서가 아니라 **안 봤기 때문**이다. 그 공백을 메운다.
+
+   nav 스펙과 달리 **두 테마 다 찍는다.** 이 줄이 쓰는 --fg-muted·--danger 는 다크에서
+   .polaroid 사진지 섬이 라이트 값으로 되돌리는 토큰이라(chrome.css), 되돌림이 깨지면
+   크림 종이 위에서 조용히 씻긴다 — 그게 이 부품의 유일한 접근성 실패 경로고 라이트 한 장은
+   그걸 못 본다. 대비 계산이 잡는 축이지만 계산은 사람이 안 돌리면 안 돌아간다.
+
+   범위는 카드 하나가 아니라 **.games 격자 전체**다. 액션 줄이 카드를 50px 높이는데,
+   액션 줄이 없는 .addslot(게임 추가)과 기준선이 어긋나는지는 격자를 봐야 드러난다
+   (grid-auto-rows:1fr 이 맞춰 주는 걸 이번에 실측으로 확인했지만, 그건 지금 참인 것이지
+   계약이 아니다). 픽스처가 결정적이라(e2e/fixtures/games.sql, poster null) 격자를 넓게
+   잡아도 흔들리지 않는다. */
+for (const theme of ["light", "dark"] as const) {
+  test(`시각: games 쓰기 권한 · ${theme}`, async ({ page, baseURL }) => {
+    await page.addInitScript((t) => {
+      try {
+        localStorage.setItem("theme", t);
+      } catch {
+        // 위 스냅샷들과 같은 이유로 무해하다.
+      }
+    }, theme);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    // 격자가 한 화면에 다 들도록 키운다. 안 그러면 Playwright 가 요소를 뷰포트로 스크롤하는데
+    // nav 가 sticky 라 격자 위에 겹쳐 구워진다 — 그러면 nav 를 고칠 때마다 이 베이스라인이
+    // 엉뚱하게 깨진다(로그인 nav 스냅샷이 히어로 블러에 물린 것과 같은 종류의 결합).
+    await page.setViewportSize({ width: 1280, height: 1600 });
+    await signIn(page.context(), baseURL!);
+
+    await page.goto("/games");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expectSignedIn(page);
+    await page.evaluate(() => document.fonts.ready);
+    // 액션이 DOM 에 실제로 섰는지 먼저 못박는다 — 권한이 빠지면 이 스냅샷은 위 로그아웃
+    // 두 장과 같은 그림이 되어 "찍었는데 아무것도 안 본" 초록이 된다.
+    await expect(page.locator('[data-od-id="game-edit-1"]')).toBeVisible();
+
+    await expect(page.locator(".games")).toHaveScreenshot(`games-signed-in-${theme}.png`, {
+      animations: "disabled",
+    });
+  });
+}
