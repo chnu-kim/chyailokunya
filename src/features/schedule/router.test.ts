@@ -5,6 +5,7 @@ import { makeDb } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
+import { getPublishedWeek } from "./service";
 
 /* 일정 라우터 — 주 단위 일괄 저장(전체 교체)의 서버 권위·불변식을 caller 로 직접 증명한다.
    각 it 은 격리 저장소라 마이그레이션된 빈 스키마에서 시작한다(setupFiles). */
@@ -163,6 +164,28 @@ describe("일정 라우터", () => {
     expect(week.entries).toEqual([]);
   });
 
+  it("공개 읽기(getPublishedWeek)는 발행된 주만 준다 — 초안은 null(공개 화면이 안 샌다)", async () => {
+    const db = makeDb(env.DB);
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    // 초안으로 저장 — 편집자는 getWeek 으로 보지만 공개 읽기엔 안 뜬다.
+    await caller.schedule.saveWeek({
+      weekStartDate: MON,
+      note: "짜는 중",
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+    });
+    expect(await getPublishedWeek(db, MON)).toBeNull();
+    // 발행하면 공개 읽기가 그 주를 준다(전체 교체라 편집기처럼 note 도 함께 다시 보낸다).
+    await caller.schedule.saveWeek({
+      weekStartDate: MON,
+      note: "짜는 중",
+      published: true,
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+    });
+    const published = await getPublishedWeek(db, MON);
+    expect(published?.note).toBe("짜는 중");
+    expect(published?.entries.map((e) => e.title)).toEqual(["젤다"]);
+  });
+
   it("게임에 이어 붙인 항목이 보드의 플레이 날짜를 유도한다(No-ship 이 닫는 지점)", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     const game = await caller.games.add({
@@ -172,9 +195,11 @@ describe("일정 라우터", () => {
     });
     // 추가 직후엔 일정이 없어 날짜가 없다.
     expect(game.lastPlayed).toBeNull();
-    // 일정에 그 게임을 07-20 에 붙이면 보드가 그 날짜를 되유도한다.
+    // 일정에 그 게임을 07-20 에 붙이고 **발행**하면 보드가 그 날짜를 되유도한다. 발행이 곧
+    // 공개 경계라, 초안으로만 저장하면 아직 보드에 안 뜬다(ADR-0022, games 라우터 테스트가 증명).
     await caller.schedule.saveWeek({
       weekStartDate: MON,
+      published: true,
       entries: [{ scheduledDate: "2026-07-20", title: "젤다", gameId: game.id }],
     });
     const [card] = await createCaller(makeCtx()).games.list();

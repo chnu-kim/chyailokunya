@@ -1,0 +1,370 @@
+/* 주간 일정 페이지(이슈 #56). 읽기 화면과 편집기가 이 파일을 공유한다. 색·타입은 전부
+   globals.css 토큰을 var() 로 읽는다(생 hex 금지, ADR-0005). 게임 보드의 dialog·composer CSS 에
+   기대지 않는다 — 편집기가 인라인이라 그 페이지와 회귀가 격리된다.
+
+   폼 컨트롤은 전부 .paper(--surface) 위에 선다 — 사진지 섬(.polaroid)이 아니라. 섬에선
+   --border-strong 이 크림 위 1.01:1 로 씻겨 입력 테두리가 사라진다(kunya-design §4). paper 위
+   --surface 에선 --border-strong 이 진한 잉크라 14:1 을 넘는다.
+
+   레이아웃 감축: 좁은 폭 경계는 560(nav·composer 와 공유하는 값)이다 — 그 아래에서 머리글이
+   세로로 쌓이고, 편집기 행의 컨트롤들이 wrap 으로 접힌다. 새 브레이크포인트를 만들지 않았다. */
+
+.sched {
+  padding: var(--space-7) 0 var(--space-9);
+}
+
+/* ── 머리글: 제목 블록 + 주 이동 ────────────────────────────────────────────── */
+.sched__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+.sched__heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.sched__title {
+  font-size: var(--text-4xl);
+}
+/* 주 범위는 제목에 딸린 부제라 무게를 낮춘다(--fg-muted). mono 로 숫자 폭을 고정해 주를
+   넘겨도 라벨이 안 흔들린다 — 게임 보드의 head__count 와 같은 결. */
+.sched__range {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  color: var(--fg-muted);
+}
+
+/* 주 이동 링크. 텍스트 링크지만 터치 타깃 44 를 세운다 — min-height 만으론 폭이 잔여값이라
+   좌우 패딩으로 폭도 함께 준다(kunya-design §4·§5). */
+.sched-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.sched-nav__step,
+.sched-nav__today {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--fg-muted);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+}
+.sched-nav__today {
+  color: var(--fg);
+}
+.sched-nav__step:hover,
+.sched-nav__today:hover {
+  color: var(--fg);
+}
+.sched-nav__step:focus-visible,
+.sched-nav__today:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── 공지 한 줄 ──────────────────────────────────────────────────────────────── */
+.sched__note {
+  font-size: var(--text-base);
+  color: var(--fg);
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+/* 편집기의 공지 입력(라벨 + field). paper 위가 아니라 페이지 배경 위지만, field 자체가
+   --surface 라 테두리 대비가 선다. */
+.sched-note {
+  display: block;
+  margin-bottom: var(--space-5);
+}
+.sched-note__label {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+
+/* ── 요일 카드 목록 ─────────────────────────────────────────────────────────── */
+.sched__days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* 하루 = paper 카드 하나. 라벨(요일·날짜)은 왼쪽 고정폭, 항목은 오른쪽에서 흐른다. */
+.sched-day {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+.sched-day__label {
+  flex: 0 0 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  padding-top: 6px;
+}
+.sched-day__dow {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1;
+  color: var(--fg);
+}
+.sched-day__md {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+.sched-day__entries {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+/* 항목 없는 날(읽기). 결정: 빈 날은 감추지 않고 "—"로 남긴다 — 감추면 7일 격자가 무너져
+   "며칠이 비었나"가 안 읽힌다. */
+.sched-day__rest {
+  color: var(--fg-muted);
+  font-size: var(--text-base);
+  margin: 0;
+  padding: 6px 0;
+}
+
+/* ── 읽기 항목: 시각 · 표지 · 제목 ─────────────────────────────────────────── */
+.sched-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.sched-entry__time {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  min-width: 3.2em;
+}
+.sched-entry__poster {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+}
+.sched-entry__title {
+  min-width: 0;
+  font-size: var(--text-base);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* ── 편집기 항목 행: 게임 · 제목 · 시각 · 삭제 ─────────────────────────────── */
+.sched-field {
+  box-sizing: border-box;
+  min-height: 44px;
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+}
+.sched-field:focus {
+  outline: 0;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px var(--focus);
+}
+.sched-note .sched-field {
+  width: 100%;
+}
+
+/* 한 줄에 넷이 서고, 좁아지면 wrap 으로 접힌다(560 아래에서 게임·제목이 각자 한 줄로 내려온다).
+   flex-basis 를 주되 min-width:0 로 셋 다 줄어들 수 있게 해 320 에서도 가로 넘침이 없다. */
+.sched-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.sched-row__game {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.sched-row__title {
+  flex: 2 1 160px;
+  min-width: 0;
+}
+.sched-row__time {
+  flex: 0 1 128px;
+  min-width: 0;
+}
+/* 삭제는 44×44 아이콘 버튼. 잉크 테두리로 항목 행의 다른 컨트롤과 같은 종족으로 읽힌다. */
+.sched-row__del {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  color: var(--fg-muted);
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.sched-row__del svg {
+  width: 16px;
+  height: 16px;
+}
+.sched-row__del:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.sched-row__del:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* 항목 추가 — 고스트 버튼. 하루 카드 안에서 가볍게, 그러나 44 를 세운다. */
+.sched-day__add {
+  align-self: flex-start;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.sched-day__add:hover {
+  color: var(--fg);
+}
+.sched-day__add:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── 저장 바 ────────────────────────────────────────────────────────────────── */
+.sched-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+.sched-publish {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+.sched-publish input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  accent-color: var(--accent-ink);
+  cursor: pointer;
+}
+.sched-publish input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.sched-publish__label {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--fg);
+}
+.sched-publish__hint {
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+.sched-bar__save {
+  margin-left: auto;
+}
+.sched-bar__save:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.sched-err {
+  color: var(--danger);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+/* ── 빈 상태(읽기, 미발행 주) ──────────────────────────────────────────────── */
+.sched__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-9) var(--space-4);
+  text-align: center;
+  color: var(--fg-muted);
+}
+.sched__empty .t-hand {
+  font-size: var(--text-2xl);
+  color: var(--fg);
+}
+
+/* ── 좁은 폭: 560 에서 머리글을 세로로 ─────────────────────────────────────── */
+@media (max-width: 560px) {
+  .sched {
+    padding-top: var(--space-6);
+  }
+  .sched__head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  /* 하루 카드는 라벨을 위로 올린다 — 좁으면 왼쪽 고정폭 라벨이 항목 폭을 너무 먹는다. */
+  .sched-day {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .sched-day__label {
+    flex: none;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+    padding-top: 0;
+  }
+}

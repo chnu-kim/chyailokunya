@@ -53,6 +53,15 @@ export async function getWeekForEdit(db: Db, weekStartDate: string): Promise<Wee
   };
 }
 
+/* 공개 읽기 — **발행된 주만** 준다(결정 13·ADR-0022). 미발행(초안)이거나 주 메타가 없으면
+   null 을 돌려 공개 화면이 "아직 준비 중"으로 떨어지게 한다: 초안 항목이 HTML 로 새지 않아야
+   미완성 편성이 공유 카드로 박제되지 않는다. 편집자용(getWeekForEdit)과 갈라 두는 이유가 이
+   경계다 — 같은 주라도 신원에 따라 서버가 다른 뷰를 준다(page.tsx 가 canWrite 로 고른다). */
+export async function getPublishedWeek(db: Db, weekStartDate: string): Promise<WeekView | null> {
+  const week = await getWeekForEdit(db, weekStartDate);
+  return week.publishedAt !== null ? week : null;
+}
+
 /* 주 단위 일괄 저장 = 그 주 전체 교체(결정 14). 메타를 upsert 하고, 그 주 날짜 범위의 항목을
    전부 지운 뒤 보낸 항목을 다시 넣는다 — 클라이언트가 항목별 add/update/delete 를 추적하지 않아도
    되고, 마지막 저장이 그 주의 정본이 된다. **D1 batch() 로 원자 실행**한다: 지우고 넣는 사이에

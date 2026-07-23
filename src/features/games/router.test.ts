@@ -139,6 +139,39 @@ describe("games 라우터", () => {
     expect(list[3]!.id).toBe(noDate1.id);
   });
 
+  it("보드 날짜는 발행 경계를 통과한 항목만 유도한다 — 초안 주는 숨고, 발행하면 뜬다(ADR-0022)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const db = makeDb(env.DB);
+    const game = await authed.games.add(eldenring);
+    // 2026-07-20 은 월요일. 그 주에 이 게임을 붙여 **초안(미발행)** 으로 저장한다.
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-20",
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: game.id }],
+    });
+    // 초안 주의 항목은 보드 날짜에 안 센다 — 관리자가 짜는 중인 편성이 미래 날짜로 새면 안 된다.
+    const draft = await createCaller(makeCtx()).games.list();
+    expect(draft[0]!.lastPlayed).toBeNull();
+
+    // 같은 주를 발행하면 그 항목이 보드 날짜로 뜬다(발행이 곧 공개 경계).
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-20",
+      published: true,
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: game.id }],
+    });
+    const published = await createCaller(makeCtx()).games.list();
+    expect(published[0]!.lastPlayed).toBe("2026-07-22");
+
+    // 주 메타가 아예 없는 항목(이관된 과거 아카이브·직접 심은 데이터)은 발행과 무관하게 센다 —
+    // LEFT JOIN 이라 손실이 없다(결정 16). 더 이른 날이라 MAX 는 그대로 07-22.
+    await db.insert(scheduleEntries).values({
+      scheduledDate: "2026-03-01",
+      title: "아카이브",
+      gameId: game.id,
+    });
+    const withLegacy = await createCaller(makeCtx()).games.list();
+    expect(withLegacy[0]!.lastPlayed).toBe("2026-07-22");
+  });
+
   it("update 는 game:write 없으면 FORBIDDEN(서버 권위)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add(eldenring);

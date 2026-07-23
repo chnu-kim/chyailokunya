@@ -33,16 +33,25 @@ const pub = { ...(await exportJWK(publicKey)), kid: "v1", alg: "EdDSA" };
 
 /* NEXTJS_ENV 는 `.dev.vars` 에서 물려받지 않는다 — wrangler 의 탐색은 병합이 아니라 **택일**
    이라 이 파일이 그걸 통째로 대체한다. 그래서 여기 다시 적는다.
-   같은 이유로 이 환경엔 CHZZK_*·SUPERADMIN_CHANNEL_ID·**AUTH_URL 이 없다.** 공개 읽기 e2e 는
-   외부 API 를 안 타서 지금은 무해하지만, **로그아웃·쓰기 경로를 테스트에 붙이는 순간 걸린다** —
-   그쪽은 AUTH_URL 로 Origin 을 검증하는 fail-closed 라(ADR-0017) 값이 없으면 무조건 거절된다.
-   그때 여기에 AUTH_URL=http://localhost:PORT 를 더한다. */
+   같은 이유로 이 환경엔 CHZZK_*·SUPERADMIN_CHANNEL_ID 가 없다(외부 API·부트스트랩을 안 탄다).
+
+   **AUTH_URL 은 이제 있다.** 일정 편집기(이슈 #56)가 첫 쓰기 e2e 라, 상태를 바꾸는 tRPC 뮤테이션
+   (saveWeek)이 Origin 검사(rejectForeignOrigin)를 탄다 — fail-closed 라 AUTH_URL 이 없으면 무조건
+   403("forbidden origin")이다. dev 서버가 뜨는 실제 origin 과 **정확히**(포트 포함) 같아야 검사가
+   통과한다(isAllowedOrigin 은 URL.origin 완전 일치라 포트가 다르면 거절). PORT 는 이 스크립트를
+   부른 webServer 커맨드가 물려준 process.env 에서 읽는다(playwright.config 의 PORT 와 같은 값).
+
+   포트를 바꿔 다시 돌릴 땐(예: 3000 ↔ 3100) 이 파일을 지운다 — 키 재사용과 같은 이유로 `wx` 라
+   한 번 만든 값(옛 포트의 AUTH_URL)이 그대로 재사용돼, 새 포트의 dev 서버가 내는 Origin 과
+   어긋나 쓰기가 403 이 된다. 지우고 다시 돌리면 현재 포트로 재생성된다. */
+const PORT = process.env.PORT ?? "3000";
 const body = [
   "# e2e 전용(자동 생성, 커밋 금지). 지울 땐 dev 서버도 같이 내린다 — 살아 있는 서버는",
   "# 부팅 때 읽은 옛 키로 계속 검증해서, 새로 만든 키로 서명한 세션이 전부 거절된다.",
   "NEXTJS_ENV=development",
   `JWT_SIGNING_JWK=${JSON.stringify(priv)}`,
   `JWT_PUBLIC_JWK=${JSON.stringify(pub)}`,
+  `AUTH_URL=http://localhost:${PORT}`,
   "",
 ].join("\n");
 

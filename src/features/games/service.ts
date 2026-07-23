@@ -1,18 +1,30 @@
 /* 게임 보드 데이터 유즈케이스. tRPC 무관(순수 db 연산)이라 라우터·서버 컴포넌트·seed 가
    재사용한다 — 공개 읽기(RSC)는 tRPC HTTP 를 왕복하지 않고 listGames 를 직접 부른다. */
 
-import { desc, eq, getTableColumns, max, sql } from "drizzle-orm";
-import { games, scheduleEntries, type Db, type GameRow } from "@/db";
+import { asc, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { games, scheduleEntries, scheduleWeeks, type Db, type GameRow } from "@/db";
 import type { AddGameInput, UpdateGameInput } from "./schema";
 
 /* 보드가 그리는 한 장. games 행 + 유도된 lastPlayed 다 — 플레이 날짜의 정본이 이제 게임
    컬럼이 아니라 일정(schedule_entries)이라, 보드는 그 게임에 걸린 항목들의 MAX(scheduled_date)
    로 "언제 플레이했나"를 되유도한다(이슈 #56 결정 3·17). lastPlayed 가 null 이면 아직 그 게임의
-   일정 항목이 없다(=안 한 게임). */
+   (보드에 셀) 일정 항목이 없다(=안 한 게임, 또는 아직 초안이라 안 뜬 편성). */
 export type GameCard = GameRow & { lastPlayed: string | null };
 
-// games.* + MAX(scheduled_date). 같은 max() SQL 을 select·orderBy 가 공유해 표현이 갈리지 않게 한다.
-const lastPlayedExpr = max(scheduleEntries.scheduledDate);
+/* 항목이 속한 주의 월요일. schedule_weeks 는 week_start_date(월요일)로 키가 잡히므로, 항목의
+   scheduled_date 로부터 그 주의 월요일을 유도해야 메타 행에 조인된다(core/calendar.weekStartOf
+   의 SQL 짝). strftime('%w') 는 일=0‥토=6 이라 (dow+6)%7 일을 빼면 월요일이 나온다. */
+const entryWeekStart = sql`date(${scheduleEntries.scheduledDate}, '-' || ((strftime('%w', ${scheduleEntries.scheduledDate}) + 6) % 7) || ' days')`;
+
+/* 유도된 플레이 날짜 = **발행 경계를 통과한** 항목들의 MAX(scheduled_date)다(ADR-0022). 항목이
+   보드 날짜에 기여하려면 그 주가 발행됐거나(published_at NOT NULL) 아예 주 메타가 없어야 한다
+   (week_start_date IS NULL = 이관된 과거 아카이브 · 직접 넣은 테스트 데이터). 미발행 초안 주는
+   메타 행이 있고 published_at 이 NULL 이라 CASE 가 NULL 을 내 빠진다 — 관리자가 짜는 중인 다음
+   주 편성의 게임이 보드에 미래 날짜로 새는 걸 여기서 막는다(이슈 #56 "놓치면 늦게 터지는 자리 1").
+   같은 SQL 을 select·orderBy·단건 유도가 공유해 세 자리의 경계가 갈리지 않게 한다. */
+const lastPlayedExpr = sql<
+  string | null
+>`max(case when ${scheduleWeeks.weekStartDate} is null or ${scheduleWeeks.publishedAt} is not null then ${scheduleEntries.scheduledDate} end)`;
 
 /* 공개 읽기. 보드는 "언제 플레이했나" 순이다 — 최근 플레이가 위로 온다. 일정 항목이 없는
    게임(lastPlayed null)은 시간축 위에 자리가 없으므로 뒤로 몰고, 그 안에서만 추가 순
@@ -23,26 +35,44 @@ const lastPlayedExpr = max(scheduleEntries.scheduledDate);
    둘째 키가 전부 NULL 이라 무의미해지고 created_at DESC 만 남는다. 구조는 played_at 컬럼 시절과
    같다(결정 17, 시각 회귀 위험 0) — 정렬 인덱스는 검색 이슈로 미룸(ADR-0014).
 
-   **발행 필터는 아직 걸지 않는다(의도적 유예).** 미발행 미래 일정의 게임이 보드에 새는 걸 막는
-   게 그 필터인데(이슈 #56 "놓치면 늦게 터지는 자리 1"), 지금은 schedule_weeks 에 행을 넣는
-   코드가 없어(일정 쓰기는 작업순서 4) 미발행 주 자체가 존재하지 않는다. 지금 필터를 걸면
-   이관된 과거 항목이 주 메타가 없어 보드에서 통째로 사라진다(결정 16 "손실 0"과 정면 충돌).
-   발행 경계는 일정 쓰기가 서는 작업순서 4 에서 ADR 과 함께 붙인다. */
+   schedule_weeks 를 LEFT JOIN 하는 이유가 발행 경계다(lastPlayedExpr 주석·ADR-0022): 항목의
+   주(월요일)에 메타 행을 이어 붙여, 그 주가 발행됐는지로 항목을 보드에 셀지 가른다. LEFT 라
+   메타 없는 항목(레거시 아카이브)은 그대로 남아 손실이 없다(결정 16). */
 export function listGames(db: Db): Promise<GameCard[]> {
   return db
     .select({ ...getTableColumns(games), lastPlayed: lastPlayedExpr })
     .from(games)
     .leftJoin(scheduleEntries, eq(scheduleEntries.gameId, games.id))
+    .leftJoin(scheduleWeeks, eq(scheduleWeeks.weekStartDate, entryWeekStart))
     .groupBy(games.id)
     .orderBy(sql`${lastPlayedExpr} IS NULL`, desc(lastPlayedExpr), desc(games.createdAt));
 }
 
+/* 일정 편집기가 항목에 게임을 이어 붙일 때 고를 후보(이슈 #56 결정 11). 보드에 이미 있는
+   게임만 준다 — 항목의 game_id 는 games.id FK 라, 없는 게임을 가리키면 저장이 롤백된다.
+   유도 조인이 필요 없어 listGames 보다 가볍고(이름·표지만), 이름순이라 편집기 검색이 사전순으로
+   좁혀진다. 표지·이름은 편집기·읽기 화면이 game_id 로 다시 그리는 데 쓴다(항목엔 표지가 없다). */
+export type GameOption = Pick<GameRow, "id" | "categoryValue" | "posterImageUrl">;
+
+export function listGameOptions(db: Db): Promise<GameOption[]> {
+  return db
+    .select({
+      id: games.id,
+      categoryValue: games.categoryValue,
+      posterImageUrl: games.posterImageUrl,
+    })
+    .from(games)
+    .orderBy(asc(games.categoryValue));
+}
+
 // 한 게임의 유도 카드(쓰기 응답용). 방금 바뀐 행 + 그 게임의 lastPlayed 를 되유도해 돌려준다 —
 // 보드가 낙관적 갱신 때 날짜줄을 잃지 않게(클리어만 고쳐도 일정에서 온 날짜는 그대로여야 한다).
+// 발행 경계는 listGames 와 같은 조인·CASE 로 건다(단건이라도 규칙이 갈리면 안 된다).
 async function gameCard(db: Db, row: GameRow): Promise<GameCard> {
   const [agg] = await db
     .select({ lastPlayed: lastPlayedExpr })
     .from(scheduleEntries)
+    .leftJoin(scheduleWeeks, eq(scheduleWeeks.weekStartDate, entryWeekStart))
     .where(eq(scheduleEntries.gameId, row.id));
   return { ...row, lastPlayed: agg?.lastPlayed ?? null };
 }
