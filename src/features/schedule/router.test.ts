@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { authoritiesFor, type Authority } from "@/core/authorities";
-import { makeDb } from "@/db";
+import { makeDb, scheduleEntries } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
@@ -32,10 +32,16 @@ describe("일정 라우터", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("getWeek 은 빈 주를 초안(발행 안 됨)으로 준다", async () => {
+  it("getWeek 은 빈 주를 초안(발행 안 됨)으로 준다 — 메타 행도 아직 없다", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
-    expect(week).toEqual({ weekStartDate: MON, note: null, publishedAt: null, entries: [] });
+    expect(week).toEqual({
+      weekStartDate: MON,
+      note: null,
+      publishedAt: null,
+      hasMeta: false,
+      entries: [],
+    });
   });
 
   it("saveWeek 은 그 주를 저장하고 getWeek 이 되읽는다", async () => {
@@ -162,6 +168,47 @@ describe("일정 라우터", () => {
     // 롤백됐으면 주도 안 남는다(배치 원자성).
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
     expect(week.entries).toEqual([]);
+  });
+
+  it("이관된 레거시 주(메타 없음)를 편집기 기본값대로 저장해도 보드 날짜가 안 사라진다", async () => {
+    const db = makeDb(env.DB);
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const game = await authed.games.add({
+      categoryId: "c-legacy",
+      categoryType: "GAME",
+      categoryValue: "엘든링",
+    });
+    /* 마이그레이션 0007 이 만드는 모양 그대로: 항목만 있고 schedule_weeks 메타는 없다.
+       이 상태에서 보드는 발행 경계의 "메타 없음 = 레거시" 갈래로 날짜를 센다(ADR-0022). */
+    await db.insert(scheduleEntries).values({
+      scheduledDate: "2026-07-22",
+      title: "엘든링",
+      gameId: game.id,
+    });
+    expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBe("2026-07-22");
+
+    // 편집기가 이 주를 연다 — 메타가 없으므로 hasMeta 로 그걸 알 수 있어야 한다.
+    const loaded = await authed.schedule.getWeek({ weekStartDate: MON });
+    expect(loaded.hasMeta).toBe(false);
+    expect(loaded.publishedAt).toBeNull();
+
+    /* 편집기의 발행 기본값은 `publishedAt !== null || !hasMeta` 다 — 레거시 주는 "이미 공개 중"
+       으로 열린다. 그 기본값 그대로 저장했을 때 날짜가 살아 있어야 한다. hasMeta 를 안 보고
+       published:false 로 저장하면 published_at NULL 인 메타가 생겨 **여기서 날짜가 사라진다**
+       (이관이 지킨 "손실 0"이 첫 편집에서 깨지는 경로 — 이 테스트가 그 회귀를 막는다). */
+    const published = loaded.publishedAt !== null || !loaded.hasMeta;
+    await authed.schedule.saveWeek({
+      weekStartDate: MON,
+      note: loaded.note,
+      published,
+      entries: loaded.entries.map((e) => ({
+        scheduledDate: e.scheduledDate,
+        startTime: e.startTime,
+        title: e.title,
+        gameId: e.gameId,
+      })),
+    });
+    expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBe("2026-07-22");
   });
 
   it("공개 읽기(getPublishedWeek)는 발행된 주만 준다 — 초안은 null(공개 화면이 안 샌다)", async () => {

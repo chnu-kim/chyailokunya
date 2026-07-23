@@ -64,3 +64,22 @@ test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 
   // 다시 서기 때문이다(안 그러면 옛 주 공지가 이월돼 저장이 새 주를 덮어쓴다).
   await expect(page.locator('[data-od-id="schedule-note-input"]')).toHaveValue("");
 });
+
+test("관리자: 이관된 레거시 주는 '이미 공개 중'으로 열린다(발행 체크됨)", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  /* 픽스처의 일정 항목엔 schedule_weeks 메타가 없다 — 마이그레이션 0007 이 옛 played_at 을
+     이관해 놓은 과거 아카이브와 같은 모양이고, 보드는 그걸 발행과 무관하게 센다(ADR-0022). */
+  await page.goto("/schedule?week=2026-03-01");
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+  await expect(page.locator('[data-od-id^="schedule-entry-title-"]').first()).toHaveValue(
+    "엘든 링",
+  );
+
+  /* 발행이 **체크된 채** 열려야 한다. 풀린 채 열리면 관리자가 무심코 저장하는 순간
+     published_at NULL 인 메타가 생겨 그 주의 과거 플레이 날짜가 보드에서 사라진다
+     (이관이 지킨 "손실 0"이 첫 편집에서 깨지는 경로). */
+  await expect(page.locator('[data-od-id="schedule-publish"]')).toBeChecked();
+});

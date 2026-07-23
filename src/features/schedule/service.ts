@@ -13,6 +13,16 @@ export type WeekView = {
   weekStartDate: string;
   note: string | null;
   publishedAt: number | null;
+  /* 이 주에 **메타 행이 있는가**. publishedAt 만으로는 "초안(메타 있고 미발행)"과 "이관된 과거
+     아카이브(메타 자체가 없음)"를 못 가른다 — 둘 다 null 이다. 그런데 보드 날짜 유도에선 그
+     둘이 정반대다(ADR-0022): 초안은 안 세고 메타 없는 레거시는 센다.
+
+     편집기가 이걸 봐야 하는 이유가 결정적이다. 레거시 주를 열어 아무거나 고치고 저장하면
+     saveWeek 이 메타 행을 만드는데, 그때 published 가 false 면 published_at 이 NULL 로 박혀
+     **그 순간부터 그 주 항목이 보드 날짜에서 빠진다** — 이관이 지킨 "손실 0"(결정 16)이 첫
+     편집에서 깨진다. 그래서 편집기는 메타 없는 주를 "이미 공개 중"으로 열어야 하고(발행 체크됨),
+     그 판단 근거가 이 필드다. */
+  hasMeta: boolean;
   entries: ScheduleEntry[];
 };
 
@@ -49,6 +59,7 @@ export async function getWeekForEdit(db: Db, weekStartDate: string): Promise<Wee
     weekStartDate,
     note: meta?.note ?? null,
     publishedAt: meta?.publishedAt ?? null,
+    hasMeta: meta !== undefined,
     entries,
   };
 }
