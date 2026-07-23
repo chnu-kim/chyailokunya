@@ -1,3 +1,4 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ImageResponse } from "next/og";
 
 /* 주간 일정표 PNG 스파이크 — 이슈 #56 작업순서 1.
@@ -5,6 +6,18 @@ import { ImageResponse } from "next/og";
    (2) workerd 런타임이 실제로 PNG 를 뱉는가, (3) 한글이 글리프로 그려지는가,
    (4) 번들·응답이 Workers 한도 안인가. 데이터는 아직 하드코딩이고, 통과하면
    schedule_entries 조회로 갈아끼운다. */
+
+/* **이 라우트는 프로덕션에서 404 다.** 그리는 한 주가 실제 편성이 아니라 더미인데,
+   경로가 공개라 누가 URL 을 발견해 공유하면 가짜 일정이 팬사이트 origin 의 이름으로
+   퍼진다 — 링크가 없어 크롤러가 못 찾는다는 건 방어가 아니다. 그리고 그 실패는 우리
+   눈에 안 띄게 퍼지므로(누가 봤는지 알 길이 없다) 사후에 못 거둔다.
+
+   그래서 플래그가 있을 때만 200 을 낸다. `.dev.vars` 에만 넣고 Cloudflare secret 에는
+   넣지 않으므로 dev·preview 는 그대로 돌고 배포본만 죽는다. 배포 런타임 검증은 이미
+   workerd preview 로 끝냈고, CI 의 `배포 빌드` 스텝이 이 파일을 계속 컴파일하니 회귀
+   감지도 살아 있다. 실제 데이터가 붙는 작업순서 7 에서 이 게이트를 걷어낸다 — 잊으면
+   og 카드가 안 떠서 바로 드러난다. */
+const SPIKE_FLAG = "OG_SCHEDULE_SPIKE";
 
 // og:image 겸용이라 1200×630 고정이다(결정 15). 이 비율을 벗어나면 트위터·카페
 // 카드가 임의로 잘라내 요일 칸이 통째로 사라진다.
@@ -104,6 +117,12 @@ async function loadSubsetFont(family: string, weight: number, text: string): Pro
 }
 
 export async function GET() {
+  if (!getCloudflareContext().env[SPIKE_FLAG]) {
+    // 404 다(501 아님) — 프로덕션에는 이 경로가 "아직 없다"가 사실이고, 501 은 있는
+    // 엔드포인트가 미구현이라는 다른 말을 한다.
+    return new Response(null, { status: 404 });
+  }
+
   /* 서브셋에 넣을 글자를 **렌더하는 문자열 그대로**에서 모은다. 손으로 나열하지 않는 게
      핵심이다 — 초판은 헤더의 날짜 범위를 JSX 안에 리터럴로 두고 여기 안 넣어서 en dash
      하나가 서브셋 밖에 있었다(코드 리뷰가 잡았다). 폰트마다 실제로 그 폰트로 그리는
