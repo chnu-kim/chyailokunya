@@ -58,7 +58,13 @@ export default async function SchedulePage({
     ]);
     return (
       <main id="main">
+        {/* key 로 주가 바뀌면 편집기를 remount 한다 — 안 하면 주 이동(WeekNav 의 client 네비)이
+            새 weekStartDate·initialWeek 을 prop 으로 주지만 편집기가 보존돼 useState 초기화가
+            재실행되지 않는다. 그러면 옛 주의 draft(note·published·항목)가 새 주 화면에 남고,
+            저장이 새 weekStartDate 로 나가 옛 주 상태를 새 주에 덮어쓴다. remount 로 새 주의
+            initialWeek 에서 draft·baseline 이 깨끗하게 다시 선다. */}
         <ScheduleEditor
+          key={weekStart}
           weekStartDate={weekStart}
           initialWeek={weekView}
           games={games}

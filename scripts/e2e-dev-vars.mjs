@@ -19,7 +19,7 @@
    커밋된 고정 키쌍으로 두면 이 재사용 분기가 통째로 사라지지만, 저장소에 개인키 모양의
    문자열을 두지 않는 쪽을 택했다 — 불변식 4 는 "무엇을 지키는 키인가"보다 먼저 읽힌다. */
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { exportJWK, generateKeyPair } from "jose";
 
@@ -41,17 +41,19 @@ const pub = { ...(await exportJWK(publicKey)), kid: "v1", alg: "EdDSA" };
    통과한다(isAllowedOrigin 은 URL.origin 완전 일치라 포트가 다르면 거절). PORT 는 이 스크립트를
    부른 webServer 커맨드가 물려준 process.env 에서 읽는다(playwright.config 의 PORT 와 같은 값).
 
-   포트를 바꿔 다시 돌릴 땐(예: 3000 ↔ 3100) 이 파일을 지운다 — 키 재사용과 같은 이유로 `wx` 라
-   한 번 만든 값(옛 포트의 AUTH_URL)이 그대로 재사용돼, 새 포트의 dev 서버가 내는 Origin 과
-   어긋나 쓰기가 403 이 된다. 지우고 다시 돌리면 현재 포트로 재생성된다. */
+   AUTH_URL 은 **키를 건드리지 않고 자가 치유한다**(아래 재사용 분기): 이 변경 이전에 만든 파일엔
+   AUTH_URL 이 없고, 포트를 바꿔 돌리면(3000 ↔ 3100) 옛 포트가 남는데 — 둘 다 쓰기 e2e 를 403 으로
+   만든다. 그래서 재사용 시 그 줄만 현재 포트로 갈아 끼운다(키는 그대로라 살아 있는 서버의 검증은
+   안 흔들린다). 손으로 파일을 지울 필요가 없다. */
 const PORT = process.env.PORT ?? "3000";
+const AUTH_URL_LINE = `AUTH_URL=http://localhost:${PORT}`;
 const body = [
   "# e2e 전용(자동 생성, 커밋 금지). 지울 땐 dev 서버도 같이 내린다 — 살아 있는 서버는",
   "# 부팅 때 읽은 옛 키로 계속 검증해서, 새로 만든 키로 서명한 세션이 전부 거절된다.",
   "NEXTJS_ENV=development",
   `JWT_SIGNING_JWK=${JSON.stringify(priv)}`,
   `JWT_PUBLIC_JWK=${JSON.stringify(pub)}`,
-  `AUTH_URL=http://localhost:${PORT}`,
+  AUTH_URL_LINE,
   "",
 ].join("\n");
 
@@ -61,8 +63,22 @@ const body = [
    확인이 한 번의 시스템 콜이라 그 창이 없다. */
 try {
   writeFileSync(PATH, body, { flag: "wx" });
-  console.log(`[e2e] ${PATH} 생성 — 세션 서명 키(EdDSA)`);
+  console.log(`[e2e] ${PATH} 생성 — 세션 서명 키(EdDSA) + AUTH_URL`);
 } catch (e) {
   if (e.code !== "EEXIST") throw e;
-  console.log(`[e2e] ${PATH} 재사용`);
+  /* 이미 있으면 **키는 보존한다**(살아 있는 서버가 그 키로 검증 중일 수 있어 재생성하면 세션이
+     통째로 거절된다 — 위 wx 근거). 하지만 AUTH_URL 은 현재 포트로 맞춘다: 옛 파일엔 아예 없거나
+     다른 포트라 그대로 두면 쓰기 e2e 가 403 이다. 키 줄은 그대로 두고 AUTH_URL 줄만 갈아 끼운다.
+     같은 키·같은 포트를 다시 쓰는 멱등 연산이라, 동시 실행이 겹쳐도 결과가 같다(키 생성 경쟁과
+     달리 클로버가 없다 — 그래서 여기선 read→write 로 나눠도 안전하다). */
+  const lines = readFileSync(PATH, "utf8").split("\n");
+  if (lines.includes(AUTH_URL_LINE)) {
+    console.log(`[e2e] ${PATH} 재사용`);
+  } else {
+    const patched = lines.filter((l) => !l.startsWith("AUTH_URL="));
+    while (patched.length && patched[patched.length - 1] === "") patched.pop();
+    patched.push(AUTH_URL_LINE, "");
+    writeFileSync(PATH, patched.join("\n"));
+    console.log(`[e2e] ${PATH} 키 보존 · AUTH_URL 갱신(${AUTH_URL_LINE})`);
+  }
 }

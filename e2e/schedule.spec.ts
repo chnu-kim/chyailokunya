@@ -41,3 +41,26 @@ test("관리자: 편집기로 항목을 저장하고 되읽는다", async ({ pag
     "e2e 저챗",
   );
 });
+
+test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 미저장 이탈 confirm 은 수락한다(이동을 진행시켜 리셋을 관찰).
+  page.on("dialog", (d) => d.accept());
+  await page.goto("/schedule?week=2027-04-05");
+
+  // 이 주 편집기에 공지를 넣어 dirty 로 만든다(저장은 안 한다).
+  const note = page.locator('[data-od-id="schedule-note-input"]');
+  await note.fill("이 공지는 이 주에만");
+
+  // WeekNav "다음주"로 이동 — 미저장이라 confirm 이 뜨고, 수락되어 새 주로 간다.
+  const before = page.url();
+  await page.locator('.sched-nav__step[rel="next"]').click();
+  await page.waitForFunction((u) => location.href !== u, before);
+
+  // 새 주 편집기의 공지는 비어 있어야 한다 — key remount 로 draft·baseline 이 새 주에서
+  // 다시 서기 때문이다(안 그러면 옛 주 공지가 이월돼 저장이 새 주를 덮어쓴다).
+  await expect(page.locator('[data-od-id="schedule-note-input"]')).toHaveValue("");
+});
