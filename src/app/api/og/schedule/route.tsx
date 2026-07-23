@@ -33,6 +33,10 @@ const BODY = "Gothic A1"; // --font-body 의 첫 스택
 
 const HEADING = "이번 주 방송";
 const SUBHEADING = "챠이로 쿠냐";
+// 헤더 오른쪽 날짜 범위. 렌더에 쓰는 문자열은 전부 상수로 빼 둔다 — 서브셋을 여기서
+// 유도하기 때문이다(GET 의 penText·bodyText). 리터럴을 JSX 안에 직접 쓰면 서브셋에서
+// 빠지는데, 빠져도 화면이 멀쩡해 보여 안 들킨다(아래 loadSubsetFont 주석).
+const RANGE = "7.20 – 7.26";
 
 type Entry = { day: string; date: string; time: string | null; title: string };
 
@@ -51,12 +55,23 @@ const WEEK: Entry[] = [
 
 const NOTE = "이번 주는 목요일에 실크송 엔딩까지 달립니다";
 
+/* 받아 둔 서브셋 바이너리를 isolate 가 사는 동안 재사용한다. 같은 주간표는 글자가 같아
+   캐시 키(=요청 URL)가 그대로 맞는다 — 없으면 매 요청이 Google Fonts 를 3회 왕복한다.
+   isolate 수명이라 콜드 스타트마다 다시 받는다: 스파이크엔 충분하고, 엣지 캐시(Cache API)
+   냐 KV/R2 냐는 작업순서 7에서 PNG 캐싱 전략과 같이 정한다(이슈 #56 미결). */
+const fontCache = new Map<string, ArrayBuffer>();
+
 /** Satori 에 넘길 폰트 바이너리를 Google Fonts 에서 받는다.
  *
  * 한글 완성형 한 벌은 1~2MB 라 Worker 번들에 못 넣는다. 대신 CSS2 API 의 `text=`
  * 파라미터로 **그릴 글자만** 서브셋해 받으면 수 KB 로 떨어진다. `text=` 가 붙은 요청은
  * User-Agent 와 무관하게 `/l/font?kit=…` 의 **truetype** 을 주는데(실측), 이게 중요하다 —
  * Satori 는 woff2 를 읽지 못하고, `text=` 없는 일반 요청은 woff2 를 준다.
+ *
+ * **서브셋에서 빠진 글자는 사라지지 않는다 — 다른 폰트로 그려진다.** next/og 가 자체
+ * 폴백 폰트를 들고 있어(실측: en dash 를 셋 다 빼고 요청해도 workerd 가 멀쩡히 그렸다)
+ * 누락이 화면상 티가 안 난다. 자형만 조용히 이탈하므로 눈으로는 못 잡는다 — 그래서 렌더
+ * 문자열을 상수로 모아 서브셋을 코드로 유도한다(HEADING·SUBHEADING·RANGE·WEEK·NOTE).
  */
 async function loadSubsetFont(family: string, weight: number, text: string): Promise<ArrayBuffer> {
   // 같은 글자를 여러 번 넘길 이유가 없다 — URL 길이는 유한하고, 주간표는 요일·숫자가
@@ -66,22 +81,35 @@ async function loadSubsetFont(family: string, weight: number, text: string): Pro
     `https://fonts.googleapis.com/css2?family=${family.replace(/ /g, "+")}:wght@${weight}` +
     `&text=${encodeURIComponent(glyphs)}`;
 
-  const css = await fetch(cssUrl).then((r) => r.text());
+  const cached = fontCache.get(cssUrl);
+  if (cached) return cached;
+
+  const cssRes = await fetch(cssUrl);
+  // 429·5xx 를 본문으로 읽으면 정규식이 안 맞아 "truetype 을 못 받았다"로 오진한다 —
+  // 원인이 다르면 메시지도 달라야 다음 사람이 엉뚱한 곳을 파지 않는다.
+  if (!cssRes.ok) throw new Error(`${family}: Google Fonts CSS ${cssRes.status}`);
+  const css = await cssRes.text();
   const fontUrl = css.match(/src:\s*url\(([^)]+)\)\s*format\('(?:truetype|opentype)'\)/)?.[1];
   if (!fontUrl) {
     // woff2 로 떨어졌다는 뜻이다 — 조용히 폴백하면 한글이 두부(□)로 그려져 배포 후에야
     // 들킨다. 여기서 깨뜨려 스파이크가 실패를 보고하게 한다.
     throw new Error(`${family}: truetype 서브셋을 못 받았다. 응답 CSS: ${css.slice(0, 200)}`);
   }
-  return fetch(fontUrl).then((r) => r.arrayBuffer());
+  const fontRes = await fetch(fontUrl);
+  if (!fontRes.ok) throw new Error(`${family}: 폰트 바이너리 ${fontRes.status}`);
+
+  const buf = await fontRes.arrayBuffer();
+  fontCache.set(cssUrl, buf);
+  return buf;
 }
 
 export async function GET() {
-  // 서브셋에 넣을 글자를 렌더할 문자열에서 그대로 모은다. 여기 빠진 글자는 화면에서
-  // 사라지므로, 문구를 추가하면 이 배열에도 넣어야 한다.
+  /* 서브셋에 넣을 글자를 **렌더하는 문자열 그대로**에서 모은다. 손으로 나열하지 않는 게
+     핵심이다 — 초판은 헤더의 날짜 범위를 JSX 안에 리터럴로 두고 여기 안 넣어서 en dash
+     하나가 서브셋 밖에 있었다(코드 리뷰가 잡았다). 폰트마다 실제로 그 폰트로 그리는
+     문자열만 모은다: 손글씨체는 제목·요일, 본문체는 나머지. */
   const penText = HEADING + SUBHEADING + WEEK.map((e) => e.day).join("");
-  const bodyText =
-    NOTE + WEEK.map((e) => `${e.date}${e.time ?? ""}${e.title}`).join("") + "휴방미정";
+  const bodyText = RANGE + NOTE + WEEK.map((e) => `${e.date}${e.time ?? ""}${e.title}`).join("");
 
   const [penFont, bodyFont, bodyBold] = await Promise.all([
     loadSubsetFont(PEN, 400, penText),
@@ -146,7 +174,7 @@ export async function GET() {
         </div>
         <div style={{ display: "flex", flex: 1 }} />
         <div style={{ display: "flex", fontSize: 26, color: T.muted, paddingBottom: 14 }}>
-          7.20 – 7.26
+          {RANGE}
         </div>
       </div>
 
@@ -252,6 +280,11 @@ export async function GET() {
         { name: BODY, data: bodyFont, weight: 400, style: "normal" },
         { name: BODY, data: bodyBold, weight: 700, style: "normal" },
       ],
+      /* 기본값이 `public, max-age=0, must-revalidate` 라 크롤러가 긁을 때마다 Satori 를
+         다시 돌리고 Google Fonts 를 왕복한다. 스파이크 데이터는 하드코딩이라 무효화할
+         것이 없어 짧게 잡아 둔다 — 발행 시점에 갱신돼야 하는 진짜 캐시 전략(무효화 키·
+         s-maxage·발행 훅)은 작업순서 7 에서 정한다(이슈 #56 미결). */
+      headers: { "Cache-Control": "public, max-age=300" },
     },
   );
 }
