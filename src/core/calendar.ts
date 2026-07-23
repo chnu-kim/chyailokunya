@@ -60,11 +60,23 @@ export function toIsoDate(v: string): IsoDate {
   return v;
 }
 
+/* 계산 결과를 다시 계약에 통과시킨다. Temporal 산술은 4자리 범위를 벗어나면 부호를 붙여
+   토해낸다 — weekStartOf('0000-01-01') 은 '-000001-12-27', addWeeks('9999-12-31',1) 은
+   '+010000-01-07'. 이 값을 그대로 IsoDate 로 브랜딩하면 타입은 IsoDate 인데 문자열은
+   YYYY-MM-DD 가 아니고, ?week= 키·정렬(사전순=시간순)이 조용히 깨진다(입력이 아니라 산술이
+   만든 값이라 isIsoDate 앞단에서 안 걸린다). 방송 일정에 0000·9999 년이 올 일은 없지만,
+   "IsoDate 는 항상 YYYY-MM-DD"를 조건부 참으로 두면 그게 언제 거짓이 되는지 호출자가
+   추적하게 된다 — 경계에서 던져 불변식을 무조건 참으로 만든다. */
+function branded(plain: Temporal.PlainDate): IsoDate {
+  return toIsoDate(plain.toString());
+}
+
 /* 지금 KST 로 며칠인가. 서버(Workers·UTC)와 브라우저(사용자 존)가 같은 답을 내야 하므로
    실행 환경의 로컬 존을 절대 쓰지 않는다 — 이 사이트의 "오늘"은 방송을 보는 사람의 하루,
    즉 KST 다. */
 export function todayKST(): IsoDate {
-  return Temporal.Now.plainDateISO(KST).toString() as IsoDate;
+  // 실시간 클록이라 5자리 연도가 나올 수 없지만, IsoDate 를 만드는 통로를 하나로 둔다.
+  return branded(Temporal.Now.plainDateISO(KST));
 }
 
 /* 그 날짜가 속한 주의 월요일. 주는 저장하지 않고 날짜에서 유도한다(결정 2) — 항목에 week_id 를
@@ -72,7 +84,7 @@ export function todayKST(): IsoDate {
    ISO 8601 의 dayOfWeek 는 월=1‥일=7 이라 (dayOfWeek - 1)일을 빼면 월요일이 나온다. */
 export function weekStartOf(date: IsoDate): IsoDate {
   const d = Temporal.PlainDate.from(date);
-  return d.subtract({ days: d.dayOfWeek - 1 }).toString() as IsoDate;
+  return branded(d.subtract({ days: d.dayOfWeek - 1 }));
 }
 
 /* 그 날짜가 속한 주의 7일(월→일). 인자로 주의 시작을 요구하지 않는다 — 요구하면 호출자가
@@ -80,13 +92,13 @@ export function weekStartOf(date: IsoDate): IsoDate {
    틀린 주가 나온다. 아무 날짜나 받아 안에서 주를 가른다. */
 export function weekDates(date: IsoDate): IsoDate[] {
   const start = Temporal.PlainDate.from(weekStartOf(date));
-  return Array.from({ length: 7 }, (_, i) => start.add({ days: i }).toString() as IsoDate);
+  return Array.from({ length: 7 }, (_, i) => branded(start.add({ days: i })));
 }
 
 /* 주 이동(음수면 이전 주). 날짜에 7*n 일을 더하는 것과 결과가 같지만 이름이 의도를 말한다 —
    호출자는 "다음 주"를 원하지 "7일 뒤"를 원하는 게 아니다. */
 export function addWeeks(date: IsoDate, weeks: number): IsoDate {
-  return Temporal.PlainDate.from(date).add({ weeks }).toString() as IsoDate;
+  return branded(Temporal.PlainDate.from(date).add({ weeks }));
 }
 
 /* 요일 라벨. weekDates 의 반환 순서와 **같은 사실**이라 같은 파일에 둔다 — 떨어뜨려 두면

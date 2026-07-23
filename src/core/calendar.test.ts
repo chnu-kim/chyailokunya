@@ -128,6 +128,14 @@ describe("weekStartOf", () => {
     expect(weekStartOf(d("2027-01-01"))).toBe("2026-12-28"); // 금 → 전해로
     expect(weekStartOf(d("2024-03-01"))).toBe("2024-02-26"); // 윤년 2/29 를 지나
   });
+
+  it("4자리 범위를 벗어나는 산술은 던진다 — IsoDate 계약을 조용히 깨느니 멈춘다", () => {
+    // isIsoDate 는 이 입력을 통과시키지만(형식이 YYYY-MM-DD), 주의 시작이 이전 해로
+    // 넘어가며 '-000001-12-27' 이 된다. 그대로 브랜딩하면 타입은 IsoDate 인데 문자열은
+    // YYYY-MM-DD 가 아니라 ?week= 키·정렬이 깨진다. 방송 일정엔 안 올 값이지만 계약은
+    // 무조건 참이어야 한다.
+    expect(() => weekStartOf(d("0000-01-01"))).toThrow(TypeError);
+  });
 });
 
 describe("weekDates", () => {
@@ -187,6 +195,12 @@ describe("addWeeks", () => {
     expect(addWeeks(d("2026-12-28"), 1)).toBe("2027-01-04");
     expect(addWeeks(d("2027-01-04"), -1)).toBe("2026-12-28");
     expect(addWeeks(d("2026-07-20"), 52)).toBe("2027-07-19");
+  });
+
+  it("5자리 연도로 넘어가는 산술은 던진다", () => {
+    // addWeeks('9999-12-31', 1) 은 '+010000-01-07'. weekStartOf 와 같은 이유로 계약을
+    // 지키려 던진다.
+    expect(() => addWeeks(d("9999-12-31"), 1)).toThrow(TypeError);
   });
 
   it("주 시작에 적용하면 결과도 주 시작이다 — 주 이동 UI 가 기대는 성질", () => {
