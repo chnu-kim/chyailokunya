@@ -4,11 +4,13 @@ import { router } from "./trpc/init";
 import { roleRouter } from "./auth/router";
 import { chzzkRouter } from "./chzzk/router";
 import { gamesRouter } from "./games/router";
+import { scheduleRouter } from "./schedule/router";
 
 export const appRouter = router({
   games: gamesRouter,
   chzzk: chzzkRouter,
   role: roleRouter,
+  schedule: scheduleRouter,
 });
 
 export type AppRouter = typeof appRouter;
