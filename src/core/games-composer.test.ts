@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   composerReducer,
   composerStep,
-  EMPTY_DATES,
   initialComposerState,
   showsManualEntry,
   type ComposerAction,
@@ -57,54 +56,6 @@ describe("단계 전이", () => {
     expect(s.selected).toBeNull();
     expect(s.results).toHaveLength(2);
     expect(s.query).toBe("젤다");
-  });
-});
-
-describe("날짜 이월 방지", () => {
-  const withDates: ComposerAction = {
-    type: "datesChanged",
-    dates: { playedAt: "2026-01-05", clearedAt: "2026-02-10" },
-  };
-
-  it("뒤로 갔다 다른 게임을 고르면 이전 게임의 날짜가 따라오지 않는다", () => {
-    const s = run(
-      ...searched("게임", [zelda, mario]),
-      pick(zelda),
-      withDates,
-      { type: "back" },
-      pick(mario),
-    );
-    expect(s.selected?.categoryValue).toBe("마리오");
-    expect(s.dates).toEqual(EMPTY_DATES);
-  });
-
-  it("뒤로만 눌러도 날짜는 비워진다", () => {
-    const s = run(...searched("게임", [zelda]), pick(zelda), withDates, { type: "back" });
-    expect(s.dates).toEqual(EMPTY_DATES);
-  });
-
-  it("같은 게임을 다시 골라도 비워진다 — picked 가 규칙의 정본이라 경로가 갈리지 않는다", () => {
-    const s = run(...searched("젤다", [zelda]), pick(zelda), withDates, pick(zelda));
-    expect(s.dates).toEqual(EMPTY_DATES);
-  });
-
-  it("수동 입력으로 넘어갈 때도 이전 날짜는 끊긴다", () => {
-    const s = run(
-      ...searched("젤다", [zelda]),
-      pick(zelda),
-      withDates,
-      { type: "back" },
-      { type: "queryChanged", query: "없는게임" },
-      { type: "searchSucceeded", query: "없는게임", results: [] },
-      { type: "manualPicked" },
-    );
-    expect(s.selected?.categoryValue).toBe("없는게임");
-    expect(s.dates).toEqual(EMPTY_DATES);
-  });
-
-  it("상세 안에서 고친 날짜는 유지된다 — 비우는 건 선택 전환뿐이다", () => {
-    const s = run(...searched("젤다", [zelda]), pick(zelda), withDates);
-    expect(s.dates).toEqual({ playedAt: "2026-01-05", clearedAt: "2026-02-10" });
   });
 });
 

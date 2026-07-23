@@ -7,33 +7,34 @@ import {
   initialComposerState,
   showsManualEntry,
 } from "@/core/games-composer";
-import type { GameRow } from "@/db";
+import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
-import { DateFields, dateOrderError, GameDialog } from "./game-dialog";
+import { GameDialog } from "./game-dialog";
 
 /* 게임 추가 컴포저(ADR-0015·0017). 두 단계다:
 
      search  — 치지직 카테고리를 검색한다(서버 인가된 tRPC, creds 는 서버에만).
-     detail  — 고른 게임의 포스터·제목을 확인하고 날짜 두 개를 넣은 뒤 추가한다.
+     detail  — 고른 게임의 포스터·제목을 확인하고 추가한다.
 
-   결과 클릭이 곧 추가였던 한 단계짜리를 나눈 이유: 날짜는 붙인 뒤에 고치는 값이 아니라 붙일
-   때 아는 값이고, 클릭 한 번이 곧 서버 쓰기면 잘못 고른 걸 되돌리는 유일한 길이 삭제였다.
-   detail 은 뒤로 갈 수 있고(결과 목록은 그대로 남는다) 그때까지 서버는 안 건드린다.
+   결과 클릭이 곧 추가였던 한 단계짜리를 나눈 이유: 클릭 한 번이 곧 서버 쓰기면 잘못 고른 걸
+   되돌리는 유일한 길이 삭제였다. detail 은 뒤로 갈 수 있고(결과 목록은 그대로 남는다) 그때까지
+   서버는 안 건드린다. 한때 detail 에서 플레이·클리어 날짜를 함께 넣었지만, 플레이 날짜가 일정
+   정본으로 옮겨가며(이슈 #56) 그 단계가 사라졌다 — 클리어는 추가 뒤 카드에서 붙인다.
 
-   단계 사이의 전이 규칙(선택·뒤로·수동 입력 비상구·날짜 초기화)은 전부 core/games-composer
-   의 순수 리듀서가 쥔다 — 이 파일은 그리기와 통신만 한다. 그래야 "뒤로 갔다 다른 게임을
-   고르면 이전 날짜가 따라오는가" 같은 전이 버그를 DOM 없이 단위 테스트가 잡는다. */
+   단계 사이의 전이 규칙(선택·뒤로·수동 입력 비상구)은 전부 core/games-composer 의 순수 리듀서가
+   쥔다 — 이 파일은 그리기와 통신만 한다. 그래야 "뒤로 갔다 다른 게임을 고르면 결과 목록이
+   남는가" 같은 전이 버그를 DOM 없이 단위 테스트가 잡는다. */
 
 export function GameComposer({
   onAdded,
   onClose,
 }: {
-  onAdded: (row: GameRow) => void;
+  onAdded: (row: GameCard) => void;
   onClose: () => void;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
-  const firstDateRef = useRef<HTMLInputElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
   const [state, dispatch] = useReducer(composerReducer, initialComposerState);
   /* 상세 단계의 서버 쓰기 에러만 여기 든다. 검색 에러(state.searchError)는 리듀서 소관이다 —
      응답이 늦게 도착할 때 어느 단계에 속한 문구인지 판단하는 건 전이 규칙이라서. */
@@ -43,13 +44,12 @@ export function GameComposer({
      body 로 떨어진다. 그래서 성공은 행을 쥐고 신호만 세우고, 실제 인계는 브라우저가 dialog 를
      닫은 뒤 오는 onClose 이벤트에서 한다. */
   const [closing, setClosing] = useState(false);
-  const [added, setAdded] = useState<GameRow | null>(null);
+  const [added, setAdded] = useState<GameCard | null>(null);
   const [searching, startSearch] = useTransition();
   const [adding, startAdd] = useTransition();
 
-  const { selected, dates } = state;
+  const { selected } = state;
   const step = composerStep(state);
-  const orderError = dateOrderError(dates);
 
   /* 단계가 바뀌면 포커스를 그 단계의 첫 조작점으로 옮긴다. 단계를 여는 버튼(결과 항목·뒤로·
      직접 입력)은 전부 **자기 자신을 언마운트**하므로, 안 옮기면 포커스가 dialog 로 떨어져
@@ -61,7 +61,7 @@ export function GameComposer({
      있어(UA 의 display:none) no-op 이고, 이후 showModal 의 포커스 단계는 autofocus "속성"을
      찾다 못 찾아 첫 포커서블(닫기 버튼)로 떨어진다. */
   useEffect(() => {
-    if (step === "detail") firstDateRef.current?.focus();
+    if (step === "detail") submitRef.current?.focus();
     else searchRef.current?.focus();
   }, [step]);
 
@@ -96,7 +96,7 @@ export function GameComposer({
 
   function onAdd(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected || orderError) return;
+    if (!selected) return;
     startAdd(async () => {
       setAddError("");
       try {
@@ -108,8 +108,6 @@ export function GameComposer({
             categoryType: "GAME",
             categoryValue: selected.categoryValue,
             posterImageUrl: selected.posterImageUrl,
-            playedAt: dates.playedAt,
-            clearedAt: dates.clearedAt,
           },
           // 상한이 없으면 busy 가 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
           { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
@@ -132,7 +130,9 @@ export function GameComposer({
     >
       {selected ? (
         <form className="composer__detail" onSubmit={onAdd}>
-          <p className="composer__hint">언제 플레이했는지 적어 두면 보드가 시간순으로 서요.</p>
+          <p className="composer__hint">
+            이 게임을 보드에 올릴게요. 클리어 표시는 추가한 뒤 카드에서 붙일 수 있어요.
+          </p>
 
           <div className="composer__chosen" data-od-id="composer-chosen">
             {selected.posterImageUrl ? (
@@ -151,16 +151,9 @@ export function GameComposer({
             <span className="composer__chosenname">{selected.categoryValue}</span>
           </div>
 
-          <DateFields
-            dates={dates}
-            onChange={(next) => dispatch({ type: "datesChanged", dates: next })}
-            idPrefix="composer-date"
-            firstFieldRef={firstDateRef}
-          />
-
-          {(orderError || addError) && (
+          {addError && (
             <p className="err" role="alert">
-              {orderError || addError}
+              {addError}
             </p>
           )}
 
@@ -181,7 +174,8 @@ export function GameComposer({
             <button
               className="btn btn--primary composer__btn"
               type="submit"
-              disabled={adding || !!orderError}
+              ref={submitRef}
+              disabled={adding}
               data-od-id="composer-submit"
             >
               {adding ? "추가 중…" : "추가"}
@@ -280,7 +274,7 @@ export function GameComposer({
       {/* 단계 전환은 화면이 통째로 바뀌는 사건이라 포커스 이동만으로는 맥락이 안 실린다 —
           보드의 announcement 규약과 같이 한 줄로 알린다. */}
       <p className="sr-only" role="status">
-        {selected ? selected.categoryValue + " 선택됨. 날짜를 입력하세요." : ""}
+        {selected ? selected.categoryValue + " 선택됨. 추가하려면 확인하세요." : ""}
       </p>
     </GameDialog>
   );

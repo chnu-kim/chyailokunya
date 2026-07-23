@@ -2,11 +2,11 @@
 
 import { useRef, useState, useTransition, type CSSProperties } from "react";
 import { ANGLE, axis, formatDate, PATTERNS, ROT } from "@/core/games";
-import type { GameRow } from "@/db";
+import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
 import { deleteErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
-import { DateFields, GameDialog, useDatePair } from "./game-dialog";
+import { ClearedFields, GameDialog, useClearedDraft } from "./game-dialog";
 
 /* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
    쓰기(추가·날짜 수정·삭제)를 한다. 쓰기는 tRPC 뮤테이션(서버 인가가 정본)을 부르고 로컬
@@ -35,12 +35,11 @@ function cssVars(vars: Record<string, string | number>): CSSProperties {
 }
 
 /* 카드의 날짜 한 줄. **플레이한 날만 싣는다** — 이 보드가 답하는 질문이 "무엇을 언제 플레이했나"
-   라서, 정렬 기준도 카드에 뜨는 날짜도 같은 하나여야 한다. 한때 플레이한 날이 없는 행에 클리어
-   날짜를 대신 실었는데, 그러면 카드마다 다른 축의 날짜가 섞여 정렬이 어긋나 보였다(클리어 날짜가
-   더 늦은데 카드는 뒤에 선다). 클리어는 날짜가 아니라 칩이 맡는다.
-   플레이한 날이 없으면 호출부가 줄 자체를 안 그린다(null 반환). */
-function dateLabel(g: GameRow): string | null {
-  return g.playedAt ? formatDate(g.playedAt) + " 플레이" : null;
+   라서, 정렬 기준도 카드에 뜨는 날짜도 같은 하나여야 한다. 그 날짜는 이제 게임 컬럼이 아니라
+   일정에서 유도된다(lastPlayed = MAX(scheduled_date), features/games/service). 클리어는 날짜가
+   아니라 칩이 맡는다. 유도된 날짜가 없으면(일정 항목이 없는 게임) 호출부가 줄 자체를 안 그린다. */
+function dateLabel(g: GameCard): string | null {
+  return g.lastPlayed ? formatDate(g.lastPlayed) + " 플레이" : null;
 }
 
 export function GameBoard({
@@ -48,22 +47,22 @@ export function GameBoard({
   canWrite,
   canDelete,
 }: {
-  initialGames: GameRow[];
+  initialGames: GameCard[];
   canWrite: boolean;
   canDelete: boolean;
 }) {
   const [games, setGames] = useState(initialGames);
   const [announcement, setAnnouncement] = useState("");
   const [composing, setComposing] = useState(false);
-  // 날짜를 고치는 중인 행. 행 전체를 들고 있는 이유: 모달이 제목·포스터로 "무엇을 고치는지"를
+  // 클리어를 고치는 중인 행. 행 전체를 들고 있는 이유: 모달이 제목·포스터로 "무엇을 고치는지"를
   // 다시 보여줘야 하고, id 만 들면 목록에서 매번 되찾아야 한다.
-  const [editing, setEditing] = useState<GameRow | null>(null);
+  const [editing, setEditing] = useState<GameCard | null>(null);
   // 삭제 확인을 받는 중인 행. editing 과 같은 이유로 행 전체를 든다 — 모달이 포스터·제목으로
   // "무엇을 떼는지"를 되짚어 줘야 하고, 되돌릴 수 없는 행동일수록 그 확인이 정확해야 한다.
-  const [deleting, setDeleting] = useState<GameRow | null>(null);
+  const [deleting, setDeleting] = useState<GameCard | null>(null);
   const addSlotRef = useRef<HTMLButtonElement>(null);
 
-  function onAdded(row: GameRow) {
+  function onAdded(row: GameCard) {
     // 최신 추가가 위로(구 보드의 prepend). 서버 정본과 같은 정렬은 아니지만(날짜순) 다음
     // 새로고침이 맞춰 준다 — 방금 붙인 카드는 눈에 보이는 자리에 있어야 한다.
     setGames((prev) => [row, ...prev]);
@@ -71,14 +70,14 @@ export function GameBoard({
     setAnnouncement(row.categoryValue + " 추가됨");
   }
 
-  function onUpdated(row: GameRow) {
+  function onUpdated(row: GameCard) {
     setGames((prev) => prev.map((g) => (g.id === row.id ? row : g)));
     setEditing(null);
-    setAnnouncement(row.categoryValue + " 날짜 수정됨");
+    setAnnouncement(row.categoryValue + " 클리어 수정됨");
   }
 
   /* 삭제가 서버까지 끝난 뒤. 모달이 닫힌 다음에 불린다(GameDeleteConfirm 의 인계 규약). */
-  function onRemoved(row: GameRow) {
+  function onRemoved(row: GameCard) {
     setGames((prev) => prev.filter((g) => g.id !== row.id));
     setDeleting(null);
     setAnnouncement(row.categoryValue + " 삭제됨");
@@ -109,7 +108,7 @@ export function GameBoard({
 
       {composing && <GameComposer onAdded={onAdded} onClose={() => setComposing(false)} />}
       {editing && (
-        <GameDateEditor game={editing} onUpdated={onUpdated} onClose={() => setEditing(null)} />
+        <GameClearEditor game={editing} onUpdated={onUpdated} onClose={() => setEditing(null)} />
       )}
       {deleting && (
         <GameDeleteConfirm
@@ -157,8 +156,9 @@ export function GameBoard({
               const ang = ANGLE[axis(key, "ang", ANGLE.length)] ?? ANGLE[0];
               const label = dateLabel(g);
               /* 날짜 줄은 플레이한 날만 실으므로 칩이 클리어를 홀로 맡는다 — 플레이한 날을
-                 모르는 채 클리어만 아는 행도 칩으로는 그 사실을 말할 수 있어야 한다. */
-              const showCleared = g.clearedAt !== null;
+                 모르는 채 클리어만 아는 게임도 칩으로는 그 사실을 말할 수 있어야 한다. 클리어의
+                 정본은 플래그다(cleared_date 유무가 아니다 — "깼는데 날짜 모름"을 살린다). */
+              const showCleared = g.cleared;
               return (
                 <div
                   key={g.id}
@@ -230,7 +230,7 @@ export function GameBoard({
                           data-od-id={"game-edit-" + g.id}
                           onClick={() => setEditing(g)}
                         >
-                          <span className="sr-only">{g.categoryValue} 날짜 수정</span>
+                          <span className="sr-only">{g.categoryValue} 클리어 수정</span>
                         </button>
                       )}
                       {canDelete && (
@@ -279,8 +279,8 @@ function GameDeleteConfirm({
   onRemoved,
   onClose,
 }: {
-  game: GameRow;
-  onRemoved: (row: GameRow) => void;
+  game: GameCard;
+  onRemoved: (row: GameCard) => void;
   onClose: () => void;
 }) {
   const [error, setError] = useState("");
@@ -382,32 +382,33 @@ function GameDeleteConfirm({
   );
 }
 
-/* 날짜 수정 모달. 고칠 수 있는 건 날짜 두 개뿐이라 제목·포스터는 "무엇을 고치는지" 확인용으로만
-   싣는다(게임 자체를 바꾸려면 떼고 다시 붙인다 — categoryId 가 정본 키라 갈아끼우면 중복
-   방지가 무너진다). 서버 updateGameInput 은 부분 패치가 아니라 두 날짜를 늘 함께 받는다. */
-function GameDateEditor({
+/* 클리어 수정 모달. 고칠 수 있는 건 클리어 상태(플래그 + 선택적 날짜)뿐이라 제목·포스터는
+   "무엇을 고치는지" 확인용으로만 싣는다(게임 자체를 바꾸려면 떼고 다시 붙인다 — categoryId 가
+   정본 키라 갈아끼우면 중복 방지가 무너진다). 플레이 날짜는 여기서 못 고친다 — 정본이 일정으로
+   옮겨갔다(이슈 #56). 서버 updateGameInput 은 부분 패치가 아니라 cleared·clearedDate 를 늘
+   함께 받는다. */
+function GameClearEditor({
   game,
   onUpdated,
   onClose,
 }: {
-  game: GameRow;
-  onUpdated: (row: GameRow) => void;
+  game: GameCard;
+  onUpdated: (row: GameCard) => void;
   onClose: () => void;
 }) {
-  const { dates, setDates, orderError } = useDatePair({
-    playedAt: game.playedAt ?? "",
-    clearedAt: game.clearedAt ?? "",
+  const { draft, setDraft } = useClearedDraft({
+    cleared: game.cleared,
+    clearedDate: game.clearedDate ?? "",
   });
   const [error, setError] = useState("");
   // 닫기 신호와 인계할 행. 컴포저와 같은 이유로 성공 즉시 onUpdated 를 부르지 않는다 —
   // 부모가 같은 커밋에서 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
   const [closing, setClosing] = useState(false);
-  const [saved, setSaved] = useState<GameRow | null>(null);
+  const [saved, setSaved] = useState<GameCard | null>(null);
   const [saving, startSave] = useTransition();
 
   function onSave(e: React.FormEvent) {
     e.preventDefault();
-    if (orderError) return;
     startSave(async () => {
       setError("");
       try {
@@ -415,8 +416,8 @@ function GameDateEditor({
         const row = await trpc.games.update.mutate(
           {
             id: game.id,
-            playedAt: dates.playedAt,
-            clearedAt: dates.clearedAt,
+            cleared: draft.cleared,
+            clearedDate: draft.clearedDate,
           },
           // 상한이 없으면 saving 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
           { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
@@ -431,8 +432,8 @@ function GameDateEditor({
 
   return (
     <GameDialog
-      title="날짜 수정"
-      odId="date-editor"
+      title="클리어 수정"
+      odId="clear-editor"
       closing={closing}
       busy={saving}
       // 삭제 확인과 같은 이유로 X 를 끈다 — 본문에 "취소"가 있다(GameDialog 의 closeButton).
@@ -440,9 +441,9 @@ function GameDateEditor({
       onClose={() => (saved ? onUpdated(saved) : onClose())}
     >
       <form className="composer__detail" onSubmit={onSave}>
-        <p className="composer__hint">비워 두면 “모름”으로 남아요.</p>
+        <p className="composer__hint">깼으면 표시해 주세요. 날짜를 모르면 비워 둬도 돼요.</p>
 
-        <div className="composer__chosen" data-od-id="date-editor-game">
+        <div className="composer__chosen" data-od-id="clear-editor-game">
           {game.posterImageUrl ? (
             <img
               className="composer__poster composer__poster--lg"
@@ -459,11 +460,11 @@ function GameDateEditor({
           <span className="composer__chosenname">{game.categoryValue}</span>
         </div>
 
-        <DateFields dates={dates} onChange={setDates} idPrefix="editor-date" />
+        <ClearedFields draft={draft} onChange={setDraft} idPrefix="editor-clear" />
 
-        {(orderError || error) && (
+        {error && (
           <p className="err" role="alert">
-            {orderError || error}
+            {error}
           </p>
         )}
 
@@ -471,7 +472,7 @@ function GameDateEditor({
           <button
             className="btn btn--secondary composer__btn"
             type="button"
-            data-od-id="date-editor-cancel"
+            data-od-id="clear-editor-cancel"
             // 저장이 날아가는 동안은 취소도 막는다 — 닫기와 같은 인계 경쟁이다(GameDialog 주석).
             disabled={saving}
             onClick={() => setClosing(true)}
@@ -481,8 +482,8 @@ function GameDateEditor({
           <button
             className="btn btn--primary composer__btn"
             type="submit"
-            disabled={saving || !!orderError}
-            data-od-id="date-editor-submit"
+            disabled={saving}
+            data-od-id="clear-editor-submit"
           >
             {saving ? "저장 중…" : "저장"}
           </button>

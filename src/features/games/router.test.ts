@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { authoritiesFor, type Authority } from "@/core/authorities";
-import { makeDb } from "@/db";
+import { makeDb, scheduleEntries } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
@@ -33,12 +33,13 @@ describe("games 라우터", () => {
     expect(await createCaller(makeCtx()).games.list()).toEqual([]);
   });
 
-  it("add 는 game:write 있으면 저장하고 list 에 뜬다(날짜는 기본 null)", async () => {
+  it("add 는 game:write 있으면 저장하고 list 에 뜬다(새 게임은 안 깬 채·일정 없음)", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     const row = await caller.games.add(eldenring);
     expect(row.id).toBeGreaterThan(0);
-    expect(row.playedAt).toBeNull();
-    expect(row.clearedAt).toBeNull();
+    expect(row.cleared).toBe(false);
+    expect(row.clearedDate).toBeNull();
+    expect(row.lastPlayed).toBeNull(); // 일정 항목이 없으니 유도된 플레이 날짜도 없다
     expect(typeof row.createdAt).toBe("number");
 
     const list = await createCaller(makeCtx()).games.list();
@@ -102,31 +103,38 @@ describe("games 라우터", () => {
     expect(await createCaller(makeCtx()).games.list()).toHaveLength(2);
   });
 
-  it("list 는 플레이 날짜 내림차순, 날짜 없는 행은 뒤로(그 안에선 추가 최신순)", async () => {
+  it("list 는 유도된 플레이 날짜 내림차순, 일정 없는 행은 뒤로(그 안에선 추가 최신순)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
+    const db = makeDb(env.DB);
     // 삽입 순서를 정렬 순서와 일부러 어긋나게 둔다 — createdAt 정렬이 남아 있으면 실패한다.
-    await authed.games.add({ ...eldenring, playedAt: "2026-03-01" });
+    const elden = await authed.games.add(eldenring);
     const noDate1 = await authed.games.add({
       categoryId: "c2",
       categoryType: "GAME",
-      categoryValue: "날짜 없음 1",
+      categoryValue: "일정 없음 1",
     });
-    await authed.games.add({
+    const recent = await authed.games.add({
       categoryId: "c3",
       categoryType: "GAME",
       categoryValue: "최근 플레이",
-      playedAt: "2026-07-12",
     });
     const noDate2 = await authed.games.add({
       categoryId: "c4",
       categoryType: "GAME",
-      categoryValue: "날짜 없음 2",
+      categoryValue: "일정 없음 2",
     });
 
+    // 플레이 날짜의 정본은 일정이다 — 항목을 심어 유도를 검증한다. eldenring 은 항목이 둘이라
+    // lastPlayed = MAX(scheduled_date) = 2026-03-01(더 이른 항목 2026-01-01 이 아니다).
+    await db.insert(scheduleEntries).values([
+      { scheduledDate: "2026-01-01", title: "엘든 첫날", gameId: elden.id },
+      { scheduledDate: "2026-03-01", title: "엘든 이어서", gameId: elden.id },
+      { scheduledDate: "2026-07-12", title: "최근 방송", gameId: recent.id },
+    ]);
+
     const list = await createCaller(makeCtx()).games.list();
-    expect(list.map((g) => g.playedAt)).toEqual(["2026-07-12", "2026-03-01", null, null]);
-    // SQLite 기본 정렬은 NULLS FIRST 라 이 순서가 규칙이 실제로 걸렸다는 증거다.
-    // 날짜 없는 둘 사이에선 나중에 추가한 쪽이 위.
+    expect(list.map((g) => g.lastPlayed)).toEqual(["2026-07-12", "2026-03-01", null, null]);
+    // 일정 없는 둘 사이에선 나중에 추가한 쪽이 위(created_at DESC).
     expect(list[2]!.id).toBe(noDate2.id);
     expect(list[3]!.id).toBe(noDate1.id);
   });
@@ -135,46 +143,60 @@ describe("games 라우터", () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add(eldenring);
     await expect(
-      createCaller(makeCtx()).games.update({ id: row.id, playedAt: "2026-07-20" }),
+      createCaller(makeCtx()).games.update({
+        id: row.id,
+        cleared: true,
+        clearedDate: "2026-07-20",
+      }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     // 막혔으면 저장도 안 됐다.
     const [after] = await createCaller(makeCtx()).games.list();
-    expect(after!.playedAt).toBeNull();
+    expect(after!.cleared).toBe(false);
   });
 
-  it("update 는 날짜를 고치고, null 로 지울 수도 있다", async () => {
+  it("update 는 클리어를 고치고, 해제(false)할 수도 있다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add(eldenring);
 
-    const dated = await authed.games.update({
+    const done = await authed.games.update({
       id: row.id,
-      playedAt: "2026-07-01",
-      clearedAt: "2026-07-20",
+      cleared: true,
+      clearedDate: "2026-07-20",
     });
-    expect(dated.playedAt).toBe("2026-07-01");
-    expect(dated.clearedAt).toBe("2026-07-20");
+    expect(done.cleared).toBe(true);
+    expect(done.clearedDate).toBe("2026-07-20");
 
-    // 날짜를 빼고 보내면 지워진다(부분 patch 가 아니라 전체 치환).
-    const cleared = await authed.games.update({ id: row.id });
-    expect(cleared.playedAt).toBeNull();
-    expect(cleared.clearedAt).toBeNull();
+    // cleared=false 로 보내면 클리어가 풀린다(부분 patch 가 아니라 전체 치환). 날짜도 함께 빠진다.
+    const undone = await authed.games.update({ id: row.id, cleared: false });
+    expect(undone.cleared).toBe(false);
+    expect(undone.clearedDate).toBeNull();
+  });
+
+  it("update 는 '깼는데 날짜 모름'을 받는다(cleared=true·date 없음)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add(eldenring);
+    const done = await authed.games.update({ id: row.id, cleared: true });
+    expect(done.cleared).toBe(true);
+    expect(done.clearedDate).toBeNull();
   });
 
   it("update 는 없는 id 면 NOT_FOUND(삭제와 달리 조용히 성공하지 않는다)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
-    await expect(authed.games.update({ id: 9999 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(authed.games.update({ id: 9999, cleared: false })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
   });
 
-  it("update 도 날짜 검증을 통과해야 한다(수정 경로로 우회 불가)", async () => {
+  it("update 도 클리어 상태 검증을 통과해야 한다(수정 경로로 우회 불가)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add(eldenring);
-    await expect(authed.games.update({ id: row.id, playedAt: "2026-02-31" })).rejects.toMatchObject(
-      {
-        code: "BAD_REQUEST",
-      },
-    );
+    // 안 깼는데 클리어 날짜 → 거절(isClearedStateValid).
     await expect(
-      authed.games.update({ id: row.id, playedAt: "2026-07-20", clearedAt: "2026-01-01" }),
+      authed.games.update({ id: row.id, cleared: false, clearedDate: "2026-07-20" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // 실재하지 않는 날짜 → 거절.
+    await expect(
+      authed.games.update({ id: row.id, cleared: true, clearedDate: "2026-02-31" }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 

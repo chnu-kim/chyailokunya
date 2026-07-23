@@ -11,15 +11,17 @@ export type Role = (typeof ROLES)[number];
 
 // 인가는 role 이 아니라 이 권한 단위로 검사한다. 세션엔 어떤 권한도 안 싣고 인가 순간 DB 에서
 // 역할을 읽어 파생한다(ADR-0017) — 그래야 역할 회수가 즉시 반영된다.
-export const AUTHORITIES = ["game:write", "game:delete", "role:manage"] as const;
+// schedule:write 는 주간 일정 쓰기(추가·수정·삭제·발행)를 하나로 묶는다 — 일괄 저장이 한
+// 뮤테이션이라(이슈 #56 결정 14) 세분할 대상이 없다. game:write 와 같은 상승 역할이 가진다.
+export const AUTHORITIES = ["game:write", "game:delete", "schedule:write", "role:manage"] as const;
 export type Authority = (typeof AUTHORITIES)[number];
 
 /* 상승 가드가 절차가 아니라 매핑으로 구조화된다: superadmin 만 role:manage 를 가져
    admin 은 다른 admin 을 임명·강등할 수 없다. 규칙을 코드로 고정해 테스트가 이 불변식을
    지킨다(자기 승격 구멍을 처음부터 막는다). */
 export const ROLE_AUTHORITIES: Record<Role, readonly Authority[]> = {
-  admin: ["game:write", "game:delete"],
-  superadmin: ["game:write", "game:delete", "role:manage"],
+  admin: ["game:write", "game:delete", "schedule:write"],
+  superadmin: ["game:write", "game:delete", "schedule:write", "role:manage"],
 };
 
 // 부여된 역할들의 effective authorities 합집합. member(역할 없음) → 빈 집합.

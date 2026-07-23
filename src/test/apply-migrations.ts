@@ -6,6 +6,8 @@ import {
   oauthAccounts,
   refreshTokens,
   roleAuditLogs,
+  scheduleEntries,
+  scheduleWeeks,
   securityEvents,
   users,
   usersRoles,
@@ -18,7 +20,8 @@ await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
 /* 이 풀(0.18)은 테스트 간 쓰기를 자동으로 되돌리지 않는다(pool 옵션에 isolatedStorage 가
    없다). 결정성을 위해 매 테스트 전에 데이터만 비운다 — 스키마는 위 마이그레이션이 세운
-   채로 둔다. FK 상 자식(oauth_accounts·users_roles·role_audit_logs·refresh_tokens)을 users 보다 먼저 지운다. */
+   채로 둔다. FK 상 자식(oauth_accounts·users_roles·role_audit_logs·refresh_tokens)을 users 보다,
+   schedule_entries(game_id FK)를 games 보다 먼저 지운다. */
 beforeEach(async () => {
   const db = makeDb(env.DB);
   await db.delete(oauthAccounts);
@@ -26,6 +29,8 @@ beforeEach(async () => {
   await db.delete(roleAuditLogs);
   await db.delete(refreshTokens);
   await db.delete(securityEvents);
+  await db.delete(scheduleEntries);
+  await db.delete(scheduleWeeks);
   await db.delete(games);
   await db.delete(users);
 });
