@@ -7,6 +7,10 @@
    키가 없으면 로그인·refresh 가 꺼지고 공개 읽기만 된다. optional(?)로 둬서 소비 지점이 부재를
    반드시 다루게 한다.
 
+   OG_SCHEDULE_SPIKE 만 성격이 다르다 — 비밀이 아니라 **기능 플래그**다. 주입 경로가 같아서
+   (wrangler 의 .dev.vars / secret) 여기 얹었을 뿐이고, 값 자체엔 감출 것이 없다. 로컬에만 두고
+   Cloudflare 에는 넣지 않아 배포본에서 스파이크 라우트가 404 가 된다(그 근거는 라우트 주석).
+
    getCloudflareContext().env 는 global CloudflareEnv, cloudflare:test 의 env 는 Cloudflare.Env
    라 둘 다 병합한다(생성 파일에서 각각 __BaseEnv_CloudflareEnv 를 확장하지만, 그 생성 베이스는
    재생성 때 덮이므로 건드리지 않는다). */
@@ -18,6 +22,7 @@ declare global {
     JWT_PUBLIC_JWK?: string;
     SUPERADMIN_CHANNEL_ID?: string;
     AUTH_URL?: string;
+    OG_SCHEDULE_SPIKE?: string;
   }
   namespace Cloudflare {
     interface Env {
@@ -27,6 +32,7 @@ declare global {
       JWT_PUBLIC_JWK?: string;
       SUPERADMIN_CHANNEL_ID?: string;
       AUTH_URL?: string;
+      OG_SCHEDULE_SPIKE?: string;
     }
   }
 }
