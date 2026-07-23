@@ -117,7 +117,9 @@ async function loadSubsetFont(family: string, weight: number, text: string): Pro
 }
 
 export async function GET() {
-  if (!getCloudflareContext().env[SPIKE_FLAG]) {
+  // truthy 가 아니라 정확히 "1" 을 요구한다 — wrangler 변수는 전부 문자열이라 `"0"`·
+  // `"false"` 도 truthy 다. 끄려고 넣은 값이 켜는 값이 되는 게이트는 게이트가 아니다.
+  if (getCloudflareContext().env[SPIKE_FLAG] !== "1") {
     // 404 다(501 아님) — 프로덕션에는 이 경로가 "아직 없다"가 사실이고, 501 은 있는
     // 엔드포인트가 미구현이라는 다른 말을 한다.
     return new Response(null, { status: 404 });
