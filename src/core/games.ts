@@ -15,26 +15,18 @@
    저장하면 저장은 타임존 무관이 되고, 타임존은 "오늘이 며칠인가"(입력 기본값)에서만
    한 번 고려하면 된다. 상태(status)는 이 두 날짜에서 유도되므로 컬럼을 없앴다. */
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/* 형식만 맞고 실재하지 않는 날짜(2026-02-31·2026-13-01)를 걸러낸다. Date 파싱은 이런
-   값을 조용히 다음 달로 굴리므로(2026-02-31 → 3/3), 되돌려 찍은 문자열이 입력과
-   같은지로 확인해야 롤오버가 잡힌다. */
-export function isDateString(v: unknown): v is string {
-  if (typeof v !== "string" || !DATE_RE.test(v)) return false;
-  // Z 를 붙여 UTC 로 파싱한다 — 로컬 타임존이 개입하면 toISOString 왕복이 하루 밀린다.
-  const d = new Date(v + "T00:00:00Z");
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
-}
+/* 날짜 형식 검증(isDateString)이 여기 있었다 — core/calendar.ts::isIsoDate 로 옮겼다.
+   일정(schedule_entries)이 서면서 같은 판정을 하는 함수가 둘이 되는데, 검증이 둘이면
+   한쪽만 엄해질 때 "어느 게 정본인가"가 코드 밖에 남는다. 실제로 Temporal 판정이 더
+   엄하다: 옛 Date 왕복은 '2026-07-20T00:00:00Z' 같은 확장 표기를 정규식 앞단에서만
+   걸렀지만, 달력 계산이 붙은 지금은 그 형태가 정렬(사전순 = 시간순)까지 깬다.
+   todayKST 도 거기 있다 — 여기선 호출자가 없어 지웠던 함수인데, 일정의 "이번 주"
+   기본값이 첫 프로덕션 호출자가 된다(ADR-0010 의 JIT 이 뒤늦게 값을 낸 자리). */
 
 // 표시용: '2026-07-20' → '2026.07.20'. 구 사이트의 점 구분 표기를 잇는다.
 export function formatDate(date: string): string {
   return date.replaceAll("-", ".");
 }
-
-/* "오늘"(KST)을 구하는 todayKST 가 여기 있었다 — 프로덕션 호출자가 한 번도 안 생겨 삭제했다.
-   유일한 후보였던 날짜 입력 기본값은 game-dialog.tsx 가 의도적으로 비워 두기로 결정했고
-   (그 근거는 그 파일 주석에 있다), 테스트만 보증하는 API 는 남기지 않는다(ADR-0010). */
 
 /* 클리어가 플레이보다 앞설 수는 없다. 한쪽이 null 이면(플레이 없이 클리어만 아는
    경우 포함) 비교할 게 없으니 참이다. 'YYYY-MM-DD' 는 사전순 = 시간순이라 문자열

@@ -5,50 +5,14 @@ import {
   formatDate,
   hash,
   isDateOrderValid,
-  isDateString,
   isGameCategory,
   PATTERNS,
   ROT,
   type ChzzkCategory,
 } from "./games";
 
-describe("isDateString", () => {
-  it("정상 YYYY-MM-DD 는 통과", () => {
-    expect(isDateString("2026-07-20")).toBe(true);
-    expect(isDateString("2024-02-29")).toBe(true); // 윤년
-    expect(isDateString("1999-12-31")).toBe(true);
-  });
-
-  it("실재하지 않는 날짜는 거절 — Date 파싱이 조용히 굴리는 값들", () => {
-    // 형식만 보면 전부 통과한다. new Date('2026-02-31') 은 3/3 으로 굴러가므로
-    // 되돌려 찍은 문자열 비교가 없으면 이 값들이 DB 에 들어간다.
-    expect(isDateString("2026-02-31")).toBe(false);
-    expect(isDateString("2026-02-30")).toBe(false);
-    expect(isDateString("2025-02-29")).toBe(false); // 평년
-    expect(isDateString("2026-04-31")).toBe(false);
-    expect(isDateString("2026-13-01")).toBe(false);
-    expect(isDateString("2026-00-10")).toBe(false);
-    expect(isDateString("2026-07-00")).toBe(false);
-    expect(isDateString("2026-07-32")).toBe(false);
-  });
-
-  it("형식이 어긋나면 거절", () => {
-    for (const bad of ["2026-7-20", "26-07-20", "2026/07/20", "2026-07-20T00:00:00Z", "", "  "]) {
-      expect(isDateString(bad)).toBe(false);
-    }
-  });
-
-  it("문자열이 아니면 거절", () => {
-    expect(isDateString(null)).toBe(false);
-    expect(isDateString(undefined)).toBe(false);
-    expect(isDateString(20260720)).toBe(false);
-    expect(isDateString(new Date())).toBe(false);
-  });
-
-  it("미래 날짜도 통과한다(발매 예정작을 미리 올릴 수 있다)", () => {
-    expect(isDateString("2099-01-01")).toBe(true);
-  });
-});
+/* 날짜 형식 검증(isDateString) 테스트는 calendar.test.ts 로 옮겼다 — 함수가 isIsoDate 로
+   그리 이사했다. 미래 날짜 허용까지 그쪽이 이어 검증한다. */
 
 describe("formatDate", () => {
   it("점 구분 표기로 바꾼다", () => {

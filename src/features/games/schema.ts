@@ -2,7 +2,8 @@
    경계를 통과한 뒤 인가·저장으로 간다. 컴포저 폼도 이 스키마를 재사용할 수 있다. */
 
 import { z } from "zod";
-import { isDateOrderValid, isDateString } from "@/core/games";
+import { isIsoDate } from "@/core/calendar";
+import { isDateOrderValid } from "@/core/games";
 
 /* 날짜 입력 = 'YYYY-MM-DD' 이면서 **실재하는** 날짜. 형식만 보면 2026-02-31 이 통과해
    저장된 뒤 표시 경계에서야 굴러간다(3/3) — 실재 검증까지 core 가 한다. 빈 문자열은
@@ -11,11 +12,7 @@ import { isDateOrderValid, isDateString } from "@/core/games";
    같은 preprocess 패턴이다. 미래 날짜는 허용한다 — 발매 예정작을 미리 올릴 수 있다. */
 const dateInput = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-  z
-    .string()
-    .refine(isDateString, "YYYY-MM-DD 형식의 실재하는 날짜여야 해요")
-    .nullable()
-    .default(null),
+  z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 해요").nullable().default(null),
 );
 
 // 두 날짜의 순서는 필드 하나로는 볼 수 없다 — 객체 레벨 refine 이 제자리다.
