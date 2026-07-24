@@ -130,6 +130,17 @@ export function nextRevision(oldRevision: number, now: number): number {
    외부에 안 보인다 — stale 해진 에디터가 다음 저장 때 CONFLICT 를 받아 새로고침하게 될 뿐이다
    (적대적 리뷰가 "실패가 발행 상태를 바꾼다"로 세 라운드 파고든 자리를 여기서 구조로 닫는다).
 
+   ── 알고 수용한 한계: 청구~batch 사이 sub-ms gap ──────────────────────────────────
+   1단계가 revision 을 올린 뒤 2단계 batch 가 항목을 바꾸는 그 사이(한 D1 왕복, ~수 ms)에 다른
+   편집자가 getWeekForEdit 을 하면 "새 revision + 옛 항목"을 본다. 그 상태로 저장하면 revision 이
+   맞아 CAS 를 통과해 앞 저장을 덮을 수 있다(적대적 리뷰 R7). **현실적 동시성은 이게 아니다** —
+   실제로 나는 건 "분 단위로 벌어진 stale 저장"이고 그건 CAS 가 막는다(revision 이 달라 CONFLICT).
+   R7 은 두 관리자가 **같은 주를 같은 수-ms 창에** 겹쳐야 걸리는 경합이라, 관리자 소수·주간 일정
+   에선 사실상 도달 불가이고 걸려도 결과는 한 저장 유실(재저장으로 복구)이다. 완전히 닫으려면
+   대화형 트랜잭션이 필요한데 D1 엔 없고, 우회(nonce 컬럼 + 조건부 가드 raw-SQL batch)는 D1
+   동작이 불확실해 과대 투자다 — 그 비용이 이 gap 의 무게보다 커서 **수용하고 머지하기로 했다
+   (2026-07-24 사용자 결정).** 필요해지면 위 우회로 닫는다.
+
    발행 시각은 처음 발행할 때만 찍고 이후 저장엔 유지한다(existing ?? now) — 재저장마다 바뀌면
    "언제 발행했나"가 무의미해진다. 발행을 내리면 null 로 되돌린다(다시 초안). */
 export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> {
