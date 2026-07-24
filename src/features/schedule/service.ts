@@ -1,9 +1,9 @@
 /* 일정 데이터 유즈케이스(이슈 #56 결정 12·14). tRPC 무관(순수 db 연산)이라 라우터·서버
    컴포넌트가 재사용한다. 쓰기는 주 단위 일괄 저장 하나 — 한 주를 통째로 교체한다. */
 
-import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { toIsoDate, weekDates } from "@/core/calendar";
-import { scheduleEntries, scheduleWeeks, type Db, type ScheduleEntry } from "@/db";
+import { games, scheduleEntries, scheduleWeeks, type Db, type ScheduleEntry } from "@/db";
 import type { SaveWeekInput } from "./schema";
 
 /* 한 주의 뷰 — 메타(공지·발행) + 그 주 7일의 항목들. 편집 화면이 불러오고, 저장이 되돌려준다.
@@ -89,6 +89,16 @@ export class WeekRevisionConflict extends Error {
   }
 }
 
+/* 항목이 보드에 없는 게임을 가리켰다. 라우터가 BAD_REQUEST 로 올린다(FK 위반과 같은 문구).
+   FK 로도 걸리지만(제약이 최종 방어선), 저장은 이걸 **메타를 건드리기 전에** 먼저 검사해
+   실패가 발행 상태를 남기지 않게 한다(saveWeek 의 prevalidate 주석). */
+export class ReferencedGameMissing extends Error {
+  constructor() {
+    super("referenced game missing");
+    this.name = "ReferencedGameMissing";
+  }
+}
+
 /* 주 단위 일괄 저장 = 그 주 전체 교체(결정 14). 메타를 upsert 하고, 그 주 날짜 범위의 항목을
    전부 지운 뒤 보낸 항목을 다시 넣는다 — 클라이언트가 항목별 add/update/delete 를 추적하지 않아도
    된다. **D1 batch() 로 원자 실행**한다: 지우고 넣는 사이에 깨지면 그 주가 반쯤 빈 채로 남기
@@ -110,6 +120,23 @@ export class WeekRevisionConflict extends Error {
 export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> {
   const { monday, sunday } = weekBounds(input.weekStartDate);
   const now = Date.now();
+
+  /* ── 0단계: 참조 게임을 **메타를 건드리기 전에** 검증한다 ─────────────────────────
+     항목의 gameId 가 없는 게임을 가리키면 2단계 INSERT 가 FK 로 실패한다. 그 실패가 메타 청구
+     (1단계) **뒤에** 나면, 메타(note·publishedAt·revision)는 이미 커밋됐는데 라우터는 실패를
+     돌려주는 상태가 된다 — publishedAt 은 공개 가시성·보드 날짜를 지배하므로(ADR-0022) "저장
+     실패했다는데 그 주가 발행/미발행으로 바뀐" 사용자 가시 결과다(적대적 리뷰가 잡은 자리).
+     참조 게임을 지금 확인해 그 실패 모드를 메타 이전으로 옮긴다: 에디터 로드 후 다른 관리자가
+     게임을 지운 현실적 시나리오는 여기서 걸려 schedule_weeks 가 한 글자도 안 바뀐다.
+     (남는 창은 이 SELECT 와 2단계 INSERT 사이 마이크로초뿐 — 사람이 그 틈에 게임을 지울 수
+     없다. FK 제약은 최종 방어선으로 그대로 두고, 걸리면 라우터가 같은 BAD_REQUEST 로 맵한다.) */
+  const gameIds = [
+    ...new Set(input.entries.map((e) => e.gameId).filter((id): id is number => id !== null)),
+  ];
+  if (gameIds.length) {
+    const found = await db.select({ id: games.id }).from(games).where(inArray(games.id, gameIds));
+    if (found.length !== gameIds.length) throw new ReferencedGameMissing();
+  }
 
   /* 발행 시각 연속성 때문에 현재 값을 먼저 읽는다. **이 읽기는 검사가 아니다** — 검사는 아래
      청구문의 WHERE 가 한다. 읽고 나서 남이 저장했더라도 청구가 0행이 되어 걸리므로, 여기서
@@ -149,14 +176,9 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
 
   /* ── 2단계: 항목 전체 교체 ────────────────────────────────────────────────────
      청구에 성공한 요청만 여기 온다. 지우기와 넣기는 **한 batch** 로 묶어 원자 실행한다 —
-     그 사이 깨지면 그 주가 반쯤 빈 채로 남기 때문이다.
-
-     청구를 batch 밖으로 뺀 대가가 하나 있다: 이 batch 가 실패하면(예: 없는 gameId → FK)
-     메타 청구는 이미 커밋돼 **항목은 그대로인데 메타(공지·발행·revision)만 갱신된 주**가
-     남는다. 되돌릴 수 없는 손실이 아니라 다시 저장하면 정리되는 상태이고, 반대쪽 대가는
-     "남의 한 주가 통째로 사라짐"이라 이쪽을 택했다. 셋을 한 batch 에 넣으면서 청구 실패 시
-     뒤를 건너뛰려면 DELETE·INSERT 마다 EXISTS 가드를 손 SQL 로 붙여야 하는데, 그 복잡도가
-     이 실패 양상의 무게보다 크다. */
+     그 사이 깨지면 그 주가 반쯤 빈 채로 남기 때문이다. 0단계가 gameId 를 미리 걸렀으므로
+     이 batch 는 현실적으로 실패할 일이 없다 — 그래서 1단계에서 커밋한 메타가 "실패했는데
+     발행 상태만 바뀐" 채로 남는 경로가 닫힌다. */
   const clearEntries = db
     .delete(scheduleEntries)
     .where(

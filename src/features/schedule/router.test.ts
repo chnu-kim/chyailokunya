@@ -171,7 +171,7 @@ describe("일정 라우터", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
-  it("없는 게임을 가리키면 FK 위반을 BAD_REQUEST 로 바꾼다(배치 전체 롤백)", async () => {
+  it("없는 게임을 가리키면 BAD_REQUEST — 메타를 만들기 전에 prevalidate 가 막는다", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     await expect(
       caller.schedule.saveWeek({
@@ -180,9 +180,49 @@ describe("일정 라우터", () => {
         entries: [{ scheduledDate: "2026-07-20", title: "유령 게임", gameId: 9999 }],
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    // 롤백됐으면 주도 안 남는다(배치 원자성).
+    // 막혔으면 주 메타도 안 생긴다 — prevalidate 가 청구 이전에 걸러 아무것도 안 썼다.
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.hasMeta).toBe(false);
     expect(week.entries).toEqual([]);
+  });
+
+  it("저장이 실패해도(없는 게임) 이미 발행된 주의 메타는 한 글자도 안 바뀐다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const game = await authed.games.add({
+      categoryId: "c-real",
+      categoryType: "GAME",
+      categoryValue: "젤다",
+    });
+    // 발행된 주를 세운다(공지·발행 시각·revision 이 다 박힌다).
+    const before = await saveWeekAsEditor(authed, {
+      weekStartDate: MON,
+      note: "지켜야 할 공지",
+      published: true,
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다", gameId: game.id }],
+    });
+    expect(before.publishedAt).not.toBeNull();
+
+    /* 그 주를 다시 저장하는데 없는 게임을 섞는다 — publishedAt 은 공개 가시성·보드 날짜를
+       지배하므로(ADR-0022), 실패가 메타를 건드리면 "실패했다는데 발행 상태가 바뀐" 결과가 된다.
+       prevalidate 가 메타 청구 이전에 막아 그 주의 메타가 그대로여야 한다. */
+    await expect(
+      authed.schedule.saveWeek({
+        weekStartDate: MON,
+        revision: before.revision,
+        note: "덮어써지면 안 되는 새 공지",
+        published: false,
+        entries: [
+          { scheduledDate: "2026-07-20", title: "젤다", gameId: game.id },
+          { scheduledDate: "2026-07-21", title: "유령", gameId: 9999 },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const after = await authed.schedule.getWeek({ weekStartDate: MON });
+    expect(after.note).toBe("지켜야 할 공지"); // 공지 안 바뀜
+    expect(after.publishedAt).toBe(before.publishedAt); // 발행 시각 안 바뀜(내려가지도 않음)
+    expect(after.revision).toBe(before.revision); // revision 안 바뀜(다음 정상 저장이 안 막힘)
+    expect(after.entries.map((e) => e.title)).toEqual(["젤다"]); // 항목도 그대로
   });
 
   it("stale revision 으로 저장하면 CONFLICT — 남의 항목을 덮어쓰지 않는다", async () => {

@@ -5,7 +5,7 @@
 import { TRPCError } from "@trpc/server";
 import { authorizedProcedure, router } from "../trpc/init";
 import { getWeekInput, saveWeekInput } from "./schema";
-import { getWeekForEdit, saveWeek, WeekRevisionConflict } from "./service";
+import { getWeekForEdit, ReferencedGameMissing, saveWeek, WeekRevisionConflict } from "./service";
 
 export const scheduleRouter = router({
   // 편집 화면이 한 주를 불러온다 — 발행 여부와 무관하게(초안 편집). 읽기지만 초안이 새지 않게
@@ -30,7 +30,9 @@ export const scheduleRouter = router({
             message: "다른 곳에서 이 주를 먼저 저장했어요.",
           });
         }
-        if (isForeignKeyViolation(e)) {
+        // prevalidate(ReferencedGameMissing)가 먼저 잡지만, FK 제약은 최종 방어선이라 남겨 둔다 —
+        // 둘 다 같은 문구로 맵한다(사용자에겐 원인이 같다).
+        if (e instanceof ReferencedGameMissing || isForeignKeyViolation(e)) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "보드에 없는 게임을 가리켰어요." });
         }
         throw e;
