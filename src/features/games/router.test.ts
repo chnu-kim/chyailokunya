@@ -525,14 +525,15 @@ describe("games 라우터", () => {
   it("초안 주의 항목은 보드에 안 뜨지만 편집 조회엔 잡힌다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
-    expect(row.lastPlayed).toBe("2026-07-22"); // 게임 폼이 청구한 주는 발행된 채 선다
+    expect(row.lastPlayed).toBe("2026-07-22"); // 청구한 주는 확정(draft=0)이라 보드에 뜬다
 
-    /* 관리자가 /schedule 에서 그 주의 발행을 내린 상태를 만든다 — claimWeek 이 이미 메타를
-       만들어 뒀으므로 INSERT 가 아니라 UPDATE 다. 초안으로 내려가면 그 주 항목은 보드에서 빠진다. */
+    /* 관리자가 /schedule 에서 그 주를 **초안으로** 되돌린 상태를 만든다 — claimWeek 이 이미
+       메타를 만들어 뒀으므로 INSERT 가 아니라 UPDATE 다. 보드가 읽는 축은 draft 하나이므로
+       여기서 뒤집는 것도 draft 다(발행을 내리는 것만으로는 이제 보드에서 안 빠진다). */
     const db = makeDb(env.DB);
     await db
       .update(scheduleWeeks)
-      .set({ publishedAt: null })
+      .set({ draft: true })
       .where(eq(scheduleWeeks.weekStartDate, "2026-07-20"));
 
     const [listed] = await createCaller(makeCtx()).games.list();
@@ -541,18 +542,101 @@ describe("games 라우터", () => {
   });
 
   /* ── 게임 폼이 메타 없는 주를 청구한다 ────────────────────────────────────────────
-     대가를 알고 고른 동작이다(claimWeek 주석): 그 주가 /schedule 에 뜬다. 대신 stale 편집기가
-     그 항목을 조용히 지우는 손실 경로가 닫힌다. 항목 자체는 이미 보드에 공개돼 있었으므로
-     새 정보가 새는 게 아니고, saveWeek 도 레거시 주를 저장하면 같은 일을 한다. */
-  it("게임 폼이 날짜를 넣으면 그 주를 발행된 채로 청구한다", async () => {
+     청구는 revision 을 확보하는 것이 전부여야 한다(claimWeek 주석). 한때는 그 주를 발행된 채로
+     만들어, 관리자가 날짜 하나를 넣거나 지웠을 뿐인데 그 주가 통째로 공개됐다(이슈 #64). */
+  it("게임 폼이 날짜를 넣어도 그 주는 공개되지 않는다 — 청구는 revision 만 잡는다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
-    await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
 
-    const week = await getPublishedWeek(makeDb(env.DB), "2026-07-20");
-    expect(week).not.toBeNull();
-    expect(week!.entries).toHaveLength(1);
+    const db = makeDb(env.DB);
+    // 공개는 안 된다 — 관리자가 /schedule 에서 발행한 적이 없다.
+    expect(await getPublishedWeek(db, "2026-07-20")).toBeNull();
+    // 그래도 보드 날짜는 선다(확정 비공개) — 관리자가 넣은 날짜가 신호 없이 사라지지 않는다.
+    expect(row.lastPlayed).toBe("2026-07-22");
     // revision 이 생겼다 = 편집기의 CAS 가 이 쓰기를 볼 수 있다.
-    expect(week!.publishedAt).not.toBeNull();
+    expect(
+      (await authed.schedule.getWeek({ weekStartDate: "2026-07-20" })).revision,
+    ).not.toBeNull();
+  });
+
+  /* 이관된 레거시 주(메타 없음)의 항목을 게임 폼이 **연결 해제**하는 경로. 관리자가 한 행동은
+     "이 게임을 그날 한 게 아니다"뿐인데, 청구가 그 주를 발행된 채로 만들면 그 주가 통째로
+     공개된다 — 항목의 시각과 자유 제목까지(이슈 #64). 해제되는 순간 그 항목은 어느 게임에도
+     안 붙어 보드에서 사라지므로, "이미 보드에 떠 있던 것"이라는 청구의 근거도 여기선 뒤집힌다. */
+  it("메타 없는 주의 항목을 연결 해제해도 그 주가 공개되지 않는다(이슈 #64)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add(eldenring);
+    const db = makeDb(env.DB);
+    /* 마이그레이션 0007 이 이관한 모양 — 항목은 있고 주 메타는 없다. 시각·자유 제목을 담아
+       두는 건 유출됐을 때 **무엇이** 새는지를 그대로 드러내기 위해서다. */
+    await db.insert(scheduleEntries).values({
+      scheduledDate: "2026-05-13",
+      startTime: "20:00",
+      title: "레거시 방송 제목",
+      gameId: row.id,
+    });
+
+    await authed.games.update({
+      id: row.id,
+      cleared: false,
+      clearedDate: null,
+      playedDate: null,
+      playedDateWas: "2026-05-13",
+    });
+
+    expect(await getPublishedWeek(db, "2026-05-11")).toBeNull();
+  });
+
+  /* 해제의 반대쪽 대가. 청구를 "발행 대신 초안으로 만든다"로 고쳤다면 유출은 막히지만 **같은
+     주에 항목을 가진 다른 게임**의 보드 날짜가 조용히 사라진다(이슈 #64 가 "간단히 못 고친다"로
+     적어 둔 자리). 청구가 도메인 상태를 아예 안 건드려야 둘 다 성립한다. */
+  it("메타 없는 주에서 해제해도 같은 주 다른 게임의 보드 날짜는 살아 있다(이슈 #64)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const db = makeDb(env.DB);
+    const unlinked = await authed.games.add(eldenring);
+    const kept = await authed.games.add({
+      categoryId: "c-zelda",
+      categoryType: "GAME",
+      categoryValue: "젤다",
+    });
+    await db.insert(scheduleEntries).values([
+      { scheduledDate: "2026-05-13", title: "레거시 방송", gameId: unlinked.id },
+      { scheduledDate: "2026-05-14", title: "젤다", gameId: kept.id },
+    ]);
+
+    await authed.games.update({
+      id: unlinked.id,
+      cleared: false,
+      clearedDate: null,
+      playedDate: null,
+      playedDateWas: "2026-05-13",
+    });
+
+    const list = await createCaller(makeCtx()).games.list();
+    expect(list.find((g) => g.id === kept.id)!.lastPlayed).toBe("2026-05-14");
+    // 해제한 쪽만 날짜를 잃는다 — 그게 관리자가 요청한 일이다.
+    expect(list.find((g) => g.id === unlinked.id)!.lastPlayed).toBeNull();
+  });
+
+  /* 날짜를 **다른 주로 옮기면** 주가 둘이다(claimWeek 이 둘 다 청구한다). 옛 주도 새 주도
+     관리자가 발행한 적이 없으니 어느 쪽도 공개되면 안 된다 — 유출 경로가 옮기기에도 없는지. */
+  it("주를 건너뛰어 날짜를 옮겨도 옛 주·새 주 어느 쪽도 공개되지 않는다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const db = makeDb(env.DB);
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+
+    await authed.games.update({
+      id: row.id,
+      cleared: false,
+      clearedDate: null,
+      playedDate: "2026-08-05",
+      playedDateWas: "2026-07-22",
+    });
+
+    expect(await getPublishedWeek(db, "2026-07-20")).toBeNull();
+    expect(await getPublishedWeek(db, "2026-08-03")).toBeNull();
+    // 옮긴 날짜는 보드에 그대로 선다(확정 비공개).
+    expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBe("2026-08-05");
   });
 
   /* **초안 주는 안 건드린다** — 관리자가 짜는 중인 편성이 먼저 새지 않는다는 결정 13 의 핵심.

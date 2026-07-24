@@ -40,5 +40,6 @@ ADR 이 그 맥락을 붙박는다. 규칙(불변식·경계·플레이북)의 �
 | [0019](./0019-game-state-derived-from-dates.md)              | 게임 상태 = 날짜 두 개에서 유도 (status 컬럼 드롭)                   | Accepted                                                   |
 | [0020](./0020-delete-confirm-dialog-replaces-undo-window.md) | 게임 삭제 = 확인 다이얼로그 (지연 커밋 되돌리기 폐기·하드 삭제 유지) | Accepted                                                   |
 | [0021](./0021-e2e-session-fixture-signed-access-cookie.md)   | e2e 로그인 = 테스트 전용 키로 서명한 access 쿠키 (마크업 주입 폐기)  | Accepted                                                   |
-| [0022](./0022-schedule-publish-boundary.md)                  | 일정 발행 경계 = 공개 읽기·보드 날짜 유도의 정본 (초안은 안 샌다)    | Accepted                                                   |
+| [0022](./0022-schedule-publish-boundary.md)                  | 일정 발행 경계 = 공개 읽기·보드 날짜 유도의 정본 (초안은 안 샌다)    | Accepted (보드 표시 규칙은 0024 가 대체)                   |
 | [0023](./0023-game-card-detail-dialog.md)                    | 게임 보드 = 훑는 격자 + 카드 상세 다이얼로그 (카드 액션 폐기)        | Accepted                                                   |
+| [0024](./0024-week-state-two-axes.md)                        | 주 상태 = draft × published 두 축 (부재를 상태로 안 쓴다)            | Accepted                                                   |

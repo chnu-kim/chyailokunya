@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { authoritiesFor, type Authority } from "@/core/authorities";
-import { makeDb, scheduleEntries } from "@/db";
+import { makeDb, scheduleEntries, scheduleWeeks } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
@@ -62,7 +62,8 @@ describe("일정 라우터", () => {
       weekStartDate: MON,
       note: null,
       publishedAt: null,
-      hasMeta: false,
+      // 메타도 항목도 없는 주 = 아직 아무도 안 짠 새 주라 초안으로 연다.
+      draft: true,
       revision: null,
       entries: [],
     });
@@ -151,13 +152,73 @@ describe("일정 라우터", () => {
       entries: [],
     });
     expect(again.publishedAt).toBe(first.publishedAt);
-    // 발행을 내리면 초안으로 되돌아간다.
-    const draft = await saveWeekAsEditor(caller, {
+    // 발행을 내리면 공개가 꺼진다 — 다만 "짜는 중"으로 되돌아가지는 않는다(아래 테스트).
+    const unpublished = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: false,
       entries: [],
     });
-    expect(draft.publishedAt).toBeNull();
+    expect(unpublished.publishedAt).toBeNull();
+  });
+
+  /* 공개 철회는 "공개를 거둔다"이지 "안 짠 것으로 되돌린다"가 아니다. 한 번 발행한 주를 내렸다고
+     그 주에 플레이한 게임의 보드 날짜까지 사라지면, 관리자는 공개만 내렸는데 보드가 함께 비는
+     걸 본다 — ADR-0022 가 (−)로 안고 있던 결합이다. draft 축을 유지해 그 결합을 끊는다. */
+  it("발행을 내려도 보드 날짜는 산다 — 공개만 철회되고 초안으로 안 돌아간다", async () => {
+    const db = makeDb(env.DB);
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const game = await authed.games.add({
+      categoryId: "c-elden",
+      categoryType: "GAME",
+      categoryValue: "엘든링",
+    });
+    const entry = { scheduledDate: "2026-07-22", title: "엘든링", gameId: game.id };
+
+    await saveWeekAsEditor(authed, { weekStartDate: MON, published: true, entries: [entry] });
+    expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBe("2026-07-22");
+
+    const after = await saveWeekAsEditor(authed, {
+      weekStartDate: MON,
+      published: false,
+      entries: [entry],
+    });
+    expect(after.draft).toBe(false); // 확정 상태는 유지
+    expect(await getPublishedWeek(db, MON)).toBeNull(); // 공개는 꺼졌다
+    expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBe("2026-07-22");
+  });
+
+  /* 반대 방향 — 아직 아무도 안 짠 주를 초안으로 저장하면 보드에도 공개에도 안 뜬다(결정 13).
+     위 테스트와 짝이라 둘이 함께 "draft 와 published_at 은 독립 축"을 못박는다. */
+  it("새 주를 초안으로 저장하면 보드에도 공개에도 안 뜬다", async () => {
+    const db = makeDb(env.DB);
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const game = await authed.games.add({
+      categoryId: "c-elden",
+      categoryType: "GAME",
+      categoryValue: "엘든링",
+    });
+
+    const saved = await saveWeekAsEditor(authed, {
+      weekStartDate: MON,
+      published: false,
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: game.id }],
+    });
+    expect(saved.draft).toBe(true);
+    expect(await getPublishedWeek(db, MON)).toBeNull();
+    expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBeNull();
+  });
+
+  /* 스키마가 모순 조합을 막는다 — 짜는 중인데 공개된 주는 없다. 서비스가 실수로 그 조합을
+     쓰려 해도 DB 가 최종 방어선이다(games_cleared_date CHECK 와 같은 결). */
+  it("짜는 중인데 공개된 주는 DB 가 거절한다(CHECK)", async () => {
+    const db = makeDb(env.DB);
+    await expect(
+      db.insert(scheduleWeeks).values({ weekStartDate: MON, draft: true, publishedAt: 1_700_000 }),
+    ).rejects.toThrow();
+    // 반대 조합(확정인데 미공개)은 정상이다 — 과거 아카이브가 거기 산다.
+    await expect(
+      db.insert(scheduleWeeks).values({ weekStartDate: MON, draft: false, publishedAt: null }),
+    ).resolves.toBeDefined();
   });
 
   it("weekStartDate 가 월요일이 아니면 거절(주는 날짜에서 유도한다)", async () => {
@@ -191,9 +252,10 @@ describe("일정 라우터", () => {
         entries: [{ scheduledDate: "2026-07-20", title: "유령 게임", gameId: 9999 }],
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    // 막혔으면 주 메타도 안 생긴다 — prevalidate 가 청구 이전에 걸러 아무것도 안 썼다.
+    /* 막혔으면 주 메타도 안 생긴다 — prevalidate 가 청구 이전에 걸러 아무것도 안 썼다.
+       revision 이 메타 행의 관찰 가능한 정본이다(있으면 행이 있다는 뜻). */
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
-    expect(week.hasMeta).toBe(false);
+    expect(week.revision).toBeNull();
     expect(week.entries).toEqual([]);
   });
 
@@ -324,20 +386,21 @@ describe("일정 라우터", () => {
     });
     expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBe("2026-07-22");
 
-    // 편집기가 이 주를 연다 — 메타가 없으므로 hasMeta 로 그걸 알 수 있어야 한다.
+    /* 편집기가 이 주를 연다. 항목이 있는데 메타가 없으면 이관된 과거 아카이브라 **확정**으로
+       열린다(draft=false) — 아직 아무도 안 짠 빈 주(draft=true)와 갈리는 자리다. */
     const loaded = await authed.schedule.getWeek({ weekStartDate: MON });
-    expect(loaded.hasMeta).toBe(false);
+    expect(loaded.draft).toBe(false);
     expect(loaded.publishedAt).toBeNull();
 
-    /* 편집기의 발행 기본값은 `publishedAt !== null || !hasMeta` 다 — 레거시 주는 "이미 공개 중"
-       으로 열린다. 그 기본값 그대로 저장했을 때 날짜가 살아 있어야 한다. hasMeta 를 안 보고
-       published:false 로 저장하면 published_at NULL 인 메타가 생겨 **여기서 날짜가 사라진다**
-       (이관이 지킨 "손실 0"이 첫 편집에서 깨지는 경로 — 이 테스트가 그 회귀를 막는다). */
-    const published = loaded.publishedAt !== null || !loaded.hasMeta;
+    /* **발행을 켜지 않고** 저장한다. 한때는 이 경로가 손실 자리였다 — published_at NULL 인 메타가
+       생기면서 그 주 항목이 보드에서 빠져 이관이 지킨 "손실 0"이 첫 편집에서 깨졌고, 그래서
+       편집기가 레거시 주를 "이미 공개 중"으로 열어(발행 체크됨) 우회했다. draft 축이 생기면서
+       우회가 필요 없어졌다: 서버가 기존 draft(false)를 유지하므로 공개는 안 되고 보드 날짜는
+       산다. 이 테스트가 그 두 가지를 한꺼번에 못박는다. */
     await saveWeekAsEditor(authed, {
       weekStartDate: MON,
       note: loaded.note,
-      published,
+      published: false,
       entries: loaded.entries.map((e) => ({
         scheduledDate: e.scheduledDate,
         startTime: e.startTime,
@@ -346,6 +409,8 @@ describe("일정 라우터", () => {
       })),
     });
     expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBe("2026-07-22");
+    // 보드엔 살아 있지만 공개는 안 된다 — 과거 아카이브는 주간표로 발행된 적이 없다.
+    expect(await getPublishedWeek(db, MON)).toBeNull();
   });
 
   it("공개 읽기(getPublishedWeek)는 발행된 주만 준다 — 초안은 null(공개 화면이 안 샌다)", async () => {

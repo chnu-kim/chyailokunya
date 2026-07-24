@@ -18,15 +18,18 @@ export type GameCard = GameRow & { lastPlayed: string | null };
    의 SQL 짝). strftime('%w') 는 일=0‥토=6 이라 (dow+6)%7 일을 빼면 월요일이 나온다. */
 const entryWeekStart = sql`date(${scheduleEntries.scheduledDate}, '-' || ((strftime('%w', ${scheduleEntries.scheduledDate}) + 6) % 7) || ' days')`;
 
-/* 유도된 플레이 날짜 = **발행 경계를 통과한** 항목들의 MAX(scheduled_date)다(ADR-0022). 항목이
-   보드 날짜에 기여하려면 그 주가 발행됐거나(published_at NOT NULL) 아예 주 메타가 없어야 한다
-   (week_start_date IS NULL = 이관된 과거 아카이브 · 직접 넣은 테스트 데이터). 미발행 초안 주는
-   메타 행이 있고 published_at 이 NULL 이라 CASE 가 NULL 을 내 빠진다 — 관리자가 짜는 중인 다음
-   주 편성의 게임이 보드에 미래 날짜로 새는 걸 여기서 막는다(이슈 #56 "놓치면 늦게 터지는 자리 1").
+/* 유도된 플레이 날짜 = **초안이 아닌 주**에 속한 항목들의 MAX(scheduled_date)다(ADR-0022).
+   보드는 축 하나(draft)만 읽는다 — 공개 여부(published_at)는 /schedule 의 축이지 보드의 축이
+   아니다. 짜는 중인 다음 주 편성의 게임이 보드에 미래 날짜로 새는 걸 여기서 막는다
+   (이슈 #56 "놓치면 늦게 터지는 자리 1").
+
+   coalesce 가 핵심이다: LEFT JOIN 미스(주 메타 행이 없는 이관된 과거 아카이브·직접 넣은 테스트
+   데이터)가 기본값 0 과 **같은 뜻으로 접힌다.** 그래서 "행이 없다"는 인프라 사실이 도메인 규칙을
+   겸직하지 않고, 청구(claimWeek)가 행을 만들어도 보드가 안 흔들린다 — 이슈 #64 가 연 자리다.
    같은 SQL 을 select·orderBy·단건 유도가 공유해 세 자리의 경계가 갈리지 않게 한다. */
 const lastPlayedExpr = sql<
   string | null
->`max(case when ${scheduleWeeks.weekStartDate} is null or ${scheduleWeeks.publishedAt} is not null then ${scheduleEntries.scheduledDate} end)`;
+>`max(case when coalesce(${scheduleWeeks.draft}, 0) = 0 then ${scheduleEntries.scheduledDate} end)`;
 
 /* 공개 읽기. 보드는 "언제 플레이했나" 순이다 — 최근 플레이가 위로 온다. 일정 항목이 없는
    게임(lastPlayed null)은 시간축 위에 자리가 없으므로 뒤로 몰고, 그 안에서만 추가 순
@@ -120,11 +123,8 @@ export function playEntriesOf(db: Db, gameId: number) {
     .orderBy(asc(scheduleEntries.scheduledDate));
 }
 
-/* 게임 폼이 일정 항목을 건드린 주를 **청구(claim)한다.** 하는 일이 둘이다:
-
-   1. 메타가 있으면 revision(last_updated_at)만 단조 증가시킨다. published_at 은 안 건드린다 —
-      초안으로 두기로 한 결정을 게임 폼이 뒤집으면 안 된다(결정 13).
-   2. 메타가 없으면 **발행된 채로 만든다.**
+/* 게임 폼이 일정 항목을 건드린 주를 **청구(claim)한다** — revision(last_updated_at)을 확보하는
+   것이 전부다. 메타가 있으면 단조 증가시키고, 없으면 기본 상태(draft=0·미발행)로 행을 만든다.
 
    왜 청구하나: saveWeek 은 그 주를 통째로 교체하면서 revision CAS 로 "그 사이 바뀌었으면 거절"을
    보장한다. 게임 폼이 그 계약 밖에서 항목을 쓰면 열어 둔 편집기가 stale 인 채 CAS 를 통과해
@@ -132,24 +132,17 @@ export function playEntriesOf(db: Db, gameId: number) {
    없으므로, 행을 만들어 두는 게 그 구멍을 닫는 유일한 길이다 — 편집기의 null 청구가
    onConflictDoNothing 으로 0행이 돼 CONFLICT 로 걸린다.
 
-   ── published_at 을 채우는 이유, 그리고 그 대가 ──────────────────────────────────
-   뿌리는 비대칭이다: 메타 부재를 게임 보드(lastPlayedExpr)는 "표시"로, 공개 /schedule
-   (getPublishedWeek)은 "비공개"로 읽는다. 행을 만드는 순간 둘 중 하나가 깨진다. NULL 로 만들면
-   그 주가 초안으로 뒤집혀 **방금 넣은 날짜가 보드에서 사라지고**, 채우면 그 주가 /schedule 에
-   뜬다.
+   ── 청구가 도메인 상태를 안 건드린다(이슈 #64 가 연 자리) ─────────────────────────
+   한때 이 함수는 메타 없는 주를 **발행된 채로** 만들었다. "행 없음"이 보드엔 표시로, 공개
+   /schedule 엔 비공개로 읽히던 시절이라 행을 만드는 순간 둘 중 하나가 깨졌고, 날짜가 사라지는
+   쪽보다 한 화면 더 보이는 쪽이 가볍다고 봤다. 그 저울질이 **해제 경로에서 뒤집혔다**: 연결이
+   풀리는 순간 그 항목은 어느 게임에도 안 붙어 보드에서 사라지는데, 바로 그 항목이 시각·자유
+   제목까지 달고 /schedule 에 공개됐다. 관리자가 한 행동은 "이 게임을 그날 한 게 아니다"뿐인데.
 
-   채우는 쪽을 골랐다(2026-07-24 사용자 결정, 8라운드에 재확인). 근거 둘:
-   - **saveWeek 도 같은 일을 한다.** 관리자가 /schedule 에서 레거시 주(메타 없음)를 저장하면
-     published 메타가 생겨 그 주가 공개된다(편집기 기본값 = 발행). 게임 폼만 다른 규칙을 쓸
-     이유가 약하다.
-   - 공개되는 항목은 **이미 게임 보드에 떠 있던 것**이다(메타 부재 = 표시). 새 정보가 새는 게
-     아니라 같은 사실이 한 화면 더 보이는 것이고, 반대쪽 대가는 **관리자가 넣은 날짜가 신호 없이
-     사라지는 것**이다. 무게가 다르다.
-
-   대가는 안다: 미래 날짜를 넣으면 아직 안 짠 주가 "빈 주간표 + 게임 하나"로 뜬다. 초안 주
-   (메타 있고 published_at NULL)는 여기서 안 건드리므로 결정 13 의 핵심 — 관리자가 짜는 중인
-   편성이 먼저 새지 않는다 — 은 그대로다. 둘을 완전히 가르려면 보드 표시와 공개 발행을 나누는
-   표식 컬럼이 필요한데, 마이그레이션이라 두 번째 요구가 설 때 JIT 로 연다(ADR-0010).
+   draft 컬럼이 그 저울질 자체를 없앤다(schema.ts 주석). 기본값 0 이 "행 없음"과 같은 뜻이라
+   청구가 만드는 행은 보드에도 공개에도 **아무 변화를 안 준다** — 넣기든 옮기기든 해제든 결과가
+   같아서 연산별로 계약을 쪼갤 필요도 없다. 초안 주(draft=1)는 UPDATE 경로라 그대로 초안이고,
+   발행된 주도 published_at 을 안 건드려 그대로 발행이다(결정 13 은 여기서도 유지된다).
 
    revision 은 nextRevision 과 같은 규칙으로 단조 증가시킨다 — 같은 ms 안에 두 번 쓰면
    now 가 기존 값과 같아 revision 이 안 바뀌고, 그럼 CAS 가 통과해 보호가 도로 뚫린다. */
@@ -157,7 +150,7 @@ function claimWeek(db: Db, date: string, now: number) {
   const weekStart = weekStartOf(toIsoDate(date));
   return db
     .insert(scheduleWeeks)
-    .values({ weekStartDate: weekStart, publishedAt: now, lastUpdatedAt: now })
+    .values({ weekStartDate: weekStart, draft: false, publishedAt: null, lastUpdatedAt: now })
     .onConflictDoUpdate({
       target: scheduleWeeks.weekStartDate,
       set: { lastUpdatedAt: sql`max(${scheduleWeeks.lastUpdatedAt} + 1, ${now})` },

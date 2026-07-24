@@ -187,18 +187,37 @@ export const scheduleEntries = sqliteTable("schedule_entries", {
    week_start_date 는 그 주의 월요일 'YYYY-MM-DD'(core/calendar.weekStartOf 로 정규화)이고
    UNIQUE — 한 주 = 한 메타 행.
 
-   published_at 은 nullable 순간(epoch ms). null = "짜는 중"이라 미완성 주간표가 og 카드로
-   박제되지 않는다(결정 13). 발행 경계가 게임 보드의 날짜 유도에도 걸리는지는 일정 쓰기가
-   서는 작업순서 4 에서 결정한다 — 지금은 이 테이블에 행을 넣는 코드가 없어(스키마만) 유예가
-   안전하다(발행 필터를 지금 걸면 이관된 과거 항목이 주 메타가 없어 보드에서 사라진다). */
-export const scheduleWeeks = sqliteTable("schedule_weeks", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  weekStartDate: text("week_start_date").notNull().unique(),
-  note: text("note"),
-  publishedAt: integer("published_at"),
-  createdAt: createdAt(),
-  lastUpdatedAt: lastUpdatedAt(),
-});
+   **주의 상태는 축이 둘이고 서로 독립이다**(ADR-0022, 이슈 #64 가 연 자리):
+     draft        — 아직 짜는 중인가. 게임 보드가 이 축 하나만 읽는다.
+     published_at — 대외 공개했나(nullable 순간, epoch ms). /schedule 이 이 축 하나만 읽는다.
+
+   한 축(published_at)으로 둘을 겸하던 시절엔 "메타 행이 없다"가 **레거시 아카이브**라는 도메인
+   사실까지 겸직했다. 그래서 낙관적 동시성(CAS) 때문에 행을 만드는 순간 도메인 상태가 딸려
+   왔다 — 게임 폼이 레거시 주의 항목을 연결 해제하면 그 주가 발행된 채 생겨 시각·자유 제목까지
+   공개됐다(이슈 #64). draft 의 **DEFAULT 0 이 "행 없음"과 같은 뜻**이라 그 겸직이 끊긴다:
+   행을 언제 만들든 도메인 상태가 안 변해서, 청구(claimWeek)가 부작용 없는 연산이 된다.
+
+   그래서 보드 유도는 `coalesce(w.draft, 0) = 0` 한 축만 본다(LEFT JOIN 미스 = 기본값과 합류).
+   3상태 enum 을 안 쓰는 이유는 ADR-0019 의 원칙 그대로다 — status 는 (draft, published_at)의
+   함수라 저장 대상이 아니다. 반대로 draft 는 published_at 에서 파생되지 않는 독립 사실이다.
+
+   CHECK 는 모순 조합 하나만 막는다: 짜는 중인데 공개된 주는 없다. 반대(draft=0·미발행)는
+   정상 상태다 — 과거 아카이브와 게임 폼이 만든 주가 거기 산다(보드엔 뜨고 공개는 안 된다). */
+export const scheduleWeeks = sqliteTable(
+  "schedule_weeks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    weekStartDate: text("week_start_date").notNull().unique(),
+    note: text("note"),
+    // boolean 모드 — 0/1 로 저장하되 타입은 boolean 으로 흐른다(games.cleared 와 같은 컨벤션).
+    // 기본 false 가 "메타 행 없음"과 같은 뜻이라, 새 행이 도메인 상태를 안 흔든다.
+    draft: integer("draft", { mode: "boolean" }).notNull().default(false),
+    publishedAt: integer("published_at"),
+    createdAt: createdAt(),
+    lastUpdatedAt: lastUpdatedAt(),
+  },
+  (t) => [check("schedule_weeks_draft", sql`${t.draft} = 0 OR ${t.publishedAt} IS NULL`)],
+);
 
 /* 자체 세션 refresh 토큰(ADR-0017). access 는 stateless(EdDSA JWT, DB 무관)라 여기 없다 —
    refresh 만 서버가 정본으로 들고 rotation·재사용 감지·revoke 를 한다. 원본은 저장하지 않고
