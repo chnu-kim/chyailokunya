@@ -105,3 +105,14 @@ export function addWeeks(date: IsoDate, weeks: number): IsoDate {
    주의 시작을 일요일로 바꾸는 날 한쪽만 고쳐도 게이트가 전부 초록이고, 화면에서 요일과
    날짜가 하루씩 밀린 채로 나간다. */
 export const WEEKDAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"] as const;
+
+/* 'YYYY-MM-DD' → 'M.D'. 연도를 뗀다 — 한 주는 같은 해라 제목·요일 라벨에 연도가 반복되면
+   시선만 벌린다(연도가 필요한 자리는 주 범위 제목뿐). 문자열이 이미 실재하는 날짜라(경계에서
+   toIsoDate 검증) split 으로 충분하고 Temporal 왕복이 필요 없다.
+
+   일정 화면에만 있다가 여기로 올라왔다 — 게임 폼이 여러 날 편성을 한 줄로 나열할 때 같은
+   표기를 써야 해서다(두 화면이 같은 날짜를 다르게 적으면 같은 편성인지 알아보기 어렵다). */
+export function formatMD(iso: string): string {
+  const [, m, d] = iso.split("-");
+  return `${Number(m)}.${Number(d)}`;
+}

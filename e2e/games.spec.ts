@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectSignedIn, signIn } from "./session";
 
 /* 게임 보드는 D1 에서 서버가 읽어 렌더한다(Phase 3). 데이터는 globalSetup 이 심은 결정적
    픽스처 8장(날짜 조합 골고루, poster null, 기본 뷰포트 5열이라 두 행). 추가·수정·삭제 UI 는 쓰기 권한이 있어야 뜨므로
@@ -56,4 +57,93 @@ test("게임: D1 에서 읽어 렌더 · 날짜 표시", async ({ page }) => {
     "직접 넣은 게임",
     "할로우 나이트",
   ]);
+});
+
+/* 여러 날 편성 게임의 저장. **서버 단위 테스트로는 못 잡는 자리다** — 계약("playedDate 를 안
+   실으면 일정을 안 건드린다")은 라우터 테스트가 덮지만, 폼이 그 계약을 지키는지는 실제 제출
+   페이로드를 태워야 안다. 초판이 정확히 거기서 깨졌다: 잠긴 폼이 빈 문자열을 실었고 그게 null
+   로 접혀 "여러 날을 지우려 한다"로 거절돼 **저장이 통째로 막혔다**(codex 리뷰).
+
+   ── 공유 픽스처를 **관찰 가능하게 바꾸지 않는다** ────────────────────────────────
+   playwright 는 fullyParallel 이라 이 스펙이 읽기 전용 스펙과 동시에 돈다. 그래서 그쪽이 보는
+   상태를 건드리면 타이밍에 따라 빨개진다(리뷰가 잡은 flakiness). 두 가지로 피한다:
+
+   1. **클리어를 안 켠다.** 위 읽기 스펙이 "엘든 링엔 클리어 칩이 없다"를 못박는다. 회귀는
+      "저장이 거절됐다"였으므로 값을 안 바꾼 저장이 통과하는지만 봐도 똑같이 잡힌다.
+   2. **기존 항목보다 이른 날짜에 붙인다.** 보드 날짜·정렬은 MAX(scheduled_date)라, 2026-03-01
+      보다 이른 날을 더하면 카드의 "2026.03.01 플레이"도 정렬 위치도 그대로다. 주(2026-02-16)는
+      다른 스펙이 쓰지 않는다 — 한때 픽스처와 같은 주에 붙였다가 schedule.spec 의 레거시 주
+      스펙을 깼다(그쪽 `.first()` 를 날짜순으로 앞선 내 항목이 가로챘다). */
+test("관리자: 여러 날 편성 게임도 저장이 통과한다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+
+  await page.goto("/schedule?week=2026-02-16");
+  await expectSignedIn(page);
+  await page.locator('[data-od-id="schedule-day-add-2026-02-17"]').click();
+  const day = page.locator('[data-od-id="schedule-day-2026-02-17"]');
+  await day.locator('[data-od-id^="schedule-entry-title-"]').fill("엘든 링 1일차");
+  await day.locator('[data-od-id^="schedule-entry-game-"]').selectOption({ label: "엘든 링" });
+  const save = page.locator('[data-od-id="schedule-save"]');
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  // 이제 게임 폼은 날짜를 잠근다 — 입력이 사라지고 날짜 나열만 남는다.
+  await page.goto("/games");
+  await page.locator('[data-od-id="game-edit-1"]').click();
+  await expect(page.locator('[data-od-id="editor-locked"]')).toBeVisible();
+  await expect(page.locator('[data-od-id="editor-played"]')).toHaveCount(0);
+
+  // 아무것도 안 바꾸고 저장만 누른다 — 옛 코드에선 이것도 BAD_REQUEST 로 막혔다.
+  await page.locator('[data-od-id="game-editor-submit"]').click();
+
+  /* 저장이 성공하면 모달이 닫힌다. 실패하면 오류 문구를 띄운 채 열려 있다 — 그게 회귀의 모습이다. */
+  await expect(page.locator('dialog[data-od-id="game-editor"]')).toHaveCount(0);
+
+  /* 그리고 일정은 그대로다 — 저장이 날짜를 지우거나 옮기면 안 된다. 서버가 거절하지 않고
+     통과했다면 여기 항목이 사라지거나 다른 날로 옮겨 간다. */
+  await page.goto("/schedule?week=2026-02-16");
+  await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveValue("엘든 링 1일차");
+});
+
+/* 폼이 열린 뒤 일정이 딴 데서 바뀌었을 때, **날짜 칸을 안 건드린 저장은 그걸 되돌리지 않는다.**
+   서버 precondition(playedDateWas)이 최종 방어선이지만 그 앞에 폼의 규약이 있다: 사용자가 날짜를
+   고치지 않았으면 아예 안 싣는다. 안 실으면 서버는 일정을 건드리지 않으므로 CONFLICT 조차 안
+   난다 — 클리어만 고치려던 관리자가 남의 일정 변경 때문에 막히면 그것대로 나쁘다.
+   라우터 테스트는 "낡은 값을 실으면 CONFLICT"를 덮지만, **폼이 애초에 안 싣는지**는 실제 제출
+   페이로드를 태워야 안다(리뷰 6라운드). */
+test("관리자: 폼이 열린 뒤 일정이 바뀌어도 클리어만 고친 저장은 그대로 통과한다", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+
+  // 마인크래프트(id 2)는 항목이 하나라(2026-07-12) 폼이 그 날짜를 읽고 편집 가능한 상태로 연다.
+  await page.goto("/games");
+  await expectSignedIn(page);
+  await page.locator('[data-od-id="game-edit-2"]').click();
+  await expect(page.locator('[data-od-id="editor-played"]')).toHaveValue("2026-07-12");
+
+  /* 폼이 열린 채로 그 **날짜**가 딴 데서 옮겨진 상황을 만든다 — 다른 탭의 관리자가 하는 일이다.
+     날짜여야 한다: 시각·제목만 바꾸면 precondition(playedDateWas)이 안 걸려 이 스펙이 아무것도
+     증명하지 못한다(실제로 처음엔 시각을 바꿨다가 검출력이 0인 걸 확인했다). 07-13 으로 옮기는
+     건 마인크래프트가 보드 1위(MAX)를 유지해 읽기 전용 스펙의 정렬 검증을 안 흔들기 때문이다. */
+  const other = await page.context().newPage();
+  await other.goto("/games");
+  await other.locator('[data-od-id="game-edit-2"]').click();
+  await other.locator('[data-od-id="editor-played"]').fill("2026-07-13");
+  await other.locator('[data-od-id="game-editor-submit"]').click();
+  await expect(other.locator('dialog[data-od-id="game-editor"]')).toHaveCount(0);
+  await other.close();
+
+  /* 원래 폼에서 그대로 저장. 날짜 칸을 안 건드렸으므로 playedDate 를 안 싣고, 서버는 일정을
+     건드리지 않아 **CONFLICT 조차 안 난다** — 클리어만 고치려던 관리자가 남의 일정 변경 때문에
+     막히면 그것대로 나쁘다. 폼이 늘 싣던 시절엔 stale 한 07-12 가 실려 CONFLICT 로 막혔다.
+     클리어를 안 켜는 건 읽기 전용 스펙이 보는 픽스처 상태를 안 흔들기 위해서다. */
+  await page.locator('[data-od-id="game-editor-submit"]').click();
+  await expect(page.locator('dialog[data-od-id="game-editor"]')).toHaveCount(0);
+
+  // 남의 변경(07-13)이 살아 있다 — stale 한 폼이 07-12 로 되돌리지 않았다.
+  await page.reload();
+  await page.locator('[data-od-id="game-edit-2"]').click();
+  await expect(page.locator('[data-od-id="editor-played"]')).toHaveValue("2026-07-13");
 });

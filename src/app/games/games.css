@@ -535,6 +535,19 @@ dialog.composer[open]::backdrop {
 .datefield .field {
   min-height: 44px;
 }
+/* 여러 날 편성이라 입력 대신 날짜를 나열하는 자리(PlayedDateField 의 잠금 분기). 본문 크기라
+   4.5:1 이 필요한데 --fg 는 .paper 위 라이트 14.3:1 / 다크 14.0:1 로 넉넉하다 — 읽으라고 두는
+   값이지 비활성이 아니므로 --fg-muted 로 흐리지 않는다. 괄호 안 개수만 한 단계 낮춘다. */
+.datefield__locked {
+  font-size: var(--text-base);
+  color: var(--fg);
+  margin: 0 0 var(--space-2);
+  /* 날짜가 여럿이면 좁은 폭에서 줄바꿈돼야 한다 — 한 줄에 밀어 넣으면 320px 에서 넘친다. */
+  overflow-wrap: anywhere;
+}
+.datefield__locked span {
+  color: var(--fg-muted);
+}
 /* 되돌리기(뒤로/취소)가 왼쪽, 확정이 오른쪽. 좁으면 확정이 위로 올라오지 않게 wrap 대신
    둘 다 늘려 한 줄을 유지한다 — 이 줄의 결정은 둘뿐이라 폭을 나눠도 라벨이 안 잘린다. */
 .composer__actions {
