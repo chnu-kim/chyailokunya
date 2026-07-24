@@ -13,12 +13,7 @@ import {
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
-import {
-  deleteErrorMessage,
-  REQUEST_TIMEOUT_MS,
-  updateErrorMessage,
-  writeErrorMessage,
-} from "./error-message";
+import { deleteErrorMessage, REQUEST_TIMEOUT_MS, updateErrorMessage } from "./error-message";
 import { ClearedFields, GameDialog, PlayedDateField, useClearedDraft } from "./game-dialog";
 
 /* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
@@ -29,11 +24,22 @@ import { ClearedFields, GameDialog, PlayedDateField, useClearedDraft } from "./g
    상태 필터 줄이 있었다. status 컬럼이 사라지며 같이 없앴다 — 걸러 볼 축이 날짜뿐인데
    서버 정렬이 이미 플레이한 날 내림차순이라, 필터는 같은 정보를 두 번째 조작으로 되풀이했다.
 
+   ── 격자는 표지·이름·클리어까지만 싣는다 ──────────────────────────────────────
+   카드마다 날짜 한 줄과 수정·삭제 버튼 둘이 서 있었다. 8장이면 아이콘만 16개고, 그 대부분은
+   **아무도 지금 쓰지 않는다** — 보드를 여는 이유는 "뭘 했나 훑기"지 고치기가 아니다. 부수
+   정보와 조작을 카드를 눌러야 나오는 상세로 내리면 격자가 사진과 이름만 말하고, 고치려는
+   사람은 고칠 카드 하나를 이미 고른 뒤에 조작을 만난다.
+
+   클리어 칩만 앞면에 남긴다: "이 게임을 깼나"는 훑는 눈이 던지는 질문이라 카드마다 열어 보게
+   하면 안 되고, 날짜와 달리 한 글자로 답이 된다. 정확한 날짜는 상세가 답한다.
+
    쓰기 권한이 없으면 추가 슬롯 자리에 **아무것도 그리지 않는다.** 잠긴 칸도, 보드 뒤 각주도
    두지 않는다: "방문자는 자기가 못 하는 걸 알아야 한다"는 근거가 언젠가 권한을 가질 사람에게만
    성립하는데, core/authorities.ts 에 member 역할이 없어 일반 팬은 영원히 쓰기를 못 얻는다.
    취할 조치가 없는 안내는 화면 어디에 두든 읽는 사람의 시간만 쓴다. 권한 모델이 바뀌어
    member 가 생기면(이슈 #22) 그때 다시 판단한다 — 그 전까진 보드가 게임만 보여주는 게 맞다.
+   **상세는 권한과 무관하게 열린다** — 거기 담긴 날짜는 공개 목록이 이미 실어 보낸 값이고,
+   앞면에서 뺀 정보를 권한 뒤에 숨기면 로그아웃 방문자는 볼 수 있던 것을 잃는다.
 
    삭제는 **확인이 먼저**다(ADR-0020): 클릭은 확인 모달을 열 뿐이고, remove 뮤테이션은 사용자가
    확인을 누른 순간 곧바로 나간다. 한때는 자국(ghost) + 6초 되돌리기 창이었는데, 그 6초 동안
@@ -45,14 +51,6 @@ import { ClearedFields, GameDialog, PlayedDateField, useClearedDraft } from "./g
 // --rest-rot/--thumb-a 같은 CSS 커스텀 속성을 인라인 style 로 넘길 때의 타입 우회.
 function cssVars(vars: Record<string, string | number>): CSSProperties {
   return vars as CSSProperties;
-}
-
-/* 카드의 날짜 한 줄. **플레이한 날만 싣는다** — 이 보드가 답하는 질문이 "무엇을 언제 플레이했나"
-   라서, 정렬 기준도 카드에 뜨는 날짜도 같은 하나여야 한다. 그 날짜는 이제 게임 컬럼이 아니라
-   일정에서 유도된다(lastPlayed = MAX(scheduled_date), features/games/service). 클리어는 날짜가
-   아니라 칩이 맡는다. 유도된 날짜가 없으면(일정 항목이 없는 게임) 호출부가 줄 자체를 안 그린다. */
-function dateLabel(g: GameCard): string | null {
-  return g.lastPlayed ? formatDate(g.lastPlayed) + " 플레이" : null;
 }
 
 export function GameBoard({
@@ -67,6 +65,10 @@ export function GameBoard({
   const [games, setGames] = useState(initialGames);
   const [announcement, setAnnouncement] = useState("");
   const [composing, setComposing] = useState(false);
+  /* 열어 둔 카드. 수정·삭제는 **이 위에 겹쳐** 뜬다(닫고 여는 게 아니다) — 그래야 취소했을 때
+     상세로 돌아오고, 포커스 복원을 브라우저의 dialog 스택이 그대로 맡는다. 행 전체를 들고
+     있는 이유는 아래 editing 과 같다. */
+  const [detail, setDetail] = useState<GameCard | null>(null);
   // 고치는 중인 행(플레이 날짜·클리어). 행 전체를 들고 있는 이유: 모달이 제목·포스터로
   // "무엇을 고치는지"를 다시 보여줘야 하고, id 만 들면 목록에서 매번 되찾아야 한다.
   const [editing, setEditing] = useState<GameCard | null>(null);
@@ -88,6 +90,9 @@ export function GameBoard({
   function onUpdated(row: GameCard) {
     setGames((prev) => sortGameCards(prev.map((g) => (g.id === row.id ? row : g))));
     setEditing(null);
+    /* 상세가 아래 열려 있으면 그 화면도 새 값으로 갈아 끼운다 — 안 하면 방금 고친 날짜가
+       돌아온 화면에 옛 값으로 떠 "저장이 안 됐다"로 읽힌다. */
+    setDetail((prev) => (prev && prev.id === row.id ? row : prev));
     setAnnouncement(row.categoryValue + " 수정됨");
   }
 
@@ -95,9 +100,11 @@ export function GameBoard({
   function onRemoved(row: GameCard) {
     setGames((prev) => prev.filter((g) => g.id !== row.id));
     setDeleting(null);
+    // 상세는 방금 사라진 게임을 보여주고 있었다 — 같이 닫는다.
+    setDetail(null);
     setAnnouncement(row.categoryValue + " 삭제됨");
     /* 모달을 닫으면 브라우저가 포커스를 트리거로 되돌리는데, 그 트리거는 방금 지운 카드의
-       삭제 버튼이라 같은 커밋에서 사라진다 — 그대로 두면 포커스가 body 로 떨어져 키보드
+       상세 안에 있어 같은 커밋에서 사라진다 — 그대로 두면 포커스가 body 로 떨어져 키보드
        사용자가 탭 순서 맨 앞으로 튕긴다. 붙이기 슬롯은 카드가 아니라 그리드의 고정 첫 칸이라
        지워지지 않으므로 여기로 넘긴다(삭제 권한이 있으면 쓰기 권한도 있다 — core/authorities). */
     addSlotRef.current?.focus();
@@ -122,12 +129,29 @@ export function GameBoard({
       </section>
 
       {composing && <GameComposer onAdded={onAdded} onClose={() => setComposing(false)} />}
+      {detail && (
+        <GameDetail
+          game={detail}
+          canWrite={canWrite}
+          canDelete={canDelete}
+          onEdit={() => setEditing(detail)}
+          onDelete={() => setDeleting(detail)}
+          onClose={() => setDetail(null)}
+        />
+      )}
+      {/* 상세가 아래 열려 있으면 스크림을 한 겹 더 깔지 않는다(GameDialog 의 className). */}
       {editing && (
-        <GameEditor game={editing} onUpdated={onUpdated} onClose={() => setEditing(null)} />
+        <GameEditor
+          game={editing}
+          stacked={detail !== null}
+          onUpdated={onUpdated}
+          onClose={() => setEditing(null)}
+        />
       )}
       {deleting && (
         <GameDeleteConfirm
           game={deleting}
+          stacked={detail !== null}
           onRemoved={onRemoved}
           onClose={() => setDeleting(null)}
         />
@@ -169,11 +193,8 @@ export function GameBoard({
               const key = String(g.id);
               const rot = ROT[axis(key, "rot", ROT.length)] ?? ROT[0];
               const ang = ANGLE[axis(key, "ang", ANGLE.length)] ?? ANGLE[0];
-              const label = dateLabel(g);
-              /* 날짜 줄은 플레이한 날만 실으므로 칩이 클리어를 홀로 맡는다 — 플레이한 날을
-                 모르는 채 클리어만 아는 게임도 칩으로는 그 사실을 말할 수 있어야 한다. 클리어의
-                 정본은 플래그다(cleared_date 유무가 아니다 — "깼는데 날짜 모름"을 살린다). */
-              const showCleared = g.cleared;
+              /* 칩이 앞면에 남는 유일한 부수 사실이다. 클리어의 정본은 플래그다
+                 (cleared_date 유무가 아니다 — "깼는데 날짜 모름"을 살린다). */
               return (
                 <div
                   key={g.id}
@@ -206,60 +227,34 @@ export function GameBoard({
                     )}
                   </div>
                   <div className="game__body">
-                    <h3 className="game__name">{g.categoryValue}</h3>
-                    {/* 칩이 날짜 **앞**이다. 이 줄은 세로로 쌓이고 날짜가 늘 마지막 줄이어야
-                        카드 간 기준선이 맞는데(games.css), 그 순서를 CSS 역전이 아니라 DOM 으로
-                        만든다 — 역전은 보이는 순서와 읽는 순서를 갈라 놓는다. */}
-                    {(label || showCleared) && (
-                      <p className="game__when" data-od-id={"game-when-" + g.id}>
-                        {showCleared && <span className="chip chip--ok">클리어</span>}
-                        {label && <span className="game__date">{label}</span>}
+                    {/* 카드 전체가 한 번에 눌린다. 그 히트 영역은 **제목 버튼이 ::after 로
+                        카드를 덮어서** 만든다 — 카드 자체를 button 으로 만들면 그 안에 h3 이
+                        못 들어가(button 의 콘텐츠 모델) 보드가 제목 없는 이미지 더미가 되고,
+                        투명 오버레이를 형제로 따로 깔면 접근 이름이 없는 버튼이 하나 더 는다.
+                        이 방식은 눌리는 것과 이름이 같은 요소라 스크린리더·키보드에서도 하나다.
+
+                        접근 이름에 "자세히"를 더한다 — 이름만이면 버튼이 무엇을 하는지 안 말한다.
+                        시각 라벨(게임명)을 그대로 품으므로 WCAG 2.5.3(Label in Name)은 지켜진다. */}
+                    <h3 className="game__name">
+                      <button
+                        className="game__open"
+                        type="button"
+                        aria-label={g.categoryValue + " 자세히"}
+                        data-od-id={"game-open-" + g.id}
+                        onClick={() => setDetail(g)}
+                      >
+                        {/* 두 줄 말줄임은 이 span 이 진다 — 버튼에 직접 걸면 함께 필요한
+                            overflow:hidden 이 카드를 덮는 ::after 까지 잘라 히트 영역이
+                            글자 크기로 쪼그라든다(games.css). */}
+                        <span className="game__nametext">{g.categoryValue}</span>
+                      </button>
+                    </h3>
+                    {g.cleared && (
+                      <p className="game__meta" data-od-id={"game-meta-" + g.id}>
+                        <span className="chip chip--ok">클리어</span>
                       </p>
                     )}
                   </div>
-                  {/* 수정·삭제는 사진 **밑** 크림 여백에 in-flow 로 선다. 한때 썸네일 우상단에
-                      겹쳤고 그건 사용자가 지목한 배치였는데, 사용자 승인을 받아 내렸다.
-
-                      **뒤집은 근거는 미감이 아니라 파생 비용이다.** 임의의 게임 표지 위에
-                      얹는다는 전제 하나가 대비 난제를 만들고, 그걸 풀려고 면+2px 잉크 테두리+
-                      그림자 세 겹으로 갔고, 거기서 다시 opacity 숨김·pointer-events 짝·
-                      focus-within 자기참조·집게 좌표 다툼·폭별 재측정이 파생됐다. 배치를
-                      내리면 배경이 카드 종이 둘로 확정돼 그 전부가 존재 이유째 사라진다
-                      (계산은 games.css 의 액션 블록 주석에).
-
-                      **상시 보인다.** hover 로만 띄우던 앞 판은 발견 가능성을 대가로 냈는데,
-                      NN/g 가 그 형태를 명시적으로 반대한다("가벼워 보이려고 hover 뒤에 숨기지
-                      마라"). 쉼 상태를 --fg-muted 로 낮춰 사진·이름·날짜 뒤에 세우는 것으로
-                      무게를 대신 뺀다 — 숨기는 대신 물러선다.
-
-                      DOM 순서 = 시각 순서 = 탭 순서다(제목 → 날짜 → 액션). 라벨은 sr-only 로
-                      두고 그 안에 동사를 넣는다: 아이콘만 남으면 접근 이름이 게임명뿐인
-                      정체불명 버튼 둘이 된다. 서버가 인가를 다시 검사하므로 이 분기는 편의일
-                      뿐이다(불변식 3). */}
-                  {(canWrite || canDelete) && (
-                    <div className="game__acts">
-                      {canWrite && (
-                        <button
-                          className="game__act game__edit"
-                          type="button"
-                          data-od-id={"game-edit-" + g.id}
-                          onClick={() => setEditing(g)}
-                        >
-                          <span className="sr-only">{g.categoryValue} 클리어 수정</span>
-                        </button>
-                      )}
-                      {canDelete && (
-                        <button
-                          className="game__act game__del"
-                          type="button"
-                          data-od-id={"game-del-" + g.id}
-                          onClick={() => setDeleting(g)}
-                        >
-                          <span className="sr-only">{g.categoryValue} 삭제</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -281,20 +276,133 @@ export function GameBoard({
   );
 }
 
-/* 삭제 확인 모달(ADR-0020). 되돌릴 수 없는 행동이라 확인을 **파괴 앞**에 세운다 — 눌러 놓고
-   무르는 창을 주는 대신, 누르기 전에 무엇이 사라지는지 보여준다. 포스터·제목을 싣는 건 날짜
-   수정 모달과 같은 이유고 여기선 더 무겁다: 아이콘 두 개짜리 오버레이는 옆 카드의 버튼을
-   잘못 누르기 쉽고, 그 오식을 잡을 마지막 지점이 이 화면이다.
+/* 카드 상세 — 격자에서 내려온 부수 정보와 조작이 사는 자리.
 
-   인계 규약은 컴포저·날짜 수정과 같다 — 성공은 신호(closing)만 세우고 실제 인계는 브라우저가
+   **권한과 무관하게 열린다.** 여기 실리는 날짜는 공개 목록(listGames)이 이미 보낸 값이라
+   숨길 것이 없고, 앞면에서 뺀 정보를 권한 뒤에 두면 로그아웃 방문자는 전에 보이던 날짜를
+   잃는다. 권한이 가르는 건 조작(수정·삭제)뿐이다.
+
+   수정·삭제는 이 모달을 **닫지 않고 그 위에 띄운다.** 닫고 여는 쪽은 취소했을 때 돌아올 자리가
+   없어져 사용자가 카드를 다시 찾아 눌러야 하고, 포커스도 갈 곳을 잃는다(방금 닫힌 모달의
+   버튼이 트리거다). 겹쳐 두면 dialog 스택이 그 둘을 브라우저 기본 동작으로 해결한다.
+
+   플레이 날짜는 lastPlayed 를 그대로 읽는다 — 발행 경계를 통과한 값이라 초안 주의 편성은 안
+   보인다(ADR-0022). 고치려고 여는 GameEditor 는 다른 값을 쓴다(초안까지 세는 playDates) —
+   보는 화면과 고치는 화면의 질문이 다르기 때문이다. */
+function GameDetail({
+  game,
+  canWrite,
+  canDelete,
+  onEdit,
+  onDelete,
+  onClose,
+}: {
+  game: GameCard;
+  canWrite: boolean;
+  canDelete: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <GameDialog
+      title={game.categoryValue}
+      odId="game-detail"
+      className="composer--detail"
+      closing={false}
+      onClose={onClose}
+    >
+      <div className="detail__head">
+        {game.posterImageUrl ? (
+          <img
+            className="composer__poster composer__poster--lg"
+            src={game.posterImageUrl}
+            alt=""
+            width={72}
+            height={96}
+          />
+        ) : (
+          <span className="composer__noposter composer__poster--lg" aria-hidden="true">
+            {game.categoryValue.charAt(0)}
+          </span>
+        )}
+        {/* 사실 두 줄은 정의 목록이다 — "이름: 값" 쌍이라는 걸 마크업이 말해야 스크린리더가
+            둘을 이어 읽는다(문단 두 개로 두면 라벨과 값의 관계가 사라진다). */}
+        <dl className="detail__facts">
+          <dt>플레이한 날</dt>
+          <dd data-od-id="detail-played">
+            {game.lastPlayed ? (
+              formatDate(game.lastPlayed)
+            ) : (
+              <span className="detail__none">아직 없어요</span>
+            )}
+          </dd>
+          <dt>클리어</dt>
+          <dd data-od-id="detail-cleared">
+            {game.cleared ? (
+              game.clearedDate ? (
+                formatDate(game.clearedDate)
+              ) : (
+                // 날짜를 모르는 클리어도 유효한 상태다 — 빈칸으로 두면 안 깬 것처럼 읽힌다.
+                <>
+                  했어요 <span className="detail__none">(날짜 모름)</span>
+                </>
+              )
+            ) : (
+              <span className="detail__none">아직이에요</span>
+            )}
+          </dd>
+        </dl>
+      </div>
+
+      {(canWrite || canDelete) && (
+        <div className="detail__acts">
+          {canWrite && (
+            <button
+              className="btn btn--primary composer__btn"
+              type="button"
+              data-od-id={"game-edit-" + game.id}
+              onClick={onEdit}
+            >
+              수정
+            </button>
+          )}
+          {/* 삭제는 오른쪽 끝으로 민다 — 남는 폭이 그대로 오식 여유가 된다(카드 액션 줄이
+              쓰던 어휘 그대로). 되돌릴 수 없는 하드 삭제라 이 거리가 위계의 절반을 지고,
+              나머지 절반은 확인 모달이 진다(ADR-0020). */}
+          {canDelete && (
+            <button
+              className="btn btn--secondary composer__btn detail__del"
+              type="button"
+              data-od-id={"game-del-" + game.id}
+              onClick={onDelete}
+            >
+              삭제
+            </button>
+          )}
+        </div>
+      )}
+    </GameDialog>
+  );
+}
+
+/* 삭제 확인 모달(ADR-0020). 되돌릴 수 없는 행동이라 확인을 **파괴 앞**에 세운다 — 눌러 놓고
+   무르는 창을 주는 대신, 누르기 전에 무엇이 사라지는지 보여준다. 포스터·제목을 싣는 건 상세가
+   이미 보여준 것을 되짚는 것이지 중복이 아니다: 이 화면의 질문은 "무엇을 보고 있나"가 아니라
+   "무엇을 지우려는가"고, 그 둘이 어긋난 채 확정되는 걸 막는 마지막 지점이 여기다.
+
+   인계 규약은 컴포저·수정과 같다 — 성공은 신호(closing)만 세우고 실제 인계는 브라우저가
    dialog 를 닫은 뒤 오는 onClose 에서 한다(GameDialog 의 busy 주석). 실패 문구는 모달 안에
    남긴다: 바깥은 inert 라 페이지 하단 라이브 영역이 안 읽힌다. */
 function GameDeleteConfirm({
   game,
+  stacked,
   onRemoved,
   onClose,
 }: {
   game: GameCard;
+  // 카드 상세 위에 겹쳐 떴는가 — 그렇다면 스크림을 한 겹 더 깔지 않는다.
+  stacked: boolean;
   onRemoved: (row: GameCard) => void;
   onClose: () => void;
 }) {
@@ -327,6 +435,7 @@ function GameDeleteConfirm({
          장난기는 신뢰를 깎는다 — 격식이 "이건 진짜다"를 말한다(AGENTS 톤 규칙의 명시적 예외). */
       title="삭제하시겠습니까?"
       odId="game-delete"
+      className={stacked ? "composer--stacked" : undefined}
       closing={closing}
       busy={removing}
       /* 본문에 "취소"가 있으므로 모서리 X 를 끈다 — 같은 일을 하는 손잡이 둘은 사용자를
@@ -402,7 +511,7 @@ function GameDeleteConfirm({
    중복 방지가 무너진다). 서버 updateGameInput 은 부분 패치가 아니라 셋을 늘 함께 받는다.
 
    플레이 날짜는 games 컬럼이 아니라 일정 항목을 고친다(정본은 schedule_entries, 이슈 #56 결정 3).
-   그래서 **열자마자 그 게임의 일정 날짜를 조회한다** — 목록(GameCard.lastPlayed)에 있는 값을 못
+   그래서 **열자마자 그 게임의 일정 날짜를 조회한다** — 상세(GameCard.lastPlayed)에 있는 값을 못
    쓰는 이유가 둘이다: (1) lastPlayed 는 발행된 항목만 세므로 초안 주의 항목이 안 보여 "0개"로
    오해하고, (2) 여러 날 편성인지 알 수 없어 잠금 판단이 안 선다. 조회는 game:write 를 요구한다
    (초안 유출 방지 — router.playDates).
@@ -411,10 +520,13 @@ function GameDeleteConfirm({
    항목이 지워진다(playedDate=null 은 삭제다) — 그 자리는 조용해서 특히 위험하다. */
 function GameEditor({
   game,
+  stacked,
   onUpdated,
   onClose,
 }: {
   game: GameCard;
+  // 카드 상세 위에 겹쳐 떴는가 — 그렇다면 스크림을 한 겹 더 깔지 않는다.
+  stacked: boolean;
   onUpdated: (row: GameCard) => void;
   onClose: () => void;
 }) {
@@ -466,6 +578,12 @@ function GameEditor({
     };
   }, [game.id]);
 
+  /* 여러 날 편성이면 입력이 잠기고(core.isPlayDateEditable) 저장에 날짜를 안 싣는다.
+     dateEdited 는 조회가 끝난 뒤에만 참이 될 수 있다 — dates 가 null 인 동안 playedDate 는
+     아직 빈 채라, 그 차이를 "고쳤다"로 세면 열자마자 낡은 빈 값이 저장에 실린다. */
+  const locked = dates !== null && !isPlayDateEditable(dates);
+  const dateEdited = !locked && dates !== null && playedDate !== loadedDate;
+
   function onSave(e: React.FormEvent) {
     e.preventDefault();
     startSave(async () => {
@@ -484,8 +602,6 @@ function GameEditor({
            날짜를 실제로 고쳤으면 playedDateWas 를 함께 보낸다 — 열었을 때의 값이라 서버가
            그 사이 바뀌었는지 판정할 수 있다.
            빈 문자열 → null 전처리의 정본은 서버 updateGameInput(Zod)이다 — 여기서 다시 하지 않는다. */
-        const locked = dates !== null && !isPlayDateEditable(dates);
-        const dateEdited = !locked && playedDate !== loadedDate;
         const row = await trpc.games.update.mutate(
           {
             id: game.id,
@@ -505,14 +621,22 @@ function GameEditor({
     });
   }
 
+  /* 저장 안 한 수정이 있는가 — 배경 클릭·Esc 로 닫을 때 되묻는 기준이다(GameDialog 의 dirty).
+     날짜 쪽은 dateEdited 를 그대로 쓴다: 불러오는 중의 빈 입력을 고침으로 세면 열자마자
+     닫기가 막힌다(위 주석). */
+  const dirty =
+    dateEdited || draft.cleared !== game.cleared || draft.clearedDate !== (game.clearedDate ?? "");
+
   return (
     <GameDialog
       /* "클리어 수정"이었다 — 플레이 날짜가 돌아오며 고치는 게 둘이 됐다. 제목이 필드보다 좁으면
          사용자는 날짜를 고치러 여기 들어올 생각을 못 한다. */
       title="게임 수정"
       odId="game-editor"
+      className={stacked ? "composer--stacked" : undefined}
       closing={closing}
       busy={saving}
+      dirty={dirty}
       // 삭제 확인과 같은 이유로 X 를 끈다 — 본문에 "취소"가 있다(GameDialog 의 closeButton).
       closeButton={false}
       onClose={() => (saved ? onUpdated(saved) : onClose())}
@@ -547,7 +671,12 @@ function GameEditor({
           disabled={saving}
         />
 
-        <ClearedFields draft={draft} onChange={setDraft} idPrefix="editor-clear" />
+        <ClearedFields
+          draft={draft}
+          onChange={setDraft}
+          idPrefix="editor-clear"
+          disabled={saving}
+        />
 
         {loadFailed && (
           <p className="err" role="alert">

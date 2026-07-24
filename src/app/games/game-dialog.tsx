@@ -25,6 +25,8 @@ export function GameDialog({
   describedBy,
   alert = false,
   closeButton = true,
+  dirty = false,
+  className,
   onClose,
   children,
 }: {
@@ -69,11 +71,31 @@ export function GameDialog({
      부수 효과가 하나 있고 그게 파괴 확인에선 이득이다: 첫 포커서블이 X 에서 "취소"로 바뀌어
      열리자마자 **안전한 쪽**에 포커스가 선다. */
   closeButton?: boolean;
+  /* 저장 안 한 입력이 들어 있는가. true 면 **셸이 주는 닫기**(모서리 X·배경 클릭·Esc)가
+     곧바로 닫지 않고 확인을 되묻는다.
+
+     왜 셸의 닫기만인가: 배경 클릭과 Esc 는 **오조작으로 일어난다** — 날짜를 고르려다 카드
+     밖을 스치거나, 입력을 지우려고 Esc 를 눌렀는데 모달이 닫힌다. 그 자리에서 입력이 통째로
+     날아가는데 신호가 하나도 없었다(사용자 지적). 반면 본문의 「취소」·「뒤로」는 사용자가
+     그 결정을 고른 것이라 다시 묻는 게 성가심이다 — 그 둘은 부모가 closing 신호로 닫고,
+     이 가드를 거치지 않는다. 모서리 X 는 셸 쪽에 둔다: 뜻은 명확하지만 닫기 손잡이 중
+     유일하게 **좌표가 폼 바로 옆**이라 잘못 눌리는 경로가 실재한다.
+
+     판정은 호출자 몫이다 — 무엇이 "고친 것"인지는 폼마다 다르고(컴포저는 상세 단계에 들어온
+     것 자체가, 수정 모달은 열 때 읽은 값과의 차이가 기준이다) 셸은 children 안을 못 본다. */
+  dirty?: boolean;
+  /* 이 카드에 더 붙일 클래스. 폭(.composer--detail)과 **겹쳐 뜰 때의 스크림**
+     (.composer--stacked)이 지금의 용도다 — 뒤에 이미 열린 카드가 있으면 40% 잉크를 한 겹 더
+     깔 이유가 없다(가릴 페이지는 앞 카드가 이미 가렸고, 그 카드는 오히려 보여야 한다). */
+  className?: string;
   onClose: () => void;
   children: React.ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = odId + "-title";
+  /* 미저장 확인이 떠 있는가. 이 상태에서도 부모 dialog 는 열린 채다 — 사용자가 무엇을 잃는지
+     보이는 자리에 두고 묻는다. */
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -108,58 +130,167 @@ export function GameDialog({
   }
   /* 셸 자신의 닫기(모서리 X·배경 클릭)는 이벤트 핸들러라 ref 를 직접 만져도 된다.
      busy 면 아무것도 안 한다 — busy prop 주석의 인계 경쟁을 막는 잠금이다. 부모가 세우는
-     closing 신호는 이 잠금을 거치지 않는다(성공해서 닫는 길이라 경쟁이 없다). */
+     closing 신호는 이 잠금을 거치지 않는다(성공해서 닫는 길이라 경쟁이 없다).
+     dirty 면 닫는 대신 확인을 띄운다(dirty prop 주석). */
   const close = useCallback(() => {
     if (busy) return;
+    if (dirty) {
+      setConfirmingDiscard(true);
+      return;
+    }
     dialogRef.current?.close();
-  }, [busy]);
+  }, [busy, dirty]);
+
+  return (
+    <>
+      <dialog
+        className={className ? "composer paper " + className : "composer paper"}
+        ref={dialogRef}
+        role={alert ? "alertdialog" : undefined}
+        aria-labelledby={titleId}
+        aria-describedby={describedBy}
+        data-od-id={odId}
+        aria-busy={busy || undefined}
+        onClose={onClose}
+        /* Esc 는 close() 를 거치지 않고 UA 가 직접 닫는다 — cancel 을 막아야 잠금이 성립한다.
+           dirty 가드도 여기서 한 번 더 건다(같은 이유로 close() 를 안 거친다). */
+        onCancel={(e) => {
+          if (busy) {
+            e.preventDefault();
+            return;
+          }
+          if (dirty) {
+            e.preventDefault();
+            setConfirmingDiscard(true);
+          }
+        }}
+        onMouseDown={(e) => {
+          pressedOutside.current = isOutside(e);
+        }}
+        onClick={(e) => {
+          if (pressedOutside.current && isOutside(e)) close();
+          pressedOutside.current = false;
+        }}
+      >
+        {closeButton && (
+          <button
+            className="composer__close"
+            type="button"
+            aria-label="닫기"
+            disabled={busy}
+            onClick={close}
+          >
+            <svg aria-hidden="true" viewBox="0 0 16 16">
+              <path
+                d="M4 4l8 8M12 4l-8 8"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        )}
+
+        <div className="composer__body">
+          <h2 className="composer__title" id={titleId}>
+            {title}
+          </h2>
+          {children}
+        </div>
+      </dialog>
+
+      {confirmingDiscard && (
+        <DiscardConfirm
+          odId={odId}
+          onKeep={() => setConfirmingDiscard(false)}
+          onDiscard={() => {
+            setConfirmingDiscard(false);
+            dialogRef.current?.close();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/* 미저장 확인. 부모 카드 **위에** 겹쳐 뜬다 — 무엇을 잃는지 뒤에 보이는 채로 물어야 "이걸
+   닫는 게 맞나"를 판단할 수 있다. 중첩 showModal 은 브라우저가 top layer 스택으로 처리해
+   부모를 inert 로 만들고, 닫으면 포커스를 원래 자리로 되돌린다(직접 만든 오버레이는 이걸
+   더 나쁘게 재구현한다). 부모 dialog 의 **형제**로 렌더하는 건 마크업 중첩을 피하려는 것뿐
+   이고, 화면 위 순서는 top layer 가 정한다.
+
+   **합쇼체다.** 입력이 사라지는 건 되돌릴 수 없고, 그런 자리에서 장난기는 신뢰를 깎는다
+   (AGENTS 톤 규칙의 명시적 예외 — 삭제 확인과 같은 종류의 화면이다).
+
+   Esc 는 「계속 작성」과 같은 뜻으로 둔다(onClose → onKeep): 확인을 취소하는 안전한 쪽이고,
+   Esc 두 번으로 입력이 날아가면 이 가드가 있으나 마나다. */
+function DiscardConfirm({
+  odId,
+  onKeep,
+  onDiscard,
+}: {
+  odId: string;
+  onKeep: () => void;
+  onDiscard: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = odId + "-discard-title";
+  const hintId = odId + "-discard-hint";
+  /* 이 닫힘이 「닫기」를 눌러서인가. close 이벤트는 **동기가 아니라 큐**라(HTML 명세) 어느
+     버튼으로 닫았는지가 onClose 시점엔 남아 있지 않다 — 표시해 두지 않으면 「닫기」도
+     onKeep 을 한 번 태워 "계속 작성"과 "그만두기"가 같은 경로로 흐른다. */
+  const discarding = useRef(false);
+
+  useEffect(() => {
+    const d = ref.current;
+    // StrictMode 의 두 번째 셋업에서 이미 열린 dialog 에 showModal 을 다시 부르면 죽는다.
+    if (d && !d.open) d.showModal();
+  }, []);
 
   return (
     <dialog
-      className="composer paper"
-      ref={dialogRef}
-      role={alert ? "alertdialog" : undefined}
+      className="composer paper composer--confirm composer--stacked"
+      ref={ref}
+      role="alertdialog"
       aria-labelledby={titleId}
-      aria-describedby={describedBy}
-      data-od-id={odId}
-      aria-busy={busy || undefined}
-      onClose={onClose}
-      /* Esc 는 close() 를 거치지 않고 UA 가 직접 닫는다 — cancel 을 막아야 잠금이 성립한다. */
-      onCancel={(e) => {
-        if (busy) e.preventDefault();
-      }}
-      onMouseDown={(e) => {
-        pressedOutside.current = isOutside(e);
-      }}
-      onClick={(e) => {
-        if (pressedOutside.current && isOutside(e)) close();
-        pressedOutside.current = false;
+      aria-describedby={hintId}
+      data-od-id={odId + "-discard"}
+      onClose={() => {
+        if (!discarding.current) onKeep();
       }}
     >
-      {closeButton && (
-        <button
-          className="composer__close"
-          type="button"
-          aria-label="닫기"
-          disabled={busy}
-          onClick={close}
-        >
-          <svg aria-hidden="true" viewBox="0 0 16 16">
-            <path
-              d="M4 4l8 8M12 4l-8 8"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
-      )}
-
       <div className="composer__body">
         <h2 className="composer__title" id={titleId}>
-          {title}
+          저장하지 않고 닫으시겠습니까?
         </h2>
-        {children}
+        <p className="composer__hint" id={hintId}>
+          작성 중인 내용은 저장되지 않고 사라집니다.
+        </p>
+        <div className="composer__actions">
+          {/* 첫 포커서블이 안전한 쪽이 되게 「계속 작성」을 앞에 둔다(삭제 확인과 같은 규약). */}
+          <button
+            className="btn btn--secondary composer__btn"
+            type="button"
+            data-od-id={odId + "-discard-keep"}
+            onClick={() => ref.current?.close()}
+          >
+            계속 작성
+          </button>
+          <button
+            className="btn composer__btn composer__btn--danger"
+            type="button"
+            data-od-id={odId + "-discard-go"}
+            /* close() 로 UA 의 닫기 알고리즘을 태워야 포커스가 돌아간다 — 곧바로 언마운트하면
+               포커스가 body 로 떨어진다(부모 dialog 가 쓰는 규약과 같다). */
+            onClick={() => {
+              discarding.current = true;
+              ref.current?.close();
+              onDiscard();
+            }}
+          >
+            닫기
+          </button>
+        </div>
       </div>
     </dialog>
   );
@@ -222,17 +353,24 @@ export function PlayedDateField({
   }
 
   /* 이미 걸린 항목이 있으면 비우기의 뜻이 "모름"이 아니라 **연결 해제**다 — 그 행은 일정에
-     남고 이 게임과의 연결만 풀린다(service.updateGame). 새 게임엔 풀 연결이 없어 "모르면
-     비워 둬요"가 그대로 맞다. 같은 빈 칸이 두 뜻을 가지므로 라벨이 그걸 말해야 한다. */
+     남고 이 게임과의 연결만 풀린다(service.updateGame). 같은 빈 칸이 두 뜻을 가지므로
+     그 사실은 화면이 말해야 한다. */
   const hasEntry = dates !== null && dates.length === 1;
+  const hintId = idPrefix + "-played-hint";
 
+  /* 그 설명이 한때 **라벨 괄호 안**에 있었다("플레이한 날 (모르면 비워 둬요)"). 두 가지가
+     겹쳐 있었다: 라벨은 11px 대문자 간격의 필드 이름 자리라 문장을 담으면 읽는 리듬이 깨지고,
+     스크린리더는 그 전체를 입력의 접근 이름으로 낭독한다("플레이한 날 괄호 모르면 비워 둬요").
+     이름과 설명을 갈라 라벨엔 이름만 남기고 설명은 aria-describedby 로 잇는다.
+
+     새 게임의 "몰라도 된다"는 여기 안 적는다 — 폼 상단 안내가 날짜 둘을 한 번에 말한다.
+     선택 입력임을 필드마다 되풀이하면 그게 소음이고, 연결 해제처럼 **상황에 따라 달라지는
+     사실**만 필드 옆에 붙을 값이 있다. */
   return (
-    <label className="datefield">
-      <span className="datefield__label">
-        {hasEntry
-          ? "플레이한 날 (비우면 일정에서 연결만 풀려요)"
-          : "플레이한 날 (모르면 비워 둬요)"}
-      </span>
+    <div className="datefield">
+      <label className="datefield__label" htmlFor={idPrefix + "-played"}>
+        플레이한 날
+      </label>
       <input
         className="field"
         type="date"
@@ -240,9 +378,15 @@ export function PlayedDateField({
         id={idPrefix + "-played"}
         data-od-id={idPrefix + "-played"}
         disabled={disabled || dates === null}
+        aria-describedby={hasEntry ? hintId : undefined}
         onChange={(e) => onChange(e.target.value)}
       />
-    </label>
+      {hasEntry && (
+        <p className="datefield__hint" id={hintId}>
+          비우면 일정에서 이 게임과의 연결만 풀려요.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -256,12 +400,15 @@ export function ClearedFields({
   onChange,
   idPrefix,
   firstFieldRef,
+  disabled = false,
 }: {
   draft: ClearedDraft;
   onChange: (next: ClearedDraft) => void;
   idPrefix: string;
   // 모달 오픈 시 포커스를 여기로 옮기려는 호출자를 위한 손잡이(체크박스가 첫 조작점).
   firstFieldRef?: React.Ref<HTMLInputElement>;
+  // 서버 쓰기가 날아가는 동안 잠근다 — 그 사이 고친 값은 어차피 이번 저장에 안 실린다.
+  disabled?: boolean;
 }) {
   return (
     <div className="clearfields">
@@ -271,6 +418,7 @@ export function ClearedFields({
           checked={draft.cleared}
           id={idPrefix + "-cleared"}
           ref={firstFieldRef}
+          disabled={disabled}
           data-od-id={idPrefix + "-cleared"}
           // 체크를 풀면 날짜도 비운다 — 안 깬 게임에 클리어 날짜가 남지 않게(CHECK 의 UI 짝).
           onChange={(e) =>
@@ -282,17 +430,21 @@ export function ClearedFields({
         <span className="clearfields__togglelabel">클리어했어요</span>
       </label>
       {draft.cleared && (
-        <label className="datefield">
-          <span className="datefield__label">클리어한 날 (모르면 비워 둬요)</span>
+        // 라벨엔 이름만 — "모르면 비워 둬요"를 뺀 근거는 PlayedDateField 주석에 있다.
+        <div className="datefield">
+          <label className="datefield__label" htmlFor={idPrefix + "-date"}>
+            클리어한 날
+          </label>
           <input
             className="field"
             type="date"
             value={draft.clearedDate}
             id={idPrefix + "-date"}
             data-od-id={idPrefix + "-date"}
+            disabled={disabled}
             onChange={(e) => onChange({ ...draft, clearedDate: e.target.value })}
           />
-        </label>
+        </div>
       )}
     </div>
   );
