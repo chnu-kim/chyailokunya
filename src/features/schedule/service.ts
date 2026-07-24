@@ -157,16 +157,28 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const publishedAt = input.published ? (existing?.publishedAt ?? now) : null;
 
-  /* ── 1단계: 청구(claim) — revision 만 원자적으로 잡는다 ────────────────────────────
+  /* ── 1단계: 청구(claim) ───────────────────────────────────────────────────────────
      revision 이 있으면 UPDATE … WHERE last_updated_at = revision(그 주가 안 바뀌었을 때만 매치),
      null 이면 INSERT … onConflictDoNothing(그 사이 아무도 안 만들었을 때만). 어느 쪽이든 0행이면
-     그 사이 누가 손댄 것이라 CONFLICT. **note·publishedAt 은 안 쓴다** — null 청구는 빈 초안
-     placeholder(note·published null)만 만들고, 진짜 메타는 2단계가 쓴다. */
+     그 사이 누가 손댄 것이라 CONFLICT.
+
+     **두 경로가 published_at 을 다루는 방식이 반대인 게 핵심이다.**
+     - 기존 주(revision 있음): published_at 을 **안 건드린다**(revision 만 단조 증가). 이미 값이
+       있는데 실패한 저장이 그걸 바꾸면 발행 경계를 넘는다 — 그래서 진짜 값은 2단계 batch 에서만
+       원자적으로 쓴다(round-4 에서 이렇게 닫았다).
+     - 새/레거시 주(revision null): 행이 **없어서** 문제가 반대다. 이관된 레거시 주는 "메타 행
+       부재 = 표시"가 정본인데(ADR-0022), 청구가 published_at NULL 인 빈 placeholder 를 만들면
+       그 주가 draft(숨김)로 뒤집힌다 — 청구 뒤 batch 가 실패하면 과거 플레이 날짜가 사라진다
+       (적대적 리뷰가 잡은 자리). 그래서 null 청구는 **의도한 메타(note·published_at)를 담아**
+       만든다: 레거시 편집의 기본값은 발행(hasMeta 없음 → published=true, 편집기)이라 청구가
+       published 행을 만들어, 실패해도 그 주 항목이 계속 보드에 뜬다(손실 0 유지). 관리자가
+       발행을 명시적으로 내린 경우엔 숨김이 곧 의도라 그대로 둔다. 여기서 published_at 을 담아도
+       round-4 문제가 안 도지는 건, 바꿀 기존 값이 없기 때문이다(생성이지 변경이 아니다). */
   const claimed =
     input.revision === null
       ? await db
           .insert(scheduleWeeks)
-          .values({ weekStartDate: input.weekStartDate })
+          .values({ weekStartDate: input.weekStartDate, note: input.note, publishedAt })
           .onConflictDoNothing({ target: scheduleWeeks.weekStartDate })
           .returning({ id: scheduleWeeks.id })
       : await db
