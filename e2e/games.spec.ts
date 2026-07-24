@@ -101,6 +101,79 @@ test("게임: 카드를 열면 날짜·클리어가 상세에 뜬다(로그아�
   await expect(detail.locator('[data-od-id="detail-played"]')).toHaveText("아직 없어요");
 });
 
+/* 상세는 히스토리 엔트리 하나를 차지한다(이슈 #65). 안 그러면 모바일 하드웨어 뒤로가기·iOS
+   스와이프가 모달이 아니라 **페이지를 통째로 떠난다** — 사용자가 실제로 겪은 결함이고, 이
+   배선은 브라우저 히스토리에 걸려 있어 단위 테스트로는 재현이 안 된다.
+
+   `/` 를 먼저 들르는 이유: 떠날 곳이 있어야 "떠났다"가 관찰된다. 히스토리에 /games 하나뿐이면
+   뒤로가기가 아무 데도 안 가서, 배선이 통째로 없어도 이 스펙이 초록으로 통과한다. */
+test("게임: 뒤로가기는 페이지가 아니라 상세를 닫는다 · 직접 닫으면 엔트리가 안 남는다", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.goto("/games");
+
+  await openCard(page, "엘든 링");
+  const detail = page.locator('dialog[data-od-id="game-detail"]');
+  await expect(detail).toBeVisible();
+  /* **주소는 안 바뀐다.** 딥링크를 안 열기로 한 결정이라(#65) /games/1 같은 주소가 생기면
+     거짓말이 된다 — 그 주소를 새로고침해도 상세가 없다. */
+  await expect(page).toHaveURL(/\/games$/);
+
+  // 뒤로가기 한 번: 모달만 닫히고 보드는 그대로다.
+  await page.goBack();
+  await expect(detail).toHaveCount(0);
+  await expect(page).toHaveURL(/\/games$/);
+  await expect(page.getByRole("heading", { level: 1, name: "플레이한 게임" })).toBeVisible();
+  /* 포커스가 누른 카드로 돌아온다. 뒤로가기로 닫을 때 상세를 곧장 언마운트하면 dialog 가
+     열린 채 DOM 에서 빠져 포커스가 body 로 떨어진다 — 키보드 사용자가 탭 순서 맨 앞으로
+     튕기고, 그 회귀는 화면상 아무 표시도 안 난다. 닫기 신호를 태워 브라우저의 dialog 닫기
+     알고리즘을 거치게 한 이유가 이것이다(game-board 의 detailClosing). */
+  await expect(page.locator('[data-od-id="game-open-1"]')).toBeFocused();
+
+  /* 반대 방향: 사용자가 **직접** 닫았으면 쌓아 둔 엔트리를 되돌려야 한다. 안 되돌리면 빈
+     엔트리가 남아 그다음 뒤로가기가 아무 일도 안 한 것처럼 보인다 — 여기선 `/` 로 못 나가는
+     모습으로 드러난다. */
+  await openCard(page, "엘든 링");
+  await expect(detail).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+/* 겹친 모달이 떠 있는 동안의 뒤로가기. **아무것도 안 닫고 엔트리만 다시 쌓는 게 결정이다** —
+   상세만 닫으면 위 모달이 돌아갈 자리를 잃고, 위까지 닫으면 뒤로가기 한 번이 셸의 잠금
+   둘(미저장 확인·쓰기 중 잠금)을 통째로 우회한다(game-board 의 popstate 주석).
+
+   **읽기 전용이다**: 폼을 열어 보기만 하고 저장을 안 누른다 — 공유 픽스처를 안 흔든다. */
+test("관리자: 수정이 겹쳐 뜬 동안엔 뒤로가기가 페이지를 안 떠난다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+  await page.goto("/games");
+  await expectSignedIn(page);
+
+  await openCard(page, "리틀 나이트메어");
+  const detail = page.locator('dialog[data-od-id="game-detail"]');
+  await page.locator('[data-od-id="game-edit-3"]').click();
+  const editor = page.locator('dialog[data-od-id="game-editor"]');
+  // 조회가 끝나기 전에 뒤로가기를 던지면 무엇이 열려 있는지가 흐려진다 — 뜬 걸 보고 시작한다.
+  await expect(page.locator('[data-od-id="editor-played"]')).toHaveValue("2026-04-11");
+
+  await page.goBack();
+  // 세 가지가 전부 그대로다: 페이지 · 아래 상세 · 위 수정 폼.
+  await expect(page).toHaveURL(/\/games$/);
+  await expect(detail).toBeVisible();
+  await expect(editor).toBeVisible();
+
+  /* 덫이 아니라 유예다 — 위를 닫으면 그다음 뒤로가기가 정상으로 돈다. 이 단언이 없으면
+     "뒤로가기를 영영 삼킨다"는 회귀가 위 단언만으로는 초록이다. */
+  await page.locator('[data-od-id="game-editor-cancel"]').click();
+  await expect(editor).toHaveCount(0);
+  await page.goBack();
+  await expect(detail).toHaveCount(0);
+  await expect(page).toHaveURL(/\/games$/);
+});
+
 /* 여러 날 편성 게임의 저장. **서버 단위 테스트로는 못 잡는 자리다** — 계약("playedDate 를 안
    실으면 일정을 안 건드린다")은 라우터 테스트가 덮지만, 폼이 그 계약을 지키는지는 실제 제출
    페이로드를 태워야 안다. 초판이 정확히 거기서 깨졌다: 잠긴 폼이 빈 문자열을 실었고 그게 null

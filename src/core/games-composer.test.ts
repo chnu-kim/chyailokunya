@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  composerActiveOption,
+  composerOptionCount,
   composerReducer,
+  composerResultIndex,
   composerStep,
   initialComposerState,
   showsDirectEntry,
   type ComposerAction,
+  type ComposerActiveMove,
   type ComposerState,
 } from "./games-composer";
 import type { ChzzkCategory } from "./games";
@@ -247,5 +251,137 @@ describe("직접 입력 항목", () => {
       posterImageUrl: null,
     });
     expect(composerStep(s)).toBe("detail");
+  });
+});
+
+/* 콤보박스의 키보드 커서(activeIndex). 이 규칙들이 리듀서에 사는 이유는 상태 정의 주석에 있고,
+   여기가 그 정본이다 — 화면에선 커서가 틀려도 조용하다(aria-activedescendant 는 IDREF 라
+   없는 id 를 가리켜도 예외가 안 난다). 그래서 "결과가 갈리면 접힌다"는 눈으로는 못 지킨다. */
+describe("결과 목록의 키보드 커서", () => {
+  const move = (to: ComposerActiveMove): ComposerAction => ({ type: "activeMoved", to });
+  const point = (index: number): ComposerAction => ({ type: "activeSet", index });
+  /* 검색어와 정확히 같은 이름이 없는 목록 — 직접 추가가 마지막 줄로 붙어 항목이 4개다.
+     커서 규칙은 그 줄까지 포함해야 하므로 기본 픽스처를 이쪽으로 잡는다. */
+  const four = searched("게임", [zelda, mario, minecraft]);
+  // 정확히 같은 이름이 있어 직접 추가가 감춰진 목록 — 항목은 결과 2개뿐이다.
+  const two = searched("젤다", [zelda, mario]);
+
+  it("열자마자는 아무것도 안 가리킨다", () => {
+    expect(initialComposerState.activeIndex).toBe(-1);
+    expect(composerActiveOption(initialComposerState)).toBeNull();
+  });
+
+  it("직접 추가 줄이 목록의 첫 인덱스다(과제 D) — 화면과 같은 인덱스 공간이어야 한다", () => {
+    const s = run(...four);
+    expect(composerOptionCount(s)).toBe(4);
+    // 맨 위로 옮기며 인덱스도 0 이 됐다 — 시각 순서(맨 위)와 키보드 순서(첫 인덱스)가 맞아야
+    // 아무것도 안 가리키던 상태에서 ↓ 한 번이 화면 첫 줄을 그대로 잡는다.
+    expect(composerActiveOption(run(...four, move("first")))).toBe("direct");
+    // 감춰지면 밀림 없이 결과 그대로다.
+    expect(composerOptionCount(run(...two))).toBe(2);
+    expect(composerActiveOption(run(...two, move("last")))).toEqual(mario);
+  });
+
+  it("결과 인덱스는 직접 추가가 보일 때만 한 칸씩 밀린다", () => {
+    const shown = run(...four); // "게임" 은 결과 어느 것과도 정확히 안 겹쳐 직접 추가가 뜬다.
+    expect(composerResultIndex(shown, 0)).toBe(1);
+    expect(composerResultIndex(shown, 2)).toBe(3);
+
+    const hidden = run(...two); // "젤다" 는 zelda 와 정확히 겹쳐 직접 추가가 감춰진다.
+    expect(composerResultIndex(hidden, 0)).toBe(0);
+    expect(composerResultIndex(hidden, 1)).toBe(1);
+  });
+
+  it("↓ 는 첫 항목(직접 추가)부터 차례로 내려간다", () => {
+    expect(run(...four, move("next")).activeIndex).toBe(0);
+    expect(composerActiveOption(run(...four, move("next")))).toBe("direct");
+    expect(run(...four, move("next"), move("next")).activeIndex).toBe(1);
+    expect(composerActiveOption(run(...four, move("next"), move("next")))).toEqual(zelda);
+  });
+
+  it("끝(마지막 결과)에서 ↓ 는 처음(직접 추가)으로 돈다", () => {
+    expect(run(...four, move("last"), move("next")).activeIndex).toBe(0);
+    expect(composerActiveOption(run(...four, move("last"), move("next")))).toBe("direct");
+  });
+
+  it("아무것도 안 가리킬 때 ↑ 는 마지막 결과로 들어간다 — 직접 추가는 이미 첫 줄이라 ↓ 한 번으로 닿는다", () => {
+    expect(run(...four, move("prev")).activeIndex).toBe(3);
+    expect(composerActiveOption(run(...four, move("prev")))).toEqual(minecraft);
+    expect(run(...four, move("first"), move("prev")).activeIndex).toBe(3);
+  });
+
+  it("Home·End 는 처음·마지막", () => {
+    expect(run(...four, move("last"), move("first")).activeIndex).toBe(0);
+    expect(run(...four, move("first"), move("last")).activeIndex).toBe(3);
+  });
+
+  it("해제(Esc)는 커서만 접는다 — 목록·검색어는 그대로다", () => {
+    const s = run(...four, move("next"), move("none"));
+    expect(s.activeIndex).toBe(-1);
+    expect(s.results).toHaveLength(3);
+    expect(s.query).toBe("게임");
+  });
+
+  it("목록이 비어 있으면 어느 방향도 커서를 안 세운다", () => {
+    const empty = run({ type: "queryChanged", query: "젤다" });
+    for (const to of ["next", "prev", "first", "last"] as const) {
+      expect(composerReducer(empty, move(to)).activeIndex).toBe(-1);
+    }
+  });
+
+  it("포인터는 절대 인덱스로 커서를 옮기고, 범위 밖은 무시한다", () => {
+    expect(run(...four, point(2)).activeIndex).toBe(2);
+    // 목록이 갈리는 프레임에 뒤늦게 온 mousemove — 그 인덱스의 id 는 이미 DOM 에 없다.
+    expect(run(...four, point(4)).activeIndex).toBe(-1);
+    expect(run(...four, move("next"), point(-1)).activeIndex).toBe(0);
+  });
+
+  it("같은 자리를 다시 가리키면 같은 상태 객체다 — mousemove 가 렌더를 못 돌린다", () => {
+    const s = run(...four, point(1));
+    expect(composerReducer(s, point(1))).toBe(s);
+    expect(composerReducer(s, move("none"))).not.toBe(s);
+  });
+
+  /* 3번째를 가리킨 채 결과가 짧아지면 커서가 없는 항목을 가리키고, 그 순간
+     aria-activedescendant 는 DOM 에 없는 id 를 든다 — 낭독이 조용해지는 것 말고는 신호가 없다. */
+  it("결과가 갱신되면 커서가 접힌다", () => {
+    const s = run(...four, move("last"), {
+      type: "searchSucceeded",
+      query: "게임",
+      results: [zelda],
+    });
+    expect(s.activeIndex).toBe(-1);
+    expect(composerActiveOption(s)).toBeNull();
+  });
+
+  it("검색어를 고치면 접힌다 — 목록이 통째로 비므로 가리킬 행이 없다", () => {
+    expect(run(...four, move("next"), { type: "queryChanged", query: "게임2" }).activeIndex).toBe(
+      -1,
+    );
+  });
+
+  it("검색이 실패해도 접힌다 — 결과가 비워지는 길은 여기도 마찬가지다", () => {
+    const s = run(...four, move("next"), {
+      type: "searchFailed",
+      query: "게임",
+      message: "검색에 실패했어요.",
+    });
+    expect(s.activeIndex).toBe(-1);
+  });
+
+  it("늦게 온 응답은 커서를 안 건드린다 — 버려진 응답이 화면 커서를 흔들면 안 된다", () => {
+    const s = run(...two, move("next"), { type: "searchSucceeded", query: "zzz", results: [] });
+    expect(s.activeIndex).toBe(0);
+    expect(composerActiveOption(s)).toEqual(zelda);
+  });
+
+  it("게임을 고르면 접히고 뒤로 돌아와도 안 살아난다 — 남으면 '이미 고른 행'으로 읽힌다", () => {
+    const picked = run(...two, move("next"), pick(zelda));
+    expect(picked.activeIndex).toBe(-1);
+    expect(composerReducer(picked, { type: "back" }).activeIndex).toBe(-1);
+  });
+
+  it("직접 추가로 넘어가도 접힌다", () => {
+    expect(run(...four, move("last"), { type: "manualPicked" }).activeIndex).toBe(-1);
   });
 });
