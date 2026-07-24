@@ -2,13 +2,14 @@
 
    왜 UI 파일에서 빼냈나: 컴포저의 위험은 그리기가 아니라 **단계 사이의 상태 이월**이다.
    "결과 클릭은 선택일 뿐"·"뒤로 가도 결과 목록은 남는다"·"수동 입력 비상구는 결과 0건일
-   때만"·"선택이 바뀌면 날짜는 따라오지 않는다" — 넷 다 렌더가 아니라 전이 규칙이고, 이
-   저장소의 테스트 러너는 workerd(DOM 없음)라 전이를 컴포넌트째로는 못 잡는다. 전이만
-   순수 모듈로 내리면 기존 게이트가 그대로 회귀를 막는다(ADR-0010 의 JIT 추상화).
+   때만" — 셋 다 렌더가 아니라 전이 규칙이고, 이 저장소의 테스트 러너는 workerd(DOM 없음)라
+   전이를 컴포넌트째로는 못 잡는다. 전이만 순수 모듈로 내리면 기존 게이트가 그대로 회귀를
+   막는다(ADR-0010 의 JIT 추상화).
 
-   컴포저는 한 번 마운트된 채 여러 게임을 거치는 유일한 화면이다 — 날짜 수정 모달은 editing
-   이 null 을 거쳐 매번 리마운트되므로 이월이 구조적으로 불가능하다. 그 차이가 이 파일의
-   존재 이유다. */
+   한때 이 리듀서의 핵심 위험은 **날짜 이월**이었다("게임 A 에 넣은 날짜가 B 의 상세에 남는다").
+   플레이 날짜가 일정 정본으로 옮겨가며(이슈 #56) 컴포저의 날짜 단계가 사라져 그 위험째 없어졌다
+   — 이제 상세 단계는 고른 게임을 확인하고 추가하는 자리일 뿐이고, 클리어는 추가 뒤 편집 모달에서
+   붙인다. 남은 이월 규칙은 선택·결과·비상구 셋이다. */
 
 import type { ChzzkCategory } from "./games";
 
@@ -19,12 +20,6 @@ export type ComposerSelection = {
   posterImageUrl: string | null;
 };
 
-export type DatePair = { playedAt: string; clearedAt: string };
-
-/* 빈 날짜 한 쌍. "모름"의 표현은 빈 문자열 하나뿐이어야 한다 — 서버 dateInput 이 이걸
-   null 로 접는다(중복 정규화 금지). */
-export const EMPTY_DATES: DatePair = { playedAt: "", clearedAt: "" };
-
 export type ComposerState = {
   query: string;
   results: ChzzkCategory[];
@@ -32,7 +27,6 @@ export type ComposerState = {
      없음"이 구분되지 않아, 열자마자 수동 입력 비상구가 뜬다. */
   searched: boolean;
   selected: ComposerSelection | null;
-  dates: DatePair;
   /* 검색 단계의 에러 문구. 리듀서 밖 useState 로 두면 단계 전이와 어긋난다 — 검색 응답을
      기다리는 사이 옛 결과를 눌러 상세로 넘어간 뒤 검색이 실패하면, 검색 실패 문구가 상세의
      에러 자리에 떠 「추가」가 실패한 것처럼 읽힌다. 단계 전이가 리듀서 소관이면 그 단계에
@@ -52,7 +46,6 @@ export const initialComposerState: ComposerState = {
   results: [],
   searched: false,
   selected: null,
-  dates: EMPTY_DATES,
   searchError: "",
   staleDropped: false,
 };
@@ -72,7 +65,6 @@ export type ComposerAction =
   | { type: "searchFailed"; query: string; message: string }
   | { type: "picked"; selection: ComposerSelection }
   | { type: "manualPicked" }
-  | { type: "datesChanged"; dates: DatePair }
   | { type: "back" };
 
 /* 이 검색 응답을 버려야 하는가. 둘 중 하나면 버린다:
@@ -133,16 +125,9 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
       };
 
     case "picked":
-      /* 선택이 바뀌면 날짜는 **반드시** 초기화한다. 컴포저는 한 번 마운트된 채 뒤로/선택을
-         오가므로, 안 비우면 게임 A 에 넣은 날짜가 게임 B 의 상세 화면에 그대로 남는다 —
-         포스터·제목만 바뀌고 날짜는 이미 시선이 지나간 자리라, 그대로 「추가」를 누르면
-         B 가 A 의 날짜로 저장된다. 서버 Zod 는 형식·순서만 보므로 통과하고, 틀린 날짜가
-         보드 정렬까지 바꾼다. 같은 게임을 다시 고른 경우까지 한 규칙으로 덮으려고
-         "뒤로"가 아니라 여기서 비운다. */
       return {
         ...state,
         selected: action.selection,
-        dates: EMPTY_DATES,
         searchError: "",
         staleDropped: false,
       };
@@ -156,18 +141,13 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
           categoryValue: state.query.trim(),
           posterImageUrl: null,
         },
-        dates: EMPTY_DATES,
         searchError: "",
         staleDropped: false,
       };
 
-    case "datesChanged":
-      return { ...state, dates: action.dates };
-
     case "back":
       /* results 를 그대로 두어야 잘못 고른 뒤 다시 검색어를 치지 않고 목록에서 옆 항목을
-         고를 수 있다. 날짜도 여기서 비운다 — picked 가 어차피 다시 비우지만, 뒤로 간
-         상태에서 화면에 남은 값이 없어야 "이건 아직 아무 게임의 날짜도 아니다"가 참이다. */
+         고를 수 있다. */
       /* searchError 도 함께 비운다 — picked 가 이미 비웠고 상세 단계에선 검색 응답을 통째로
          무시하니 실제로는 늘 빈 값이지만, "검색 단계로 돌아온 화면에 옛 에러가 없다"를
          이 액션 하나로 보장해 두면 나중에 경로가 늘어도 불변식이 안 새어 나간다. */
@@ -176,7 +156,6 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
       return {
         ...state,
         selected: null,
-        dates: EMPTY_DATES,
         searchError: "",
         staleDropped: false,
       };

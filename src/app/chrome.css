@@ -704,6 +704,31 @@ h2.t-script {
 .foot a {
   color: var(--fg-on-brown);
 }
+/* 푸터 사이트맵. 상단 nav 에 아직 없는 페이지(일정)의 유일한 링크 진입점이라 여기 산다
+   (routes.ts). 색은 .foot a 와 같은 --fg-on-brown — 브라운 위 5.67:1 로 ≥14px 본문 4.5 를
+   넘긴다(위 .foot small 주석의 계산과 같은 자리). 포커스 링은 전역 :focus-visible 이 맡는다.
+   min-height 44 로 터치 하한을 세운다 — 세로만 세우고 폭은 padding 으로 벌린다(§4 규율). */
+.foot__nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.foot__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-on-brown);
+  text-decoration: none;
+  border-radius: var(--radius-xs);
+}
+.foot__link:hover {
+  text-decoration: underline;
+}
 /* opacity 를 걸지 않는다 — .8 이면 --fg-on-brown 이 브라운 위에서 합성돼 4.31 로
    떨어지는데 이 줄은 11px 라 4.5 를 넘겨야 한다. 색 자체론 5.67 이라 통과한다. */
 .foot small {

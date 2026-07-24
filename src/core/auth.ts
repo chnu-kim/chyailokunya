@@ -28,7 +28,13 @@ export function shouldBootstrapSuperadmin(
    `/api/auth/login`(리다이렉트 루프)·없는 경로(로그인 성공 직후 404). 목록 대조는 둘 다 막는다.
    허용목록을 버리고 파서 검사로 갈아탈 땐 이 내부 목적지들을 따로 막아야 한다.
 
-   쿼리스트링·프래그먼트는 통째로 버린다: 세 페이지 다 URL 에 상태를 두지 않아 보존할 게 없다. */
+   쿼리스트링·프래그먼트는 통째로 버린다. **이젠 "보존할 게 없어서"가 아니다** — `/schedule` 은
+   보고 있는 주를 `?week=` 에 담는다(이슈 #56). 그래서 과거·미래 주를 보다 로그인하면 그 주가
+   아니라 이번 주로 돌아온다. 알고 감수하는 손실이다: 되살리려면 nav 가 현재 쿼리까지 실어
+   보내야 하는데(`usePathname` 은 경로만 준다) 공유 크롬에서 `useSearchParams` 를 쓰면 정적
+   렌더 경계(Suspense)가 딸려 오고, 그 대가가 "주 이동 한 번"이라는 손실보다 크다. 되살릴 땐
+   여기서 임의 쿼리를 통과시키지 말고 **검증된 값으로 문자열을 다시 조립**한다 — 위 문단의
+   "공격자 바이트가 출력에 한 글자도 닿지 않는다"가 이 함수의 성질이고, 그건 지켜야 한다. */
 export function safeReturnTo(raw: string | null | undefined, allowed: readonly string[]): string {
   const candidate = (raw ?? "").trim();
   return allowed.includes(candidate) ? candidate : "/";

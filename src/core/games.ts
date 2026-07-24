@@ -1,39 +1,34 @@
-/* 게임 보드 도메인 — 순수 로직(HTTP·DB·React 무관). 날짜 값 객체(YYYY-MM-DD)·카드 회전/
-   패턴 해시, 그리고 치지직 category → games 매핑을 담는다.
+/* 게임 보드 도메인 — 순수 로직(HTTP·DB·React 무관). 클리어 상태·카드 회전/패턴 해시,
+   그리고 치지직 category → games 매핑을 담는다.
 
-   상태(STATUS/statusOf/isStatus)는 제거됐다 — 별도 컬럼으로 두면 날짜와 어긋난 상태
-   ("클리어인데 cleared_at 이 null")가 저장 가능해진다. 이제 정본은 날짜 두 개뿐이고
-   "클리어했나"는 clearedAt !== null 로 유도한다.
+   상태(STATUS/statusOf/isStatus)는 제거됐다 — 별도 컬럼으로 두면 날짜와 어긋난 상태가
+   저장 가능해진다. 플레이 날짜의 정본은 이제 일정(schedule_entries)이고, 보드는 그 항목의
+   MAX(scheduled_date)로 유도한다(이슈 #56 결정 3·17). 클리어만 게임 자체의 사실로 남아
+   여기 산다 — cleared 플래그(정본) + 선택적 cleared_date.
 
    localStorage 시대의 coerce/parseGames/seeds 는 제거됐다 — D1(서버 권위)이 목록의 정본이
    되면서(ADR-0014·이슈 #5) "신뢰하지 않는 문자열을 배열로 강제 변환"하던 경계가 서버 입력
    검증(Zod, features/games/schema)으로 옮겨갔다. 이 파일엔 UI 가 쓰는 순수 표시 로직만 남는다. */
 
-/* ── 날짜(YYYY-MM-DD) ────────────────────────────────────────────────────────
-   played_at·cleared_at 은 "달력의 하루"지 시각이 아니다. epoch ms 로 두면 저장·표시
-   양쪽에서 타임존이 개입해 KST 자정 근처의 하루가 밀린다 — 텍스트 'YYYY-MM-DD' 로
-   저장하면 저장은 타임존 무관이 되고, 타임존은 "오늘이 며칠인가"(입력 기본값)에서만
-   한 번 고려하면 된다. 상태(status)는 이 두 날짜에서 유도되므로 컬럼을 없앴다. */
+/* ── 클리어 상태 ─────────────────────────────────────────────────────────────
+   cleared_date 는 "달력의 하루"지 시각이 아니다. epoch ms 로 두면 저장·표시 양쪽에서
+   타임존이 개입해 KST 자정 근처의 하루가 밀린다 — 텍스트 'YYYY-MM-DD' 로 저장하면 저장은
+   타임존 무관이 되고, 타임존은 "오늘이 며칠인가"(입력 기본값)에서만 한 번 고려하면 된다.
 
-/* 날짜 형식 검증(isDateString)이 여기 있었다 — core/calendar.ts::isIsoDate 로 옮겼다.
-   일정(schedule_entries)이 서면서 같은 판정을 하는 함수가 둘이 되는데, 검증이 둘이면
-   한쪽만 엄해질 때 "어느 게 정본인가"가 코드 밖에 남는다. 실제로 Temporal 판정이 더
-   엄하다: 옛 Date 왕복은 '2026-07-20T00:00:00Z' 같은 확장 표기를 정규식 앞단에서만
-   걸렀지만, 달력 계산이 붙은 지금은 그 형태가 정렬(사전순 = 시간순)까지 깬다.
-   todayKST 도 거기 있다 — 여기선 호출자가 없어 지웠던 함수인데, 일정의 "이번 주"
-   기본값이 첫 프로덕션 호출자가 된다(ADR-0010 의 JIT 이 뒤늦게 값을 낸 자리). */
+   날짜 형식 검증(isDateString)은 core/calendar.ts::isIsoDate 로 옮겼다 — 일정과 게임이 같은
+   판정을 나눠 쓰면 정본이 코드 밖에 남는다(Temporal 판정이 더 엄해 확장 표기를 거절한다). */
 
 // 표시용: '2026-07-20' → '2026.07.20'. 구 사이트의 점 구분 표기를 잇는다.
 export function formatDate(date: string): string {
   return date.replaceAll("-", ".");
 }
 
-/* 클리어가 플레이보다 앞설 수는 없다. 한쪽이 null 이면(플레이 없이 클리어만 아는
-   경우 포함) 비교할 게 없으니 참이다. 'YYYY-MM-DD' 는 사전순 = 시간순이라 문자열
-   비교로 충분하다. */
-export function isDateOrderValid(playedAt: string | null, clearedAt: string | null): boolean {
-  if (playedAt === null || clearedAt === null) return true;
-  return clearedAt >= playedAt;
+/* 클리어 상태의 정합성 — DB CHECK(cleared = 1 OR cleared_date IS NULL)의 도메인 짝이다.
+   안 깬 게임에 클리어 날짜가 붙는 모순만 막는다: cleared 가 false 인데 날짜가 있으면 거짓.
+   깬 채 날짜가 null("깼는데 날짜 모름", 할로우 나이트)은 참 — 그 표현을 살리려고 플래그를
+   날짜와 독립으로 뒀기 때문이다. 플레이 날짜는 일정 정본으로 옮겨가 여기서 비교하지 않는다. */
+export function isClearedStateValid(cleared: boolean, clearedDate: string | null): boolean {
+  return cleared || clearedDate === null;
 }
 
 /* 기울기·종이결·썸네일 패턴은 카드의 정체성이지 목록 위치가 아니다. 인덱스로 고르면

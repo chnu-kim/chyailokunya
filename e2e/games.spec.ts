@@ -29,9 +29,9 @@ test("게임: D1 에서 읽어 렌더 · 날짜 표시", async ({ page }) => {
   await expect(little).toContainText("2026.04.11 플레이");
   await expect(little.getByText("클리어")).toBeVisible();
 
-  // 플레이한 날 없이 클리어만 아는 행 — 카드에 뜨는 날짜는 플레이한 날뿐이라 날짜 줄이 아예
-  // 없고, 클리어 사실은 칩이 홀로 맡는다. 클리어한 날(2026-05-02)은 어디에도 안 나온다 —
-  // 정렬 축이 아닌 날짜를 카드에 실으면 순서가 어긋나 보이기 때문이다.
+  // 플레이 일정이 없이 클리어만 아는 행 — 카드에 뜨는 날짜는 유도된 플레이 날짜뿐이라 일정이
+  // 없으면 날짜 줄이 아예 없고, 클리어 사실은 칩이 홀로 맡는다. 클리어한 날(2026-05-02)은
+  // 어디에도 안 나온다 — 정렬 축이 아닌 날짜를 카드에 실으면 순서가 어긋나 보이기 때문이다.
   // (줄 자체는 칩을 담아야 하므로 남는다 — 사라지는 건 날짜 텍스트다.)
   const hollow = page.locator(CARDS).filter({ hasText: "할로우 나이트" });
   await expect(hollow.locator(".game__date")).toHaveCount(0);
@@ -43,9 +43,9 @@ test("게임: D1 에서 읽어 렌더 · 날짜 표시", async ({ page }) => {
   await expect(manual).toBeVisible();
   await expect(manual.locator('[data-od-id^="game-when-"]')).toHaveCount(0);
 
-  // 정렬: 플레이한 날 내림차순, played_at 이 null 인 행은 뒤 그룹에서 created_at 내림차순.
-  // 할로우 나이트는 클리어한 날이 있어도 played_at 이 null 이라 뒤 그룹이다 — 클리어 날짜는
-  // 정렬 축이 아니라는 규칙이 여기서 한 번 실행된다.
+  // 정렬: 유도된 플레이 날짜(lastPlayed = MAX(scheduled_date)) 내림차순, 일정이 없어 null 인
+  // 행은 뒤 그룹에서 created_at 내림차순. 할로우 나이트는 클리어한 날이 있어도 일정 항목이 없어
+  // (lastPlayed null) 뒤 그룹이다 — 클리어 날짜는 정렬 축이 아니라는 규칙이 여기서 한 번 실행된다.
   await expect(page.locator(CARDS + " .game__name")).toHaveText([
     "마인크래프트",
     "리틀 나이트메어",

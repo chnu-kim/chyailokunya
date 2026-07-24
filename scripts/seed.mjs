@@ -17,10 +17,12 @@ import { join } from "node:path";
 
 const BASE_URL = "https://openapi.chzzk.naver.com";
 
-/* 이름 → 플레이/클리어 날짜. status 컬럼은 드롭됐다 — 이제 날짜 두 개가 상태의 정본이고
-   "클리어"는 cleared_at 이 있다는 뜻이다. 날짜를 모르는 시드는 둘 다 null 로 둔다(보드에선
-   날짜 줄 없이 뜬다). 치지직 GAME 카테고리에 없는 이름은 검색이 비어 제외된다
-   (ADR-0015: 예 "마이 보이스 주"·"겟 투 워크"). */
+/* 이름 → 플레이 날짜 · 클리어 날짜. 플레이 날짜의 정본은 이제 일정(schedule_entries)이고
+   보드는 그 항목의 MAX(scheduled_date)로 유도한다(이슈 #56 결정 3). 그래서 playedAt 은
+   games 컬럼이 아니라 게임에 걸린 일정 항목으로 심는다. 클리어는 게임 자체의 사실이라 games 에
+   남는다 — clearedAt 이 있으면 cleared=1·cleared_date=그 날짜, 없으면 cleared=0(안 깼거나 미정).
+   playedAt 이 null 인 시드는 일정 항목 없이 게임만 선다(보드에선 날짜 줄 없이 뒤로). 치지직
+   GAME 카테고리에 없는 이름은 검색이 비어 제외된다(ADR-0015: 예 "마이 보이스 주"·"겟 투 워크"). */
 const SEED = [
   { q: "마인크래프트", playedAt: "2026-07-12", clearedAt: null },
   { q: "리그 오브 레전드", playedAt: "2026-07-05", clearedAt: null },
@@ -62,6 +64,10 @@ function sqlStr(s) {
 
 const now = Date.now();
 const values = [];
+// 플레이 날짜는 일정 항목으로 심는다. category_id 로 방금 넣은 게임 행에 이어 붙이고, 같은
+// (게임, 날짜) 항목이 이미 있으면 건너뛴다 — 재실행에도 중복 항목이 안 생긴다(games 의
+// INSERT OR IGNORE 와 짝이 맞는 멱등성).
+const scheduleStmts = [];
 for (const { q, playedAt, clearedAt } of SEED) {
   const cat = await searchGame(q);
   if (!cat) {
@@ -69,11 +75,22 @@ for (const { q, playedAt, clearedAt } of SEED) {
     continue;
   }
   const poster = cat.posterImageUrl ? sqlStr(cat.posterImageUrl) : "NULL";
-  const played = playedAt ? sqlStr(playedAt) : "NULL";
-  const cleared = clearedAt ? sqlStr(clearedAt) : "NULL";
+  const cleared = clearedAt ? "1" : "0";
+  const clearedDate = clearedAt ? sqlStr(clearedAt) : "NULL";
   values.push(
-    `(${sqlStr(cat.categoryId)}, 'GAME', ${sqlStr(cat.categoryValue)}, ${poster}, ${played}, ${cleared}, ${now}, ${now})`,
+    `(${sqlStr(cat.categoryId)}, 'GAME', ${sqlStr(cat.categoryValue)}, ${poster}, ${cleared}, ${clearedDate}, ${now}, ${now})`,
   );
+  if (playedAt) {
+    const catId = sqlStr(cat.categoryId);
+    const date = sqlStr(playedAt);
+    scheduleStmts.push(
+      "INSERT INTO schedule_entries (scheduled_date, start_time, title, game_id, created_at, last_updated_at)\n" +
+        `SELECT ${date}, NULL, category_value, id, ${now}, ${now} FROM games\n` +
+        `WHERE category_id = ${catId}\n` +
+        "  AND NOT EXISTS (SELECT 1 FROM schedule_entries se " +
+        `WHERE se.game_id = games.id AND se.scheduled_date = ${date});`,
+    );
+  }
   console.log(`해결: ${q} → ${cat.categoryValue} (${cat.categoryId})`);
 }
 
@@ -84,10 +101,12 @@ if (values.length === 0) {
 
 const sql =
   "INSERT OR IGNORE INTO games\n" +
-  "  (category_id, category_type, category_value, poster_image_url, played_at, cleared_at, created_at, last_updated_at)\n" +
+  "  (category_id, category_type, category_value, poster_image_url, cleared, cleared_date, created_at, last_updated_at)\n" +
   "VALUES\n  " +
   values.join(",\n  ") +
-  ";\n";
+  ";\n" +
+  scheduleStmts.join("\n") +
+  "\n";
 
 const tmp = join(tmpdir(), `ck-seed-${now}.sql`);
 writeFileSync(tmp, sql);

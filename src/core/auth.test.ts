@@ -6,7 +6,7 @@ import { safeReturnTo, shouldBootstrapSuperadmin } from "./auth";
    `core-is-pure` 가 error 로 죽고, 순수 함수는 애초에 임의 목록으로 검증하는 게 옳다.
    이 사본이 진짜 목록·실제 라우트와 어긋나는지는 여기가 아니라 `e2e/routes.spec.ts` 가 본다
    (파일시스템을 읽어야 해서 workerd 안인 이 풀에선 못 한다). */
-const ALLOWED = ["/", "/landing", "/games"];
+const ALLOWED = ["/", "/landing", "/games", "/schedule"];
 
 describe("shouldBootstrapSuperadmin", () => {
   it("channelId 가 SUPERADMIN_CHANNEL_ID 와 정확히 일치하면 승격", () => {

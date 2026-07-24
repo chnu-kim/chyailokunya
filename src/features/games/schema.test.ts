@@ -55,7 +55,7 @@ describe("addGameInput", () => {
     }
   });
 
-  it("정상 치지직 category 스냅샷은 통과", () => {
+  it("정상 치지직 category 스냅샷은 통과 — add 는 카테고리 4필드만 받는다(날짜 없음)", () => {
     const result = addGameInput.safeParse({
       ...base,
       posterImageUrl: "https://ssl.pstatic.net/cmcp/section/2024/game/poster.jpg",
@@ -64,9 +64,9 @@ describe("addGameInput", () => {
     if (result.success) {
       expect(result.data.categoryId).toBe("c1");
       expect(result.data.categoryValue).toBe("엘든링");
-      // 날짜를 안 보내면 둘 다 null — "아직 안 한 게임"이 기본값이다.
-      expect(result.data.playedAt).toBeNull();
-      expect(result.data.clearedAt).toBeNull();
+      // 클리어·플레이 날짜는 add 입력에 없다 — 플레이는 일정 정본, 클리어는 추가 뒤 편집.
+      expect(result.data).not.toHaveProperty("clearedDate");
+      expect(result.data).not.toHaveProperty("cleared");
     }
   });
 
@@ -84,75 +84,53 @@ describe("addGameInput", () => {
   });
 });
 
-describe("날짜 입력 (addGameInput·updateGameInput 공통 계약)", () => {
-  it("실재하지 않는 날짜는 거절 — 형식만 맞는 값이 새지 않는다", () => {
-    for (const bad of ["2026-02-31", "2025-02-29", "2026-13-01", "2026-07-32", "2026-7-20"]) {
-      expect(addGameInput.safeParse({ ...base, playedAt: bad }).success).toBe(false);
-      expect(addGameInput.safeParse({ ...base, clearedAt: bad }).success).toBe(false);
-      expect(updateGameInput.safeParse({ id: 1, playedAt: bad }).success).toBe(false);
-    }
-  });
-
-  it("빈 문자열·공백만은 null 로 접힌다(빈 date 입력이 보내는 값)", () => {
-    for (const empty of ["", "   "]) {
-      const result = addGameInput.safeParse({ ...base, playedAt: empty, clearedAt: empty });
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.playedAt).toBeNull();
-        expect(result.data.clearedAt).toBeNull();
-      }
-    }
-  });
-
-  it("미래 날짜는 허용(발매 예정작을 미리 올릴 수 있다)", () => {
-    expect(addGameInput.safeParse({ ...base, playedAt: "2099-01-01" }).success).toBe(true);
-  });
-
-  it("clearedAt 이 playedAt 보다 앞서면 거절, 같거나 뒤면 통과", () => {
-    const bad = addGameInput.safeParse({
-      ...base,
-      playedAt: "2026-07-20",
-      clearedAt: "2026-07-19",
-    });
-    expect(bad.success).toBe(false);
-    // 폼이 오류를 띄울 자리를 알아야 한다 — path 는 clearedAt.
-    if (!bad.success) expect(bad.error.issues[0]!.path).toEqual(["clearedAt"]);
-
-    expect(
-      addGameInput.safeParse({ ...base, playedAt: "2026-07-20", clearedAt: "2026-07-20" }).success,
-    ).toBe(true);
-    expect(
-      addGameInput.safeParse({ ...base, playedAt: "2026-07-01", clearedAt: "2026-07-20" }).success,
-    ).toBe(true);
-  });
-
-  it("playedAt 없이 clearedAt 만 있어도 통과(순서 검사 대상이 아니다)", () => {
-    expect(addGameInput.safeParse({ ...base, clearedAt: "2026-07-20" }).success).toBe(true);
-    expect(updateGameInput.safeParse({ id: 1, clearedAt: "2026-07-20" }).success).toBe(true);
-  });
-});
-
-describe("updateGameInput", () => {
-  it("id 는 양의 정수여야 한다", () => {
+describe("updateGameInput — 클리어 상태", () => {
+  it("id 는 양의 정수, cleared 는 필수 boolean", () => {
     for (const bad of [0, -1, 1.5, "1"]) {
-      expect(updateGameInput.safeParse({ id: bad }).success).toBe(false);
+      expect(updateGameInput.safeParse({ id: bad, cleared: false }).success).toBe(false);
     }
+    // cleared 를 빼면 "안 보냄"과 "false" 가 구분 안 돼 거절(부분 patch 아님).
+    expect(updateGameInput.safeParse({ id: 1 }).success).toBe(false);
   });
 
-  it("날짜를 안 보내면 둘 다 null — 지우기가 표현된다", () => {
-    const result = updateGameInput.safeParse({ id: 7 });
+  it("clearedDate 를 안 보내면 null — cleared=true 면 '깼는데 날짜 모름'", () => {
+    const result = updateGameInput.safeParse({ id: 7, cleared: true });
     expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data).toEqual({ id: 7, playedAt: null, clearedAt: null });
+    if (result.success) expect(result.data).toEqual({ id: 7, cleared: true, clearedDate: null });
+  });
+
+  it("clearedDate 의 빈 문자열·공백만은 null 로 접힌다(빈 date 입력이 보내는 값)", () => {
+    for (const empty of ["", "   "]) {
+      const result = updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: empty });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.clearedDate).toBeNull();
     }
   });
 
-  it("순서 역전은 여기서도 막힌다(수정 경로로 우회 불가)", () => {
-    const result = updateGameInput.safeParse({
-      id: 1,
-      playedAt: "2026-07-20",
-      clearedAt: "2026-01-01",
-    });
-    expect(result.success).toBe(false);
+  it("실재하지 않는 clearedDate 는 거절 — 형식만 맞는 값이 새지 않는다", () => {
+    for (const bad of ["2026-02-31", "2025-02-29", "2026-13-01", "2026-07-32", "2026-7-20"]) {
+      expect(updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: bad }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it("미래 clearedDate 는 허용", () => {
+    expect(
+      updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: "2099-01-01" }).success,
+    ).toBe(true);
+  });
+
+  it("안 깼는데 클리어 날짜가 있으면 거절(DB CHECK 의 Zod 짝), path 는 clearedDate", () => {
+    const bad = updateGameInput.safeParse({ id: 1, cleared: false, clearedDate: "2026-07-20" });
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.error.issues[0]!.path).toEqual(["clearedDate"]);
+  });
+
+  it("깬 채 날짜 있음·날짜 없음은 둘 다 통과", () => {
+    expect(
+      updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: "2026-07-20" }).success,
+    ).toBe(true);
+    expect(updateGameInput.safeParse({ id: 1, cleared: true }).success).toBe(true);
   });
 });

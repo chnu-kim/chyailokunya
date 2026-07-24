@@ -13,13 +13,15 @@ describe("authoritiesFor", () => {
     expect(a.size).toBe(0);
     expect(hasAuthority(a, "game:write")).toBe(false);
     expect(hasAuthority(a, "game:delete")).toBe(false);
+    expect(hasAuthority(a, "schedule:write")).toBe(false);
     expect(hasAuthority(a, "role:manage")).toBe(false);
   });
 
-  it("admin 은 game 쓰기·삭제는 되지만 role:manage 는 못 한다(상승 가드)", () => {
+  it("admin 은 game·schedule 쓰기·삭제는 되지만 role:manage 는 못 한다(상승 가드)", () => {
     const a = authoritiesFor(["admin"]);
     expect(hasAuthority(a, "game:write")).toBe(true);
     expect(hasAuthority(a, "game:delete")).toBe(true);
+    expect(hasAuthority(a, "schedule:write")).toBe(true);
     // 핵심 불변식: admin 은 다른 admin 을 임명·강등할 수 없다.
     expect(hasAuthority(a, "role:manage")).toBe(false);
   });
@@ -29,11 +31,12 @@ describe("authoritiesFor", () => {
     expect(hasAuthority(a, "role:manage")).toBe(true);
     expect(hasAuthority(a, "game:write")).toBe(true);
     expect(hasAuthority(a, "game:delete")).toBe(true);
+    expect(hasAuthority(a, "schedule:write")).toBe(true);
   });
 
   it("여러 역할은 합집합(superadmin 이 admin 을 포섭)", () => {
     const a = authoritiesFor(["admin", "superadmin"]);
-    expect([...a].sort()).toEqual(["game:delete", "game:write", "role:manage"]);
+    expect([...a].sort()).toEqual(["game:delete", "game:write", "role:manage", "schedule:write"]);
   });
 
   it("반환 집합은 상수를 오염시키지 않는다(새 Set)", () => {

@@ -1,14 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isDateOrderValid } from "@/core/games";
-import type { DatePair } from "@/core/games-composer";
 
-/* 게임 보드의 모달 키트 — 컴포저(추가)와 날짜 수정이 둘 다 쓴다. 두 번째 호출자가 생기면서
+/* 게임 보드의 모달 키트 — 컴포저(추가)와 클리어 수정이 둘 다 쓴다. 두 번째 호출자가 생기면서
    드러난 seam 이라 여기로 뺐다(ADR-0010 의 JIT 추상화). 담는 건 둘이다: 네이티브 dialog 셸과
-   플레이/클리어 날짜 한 쌍의 입력. 실패 문구는 error-message.ts 로 나갔다 — 이 파일이 React 를
-   끌어와 단위 테스트가 안 붙었고, 그래서 "400 에 네트워크 탓 문구가 뜨는" 결함이 테스트 없이
-   프로덕션까지 갔다.
+   클리어 상태(플래그 + 선택적 날짜) 입력. 실패 문구는 error-message.ts 로 나갔다 — 이 파일이
+   React 를 끌어와 단위 테스트가 안 붙었고, 그래서 "400 에 네트워크 탓 문구가 뜨는" 결함이
+   테스트 없이 프로덕션까지 갔다.
 
    표면이 .paper 인 이유: .polaroid 는 --border-strong 을 안 되돌려 다크에서 입력 테두리가
    크림 위 1.01:1 로 사라진다. .paper 위에선 14.3:1 이라 폼은 반드시 이쪽에 올린다. */
@@ -164,66 +162,67 @@ export function GameDialog({
   );
 }
 
-export type { DatePair };
+/* 클리어 편집의 폼 상태. 플래그(정본)와 선택적 날짜 한 쌍이다 — DB 의 cleared·cleared_date 를
+   그대로 옮긴 모양이다. 날짜의 "모름"은 빈 문자열 하나뿐이어야 한다(서버 dateInput 이 null 로
+   전처리한다 — 중복 정규화 금지). */
+export type ClearedDraft = { cleared: boolean; clearedDate: string };
 
-/* 날짜 두 개는 optional 이라 기본값을 비워 둔다 — "오늘"을 심으면 "플레이한 날을 모른다"가
-   표현 불가능해지고, 사용자가 안 지운 기본값이 사실인 척 저장된다(core 의 todayKST 를 끝내
-   아무도 안 부른 이유가 이 결정이다). 빈 문자열은 서버의 dateInput 이 null 로 전처리한다
-   (중복 정규화 금지 — 여기선 그대로 넘긴다).
-
-   순서 검증은 서버 addGameInput/updateGameInput 의 refine 이 정본이고, 여기 것은 왕복 한 번을
-   아끼는 편의다. type=date 라 형식·실재성(2026-02-31)은 브라우저가 먼저 막는다. */
-export function dateOrderError(dates: DatePair): string {
-  return isDateOrderValid(dates.playedAt || null, dates.clearedAt || null)
-    ? ""
-    : "클리어한 날이 플레이한 날보다 앞설 수는 없어요.";
+/* 클리어 수정 모달 전용 — editing 이 null 을 거쳐 매번 리마운트되므로 폼 상태를 여기서 들어도
+   이월이 없다. 컴포저는 반대로 한 번 마운트된 채 여러 게임을 거치지만, 이제 클리어를 add 단계에
+   두지 않으므로(추가 뒤 편집으로 붙인다) 이 상태는 편집 모달에만 산다. */
+export function useClearedDraft(initial: ClearedDraft) {
+  const [draft, setDraft] = useState(initial);
+  return { draft, setDraft };
 }
 
-/* 날짜 수정 모달 전용 — editing 이 null 을 거쳐 매번 리마운트되므로 폼 상태를 여기서 들어도
-   이월이 없다. 컴포저는 반대로 한 번 마운트된 채 여러 게임을 거치므로 날짜를 상태 기계
-   (core/games-composer)가 들고 선택 전환마다 비운다. */
-export function useDatePair(initial: DatePair) {
-  const [dates, setDates] = useState(initial);
-  return { dates, setDates, orderError: dateOrderError(dates) };
-}
-
-export function DateFields({
-  dates,
+/* 클리어 플래그 + 선택적 날짜. 체크가 정본이고 날짜는 그 아래 딸린다 — 안 깬 게임에 날짜만
+   있는 모순을 UI 에서부터 막으려고, 체크를 풀면 날짜 입력을 감추고 값도 비운다(서버 CHECK·
+   Zod 가 최종 방어선이지만, 화면에서 애초에 그 조합을 못 만들게 한다). 체크가 켜졌는데 날짜가
+   비면 "깼는데 날짜 모름"이라 그대로 유효하다 — 그 표현을 살리는 게 플래그를 날짜와 독립으로
+   둔 이유다. type=date 라 형식·실재성(2026-02-31)은 브라우저가 먼저 막는다. */
+export function ClearedFields({
+  draft,
   onChange,
   idPrefix,
   firstFieldRef,
 }: {
-  dates: DatePair;
-  onChange: (next: DatePair) => void;
+  draft: ClearedDraft;
+  onChange: (next: ClearedDraft) => void;
   idPrefix: string;
-  // 단계 전환 후 포커스를 여기로 옮기려는 호출자(컴포저)를 위한 손잡이.
+  // 모달 오픈 시 포커스를 여기로 옮기려는 호출자를 위한 손잡이(체크박스가 첫 조작점).
   firstFieldRef?: React.Ref<HTMLInputElement>;
 }) {
   return (
-    <div className="datefields">
-      <label className="datefield">
-        <span className="datefield__label">플레이한 날</span>
+    <div className="clearfields">
+      <label className="clearfields__toggle" htmlFor={idPrefix + "-cleared"}>
         <input
-          className="field"
-          type="date"
-          value={dates.playedAt}
-          id={idPrefix + "-played"}
-          ref={firstFieldRef}
-          data-od-id={idPrefix + "-played"}
-          onChange={(e) => onChange({ ...dates, playedAt: e.target.value })}
-        />
-      </label>
-      <label className="datefield">
-        <span className="datefield__label">클리어한 날</span>
-        <input
-          className="field"
-          type="date"
-          value={dates.clearedAt}
+          type="checkbox"
+          checked={draft.cleared}
           id={idPrefix + "-cleared"}
+          ref={firstFieldRef}
           data-od-id={idPrefix + "-cleared"}
-          onChange={(e) => onChange({ ...dates, clearedAt: e.target.value })}
+          // 체크를 풀면 날짜도 비운다 — 안 깬 게임에 클리어 날짜가 남지 않게(CHECK 의 UI 짝).
+          onChange={(e) =>
+            onChange(
+              e.target.checked ? { ...draft, cleared: true } : { cleared: false, clearedDate: "" },
+            )
+          }
         />
+        <span className="clearfields__togglelabel">클리어했어요</span>
       </label>
+      {draft.cleared && (
+        <label className="datefield">
+          <span className="datefield__label">클리어한 날 (모르면 비워 둬요)</span>
+          <input
+            className="field"
+            type="date"
+            value={draft.clearedDate}
+            id={idPrefix + "-date"}
+            data-od-id={idPrefix + "-date"}
+            onChange={(e) => onChange({ ...draft, clearedDate: e.target.value })}
+          />
+        </label>
+      )}
     </div>
   );
 }

@@ -50,6 +50,13 @@
       "when": 1784477657824,
       "tag": "0006_quick_rage",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1784831246036,
+      "tag": "0007_milky_slapstick",
+      "breakpoints": true
     }
   ]
 }

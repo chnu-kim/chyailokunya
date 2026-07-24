@@ -4,7 +4,7 @@ import {
   axis,
   formatDate,
   hash,
-  isDateOrderValid,
+  isClearedStateValid,
   isGameCategory,
   PATTERNS,
   ROT,
@@ -21,22 +21,18 @@ describe("formatDate", () => {
   });
 });
 
-describe("isDateOrderValid", () => {
-  it("클리어가 플레이보다 뒤면(또는 같으면) 참", () => {
-    expect(isDateOrderValid("2026-07-01", "2026-07-20")).toBe(true);
-    expect(isDateOrderValid("2026-07-20", "2026-07-20")).toBe(true); // 하루만에 클리어
+describe("isClearedStateValid", () => {
+  it("깬 게임엔 날짜가 있든 없든 참 — 없으면 '깼는데 날짜 모름'(할로우 나이트)", () => {
+    expect(isClearedStateValid(true, "2026-05-02")).toBe(true);
+    expect(isClearedStateValid(true, null)).toBe(true);
   });
 
-  it("클리어가 플레이보다 앞서면 거짓", () => {
-    expect(isDateOrderValid("2026-07-20", "2026-07-19")).toBe(false);
-    // 사전순 비교라 연·월 경계도 잡혀야 한다.
-    expect(isDateOrderValid("2026-01-01", "2025-12-31")).toBe(false);
+  it("안 깬 게임에 클리어 날짜가 붙으면 거짓(DB CHECK 의 도메인 짝)", () => {
+    expect(isClearedStateValid(false, "2026-05-02")).toBe(false);
   });
 
-  it("한쪽이 null 이면 비교할 게 없어 참 — 플레이 없이 클리어만 아는 경우도 허용", () => {
-    expect(isDateOrderValid(null, "2026-07-20")).toBe(true);
-    expect(isDateOrderValid("2026-07-20", null)).toBe(true);
-    expect(isDateOrderValid(null, null)).toBe(true);
+  it("안 깼고 날짜도 없으면 참 — 기본 상태", () => {
+    expect(isClearedStateValid(false, null)).toBe(true);
   });
 });
 
