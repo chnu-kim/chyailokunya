@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
-import { ANGLE, axis, formatDate, isPlayDateEditable, PATTERNS, ROT } from "@/core/games";
+import {
+  ANGLE,
+  axis,
+  formatDate,
+  isPlayDateEditable,
+  PATTERNS,
+  ROT,
+  sortGameCards,
+} from "@/core/games";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
@@ -75,8 +83,10 @@ export function GameBoard({
     setAnnouncement(row.categoryValue + " 추가됨");
   }
 
+  /* 날짜를 고치면 lastPlayed 가 바뀌어 **자리도 달라져야 한다** — 제자리 교체만 하면 새로고침
+     전까지 보드가 날짜순이 아닌 채로 남는다. 정렬 규칙은 core 가 쥔다(서버 SQL 의 짝). */
   function onUpdated(row: GameCard) {
-    setGames((prev) => prev.map((g) => (g.id === row.id ? row : g)));
+    setGames((prev) => sortGameCards(prev.map((g) => (g.id === row.id ? row : g))));
     setEditing(null);
     setAnnouncement(row.categoryValue + " 수정됨");
   }

@@ -47,6 +47,29 @@ export function isPlayDateEditable(dates: readonly string[]): boolean {
   return dates.length <= 1;
 }
 
+/* 보드 정렬의 도메인 규칙 — **서버 SQL(features/games/service.listGames)의 짝**이다.
+   유도된 플레이 날짜 내림차순, 날짜 없는 행은 뒤로, 그 안에서는 추가 최신순.
+
+   왜 클라이언트에도 필요한가: 날짜를 고치면 그 카드의 lastPlayed 가 바뀌어 **자리가 달라져야
+   한다.** 제자리 교체만 하면 새로고침 전까지 보드가 날짜순이 아닌 채로 남아, 방금 옮긴 게임이
+   엉뚱한 자리에 앉는다(적대적 리뷰가 아니라 일반 리뷰가 잡은 자리).
+
+   규칙이 두 곳에 살지만 정본은 SQL 이다 — 여기가 어긋나면 새로고침 한 번에 순서가 튀므로
+   화면이 먼저 말해 준다. 순수 함수로 둬 단위 테스트가 규칙 자체를 못박는다. */
+export function sortGameCards<T extends { lastPlayed: string | null; createdAt: number }>(
+  cards: readonly T[],
+): T[] {
+  return [...cards].sort((a, b) => {
+    // 날짜 있음/없음을 먼저 가른다 — 없는 쪽이 뒤(SQL 의 `lastPlayed IS NULL` ASC).
+    if ((a.lastPlayed === null) !== (b.lastPlayed === null)) return a.lastPlayed === null ? 1 : -1;
+    // 둘 다 날짜가 있으면 사전순 = 시간순이라 문자열 비교로 충분하다(ISO 날짜).
+    if (a.lastPlayed !== null && b.lastPlayed !== null && a.lastPlayed !== b.lastPlayed) {
+      return a.lastPlayed < b.lastPlayed ? 1 : -1;
+    }
+    return b.createdAt - a.createdAt;
+  });
+}
+
 /* 기울기·종이결·썸네일 패턴은 카드의 정체성이지 목록 위치가 아니다. 인덱스로 고르면
    하나 추가·삭제할 때마다 보드 전체가 다시 기울어진다 — id 해시로 안정적으로 고른다.
    폭이 ±1.4° 였다가 ±1.2° 로 좁아졌다: 포스터가 비어 패턴+이니셜만 있던 시절엔 기울기가

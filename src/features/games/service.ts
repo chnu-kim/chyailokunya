@@ -120,38 +120,48 @@ export function playEntriesOf(db: Db, gameId: number) {
     .orderBy(asc(scheduleEntries.scheduledDate));
 }
 
-/* 게임 폼이 일정 항목을 건드린 주의 revision 을 올린다 — **행이 이미 있을 때만.**
+/* 게임 폼이 일정 항목을 건드린 주를 **청구(claim)한다.** 하는 일이 둘이다:
 
-   왜 올리나: saveWeek 은 그 주를 통째로 교체하면서 revision CAS 로 "그 사이 바뀌었으면 거절"을
+   1. 메타가 있으면 revision(last_updated_at)만 단조 증가시킨다. published_at 은 안 건드린다 —
+      초안으로 두기로 한 결정을 게임 폼이 뒤집으면 안 된다(결정 13).
+   2. 메타가 없으면 **발행된 채로 만든다.**
+
+   왜 청구하나: saveWeek 은 그 주를 통째로 교체하면서 revision CAS 로 "그 사이 바뀌었으면 거절"을
    보장한다. 게임 폼이 그 계약 밖에서 항목을 쓰면 열어 둔 편집기가 stale 인 채 CAS 를 통과해
-   방금 만든 항목을 지운다(적대적 리뷰 3라운드). UPDATE 라 published_at 은 안 건드린다 —
-   초안으로 두기로 한 결정을 게임 폼이 뒤집으면 안 된다(결정 13).
+   방금 만든 항목을 **조용히 지운다**(적대적 리뷰 3·8라운드). 메타가 없으면 올릴 revision 자체가
+   없으므로, 행을 만들어 두는 게 그 구멍을 닫는 유일한 길이다 — 편집기의 null 청구가
+   onConflictDoNothing 으로 0행이 돼 CONFLICT 로 걸린다.
 
-   ── 메타가 없는 주는 왜 안 만드나 ────────────────────────────────────────────────
-   한때 여기서 published_at 을 채워 행을 만들었다. 그러면 동시성은 완전히 닫히지만 **그 주가
-   /schedule 에 공개된다** — getPublishedWeek 은 published_at 이 NULL 이 아니면 공개로 보고,
-   메타가 없던 주는 원래 비공개였다. 관리자가 게임 보드에 플레이 기록을 남긴 것뿐인데 안 짠
-   주간표가 준비된 것처럼 서는 셈이라 결정 13 의 결에 어긋난다(적대적 리뷰 4라운드).
+   ── published_at 을 채우는 이유, 그리고 그 대가 ──────────────────────────────────
+   뿌리는 비대칭이다: 메타 부재를 게임 보드(lastPlayedExpr)는 "표시"로, 공개 /schedule
+   (getPublishedWeek)은 "비공개"로 읽는다. 행을 만드는 순간 둘 중 하나가 깨진다. NULL 로 만들면
+   그 주가 초안으로 뒤집혀 **방금 넣은 날짜가 보드에서 사라지고**, 채우면 그 주가 /schedule 에
+   뜬다.
 
-   반대로 published_at 을 NULL 로 두고 만들면 그 주가 **초안으로 뒤집혀** 방금 넣은 날짜가
-   보드에서 사라진다 — 기능 자체가 무의미해진다. 뿌리는 비대칭이다: 메타 부재를 게임 보드는
-   "표시"로, 공개 /schedule 은 "비공개"로 읽는다. 행을 만드는 순간 둘 중 하나가 깨진다.
+   채우는 쪽을 골랐다(2026-07-24 사용자 결정, 8라운드에 재확인). 근거 둘:
+   - **saveWeek 도 같은 일을 한다.** 관리자가 /schedule 에서 레거시 주(메타 없음)를 저장하면
+     published 메타가 생겨 그 주가 공개된다(편집기 기본값 = 발행). 게임 폼만 다른 규칙을 쓸
+     이유가 약하다.
+   - 공개되는 항목은 **이미 게임 보드에 떠 있던 것**이다(메타 부재 = 표시). 새 정보가 새는 게
+     아니라 같은 사실이 한 화면 더 보이는 것이고, 반대쪽 대가는 **관리자가 넣은 날짜가 신호 없이
+     사라지는 것**이다. 무게가 다르다.
 
-   그래서 **공개 경계를 지키고 동시성 구멍을 남기기로 했다**(2026-07-24 사용자 결정). 남는
-   구멍은 "편집기를 열어 둔 채 그 주 날짜를 게임 폼에서 넣고, 편집기가 저장하면 그 항목이
-   지워진다" 하나다. 좁은 창이고(관리자 소수·주간 편성), 무엇보다 **main 에도 있던 한계**다 —
-   게임 폼이 애초에 일정을 안 건드렸으니 이 PR 이 만든 회귀가 아니다. 메타가 있는 주(초안 포함)
-   는 그대로 보호된다. 완전히 닫으려면 보드 표시와 공개 발행을 가르는 표식 컬럼이 필요한데,
-   그건 마이그레이션이라 두 번째 요구가 설 때 JIT 로 연다(ADR-0010).
+   대가는 안다: 미래 날짜를 넣으면 아직 안 짠 주가 "빈 주간표 + 게임 하나"로 뜬다. 초안 주
+   (메타 있고 published_at NULL)는 여기서 안 건드리므로 결정 13 의 핵심 — 관리자가 짜는 중인
+   편성이 먼저 새지 않는다 — 은 그대로다. 둘을 완전히 가르려면 보드 표시와 공개 발행을 나누는
+   표식 컬럼이 필요한데, 마이그레이션이라 두 번째 요구가 설 때 JIT 로 연다(ADR-0010).
 
    revision 은 nextRevision 과 같은 규칙으로 단조 증가시킨다 — 같은 ms 안에 두 번 쓰면
    now 가 기존 값과 같아 revision 이 안 바뀌고, 그럼 CAS 가 통과해 보호가 도로 뚫린다. */
 function claimWeek(db: Db, date: string, now: number) {
   const weekStart = weekStartOf(toIsoDate(date));
   return db
-    .update(scheduleWeeks)
-    .set({ lastUpdatedAt: sql`max(${scheduleWeeks.lastUpdatedAt} + 1, ${now})` })
-    .where(eq(scheduleWeeks.weekStartDate, weekStart));
+    .insert(scheduleWeeks)
+    .values({ weekStartDate: weekStart, publishedAt: now, lastUpdatedAt: now })
+    .onConflictDoUpdate({
+      target: scheduleWeeks.weekStartDate,
+      set: { lastUpdatedAt: sql`max(${scheduleWeeks.lastUpdatedAt} + 1, ${now})` },
+    });
 }
 
 /* 추가 — category 스냅샷을 denormalize 저장하고, 날짜를 받았으면 그 날의 일정 항목까지
