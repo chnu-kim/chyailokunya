@@ -49,6 +49,31 @@ describe("games 라우터", () => {
     expect(list[0]!.categoryValue).toBe("엘든링");
   });
 
+  /* 추가 폼이 클리어를 받는다(이 보드는 이미 한 방송을 기록하는 자리라 소급 입력이 정상
+     경로다 — addGameInput 주석). 안 보내면 default(false) 로 떨어지는 건 위 테스트가 본다. */
+  it("add 는 이미 깬 게임을 클리어 상태 그대로 올린다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const row = await caller.games.add({ ...eldenring, cleared: true, clearedDate: "2026-03-01" });
+    expect(row.cleared).toBe(true);
+    expect(row.clearedDate).toBe("2026-03-01");
+  });
+
+  it("add 도 '깼는데 날짜 모름'을 받는다(cleared=true·date 없음)", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const row = await caller.games.add({ ...eldenring, cleared: true });
+    expect(row.cleared).toBe(true);
+    expect(row.clearedDate).toBeNull();
+  });
+
+  it("add 도 클리어 상태 검증을 통과해야 한다(추가 경로로 우회 불가)", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    // 안 깼는데 클리어 날짜만 있는 모순 — DB CHECK 이전에 입력 경계가 막는다.
+    await expect(
+      caller.games.add({ ...eldenring, cleared: false, clearedDate: "2026-03-01" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await createCaller(makeCtx()).games.list()).toEqual([]);
+  });
+
   it("같은 category_id 재추가는 CONFLICT(한 카테고리 = 보드 1회)", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     await caller.games.add({ categoryId: "dup", categoryType: "GAME", categoryValue: "A" });
