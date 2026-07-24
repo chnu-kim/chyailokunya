@@ -5,6 +5,7 @@ import { authoritiesFor, type Authority } from "@/core/authorities";
 import { makeDb, scheduleEntries, scheduleWeeks } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
+import { getPublishedWeek } from "@/features/schedule/service";
 import type { Context } from "@/features/trpc/init";
 
 /* tRPC 프로시저를 HTTP·세션 없이 caller 로 직접 부른다(ADR-0008·이슈 #5 완료기준). 쓰기의
@@ -474,54 +475,70 @@ describe("games 라우터", () => {
   it("초안 주의 항목은 보드에 안 뜨지만 편집 조회엔 잡힌다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
-    expect(row.lastPlayed).toBe("2026-07-22"); // 게임 폼이 청구한 주는 발행된 채 선다
+    expect(row.lastPlayed).toBe("2026-07-22"); // 주 메타가 없으면 표시(레거시 규칙)
 
-    /* 관리자가 /schedule 에서 그 주의 발행을 내린 상태를 만든다. INSERT 가 아니라 UPDATE 인 게
-       핵심이다 — 게임 폼의 claimWeek 이 이미 메타를 만들어 뒀다(편집기 CAS 가 이 쓰기를 보게
-       하려고). 초안으로 내려가면 그 주 항목은 보드에서 빠진다. */
+    // 그 주를 초안으로 만든다(published_at NULL). 게임 폼은 메타를 안 만드므로 INSERT 다.
     const db = makeDb(env.DB);
-    await db
-      .update(scheduleWeeks)
-      .set({ publishedAt: null })
-      .where(eq(scheduleWeeks.weekStartDate, "2026-07-20"));
+    await db.insert(scheduleWeeks).values({ weekStartDate: "2026-07-20", publishedAt: null });
 
     const [listed] = await createCaller(makeCtx()).games.list();
     expect(listed!.lastPlayed).toBeNull(); // 보드에선 숨는다
     expect(await authed.games.playDates({ id: row.id })).toEqual(["2026-07-22"]); // 편집엔 보인다
   });
 
-  /* ── 편집기의 낙관적 동시성을 게임 폼이 뚫지 않는다 ────────────────────────────────
-     saveWeek 은 그 주를 **통째로 교체**하면서 revision CAS 로 "그 사이 바뀌었으면 거절"을
-     보장한다. 게임 폼이 그 계약 밖에서 항목을 쓰면 열어 둔 편집기가 stale 인 채 CAS 를 통과해
-     방금 넣은 날짜를 지운다 — 사용자에겐 "분명 넣었는데 사라졌다"로만 보인다(적대적 리뷰 3라운드).
-     그래서 게임 폼의 쓰기도 그 주를 청구한다(claimWeek). */
-  it("메타 없던 주: 게임 폼이 항목을 만들면 stale 편집기 저장이 CONFLICT 로 막힌다", async () => {
+  /* ── 게임 폼의 쓰기는 공개 발행 상태를 안 건드린다 ──────────────────────────────────
+     한때 claimWeek 이 메타 없는 주를 published 로 만들어 동시성을 완전히 닫았는데, 그러면
+     **그 주가 /schedule 에 공개된다** — 관리자가 보드에 플레이 기록을 남긴 것뿐인데 안 짠
+     주간표가 준비된 것처럼 선다(적대적 리뷰 4라운드). 공개 경계를 지키기로 했으므로
+     (2026-07-24 사용자 결정) 그 자리를 여기서 못박는다. */
+  it("게임 폼이 날짜를 넣어도 그 주가 공개되지 않는다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
-    // 편집기가 그 주를 연다 — 메타가 없어 revision 은 null 이다.
-    const opened = await authed.schedule.getWeek({ weekStartDate: "2026-07-20" });
-    expect(opened.revision).toBeNull();
+    await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
 
-    // 그 사이 게임 폼이 같은 주에 날짜를 넣는다.
-    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
-
-    /* 이제 stale 편집기가 저장하면 거절돼야 한다. 안 그러면 전체 교체가 방금 만든 항목을
-       지운다 — revision 이 null 이던 시절엔 청구가 그대로 성공했다. */
-    await expect(
-      authed.schedule.saveWeek({
-        weekStartDate: "2026-07-20",
-        revision: opened.revision,
-        entries: [],
-      }),
-    ).rejects.toMatchObject({ code: "CONFLICT" });
-
-    // 거절됐으니 항목도 살아 있다.
-    expect(await authed.games.playDates({ id: row.id })).toEqual(["2026-07-22"]);
+    // 공개 조회는 여전히 그 주를 안 준다(메타가 없으므로 published 가 아니다).
+    expect(await getPublishedWeek(makeDb(env.DB), "2026-07-20")).toBeNull();
+    // 메타 행 자체가 안 생겼다.
+    expect(await makeDb(env.DB).select().from(scheduleWeeks)).toEqual([]);
   });
 
-  it("메타 있던 주: 게임 폼이 날짜를 옮기면 stale 편집기 저장이 CONFLICT 로 막힌다", async () => {
+  it("이미 발행된 주는 게임 폼이 건드려도 발행 상태가 유지된다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add(eldenring);
+    // 편집기가 그 주를 발행 상태로 세운다.
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-20",
+      revision: null,
+      published: true,
+      entries: [],
+    });
+
+    await authed.games.update({
+      id: row.id,
+      cleared: false,
+      clearedDate: null,
+      playedDate: "2026-07-22",
+    });
+
+    const published = await getPublishedWeek(makeDb(env.DB), "2026-07-20");
+    expect(published).not.toBeNull();
+    expect(published!.entries).toHaveLength(1); // 게임 폼이 넣은 항목이 그 주에 선다
+  });
+
+  /* ── 편집기의 낙관적 동시성 ────────────────────────────────────────────────────────
+     saveWeek 은 그 주를 **통째로 교체**하면서 revision CAS 로 "그 사이 바뀌었으면 거절"을
+     보장한다. 게임 폼이 그 계약 밖에서 쓰면 열어 둔 편집기가 stale 인 채 CAS 를 통과해 방금
+     넣은 날짜를 지운다 — 사용자에겐 "분명 넣었는데 사라졌다"로만 보인다(적대적 리뷰 3라운드).
+     그래서 **메타가 있는 주는** 게임 폼의 쓰기도 revision 을 올린다(claimWeek). */
+  it("메타 있는 주: 게임 폼이 날짜를 옮기면 stale 편집기 저장이 CONFLICT 로 막힌다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
-    // 편집기가 그 주를 연다(이제 메타가 있어 revision 이 선다).
+    // 편집기가 그 주를 연다. 메타를 세워야 revision 이 서므로 한 번 저장해 둔다.
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-20",
+      revision: null,
+      published: true,
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: row.id }],
+    });
     const opened = await authed.schedule.getWeek({ weekStartDate: "2026-07-20" });
     expect(opened.revision).not.toBeNull();
 
@@ -542,11 +559,25 @@ describe("games 라우터", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  /* 날짜를 다른 주로 옮기면 주가 둘이다 — 옛 주와 새 주. 한쪽만 청구하면 다른 쪽 편집기가
-     그대로 통과해 지운다. */
+  /* 날짜를 다른 주로 옮기면 주가 둘이다 — 옛 주와 새 주. 한쪽만 올리면 다른 쪽 편집기가
+     그대로 통과해 지운다. 둘 다 메타가 있는 경우로 세워 그걸 본다. */
   it("주를 건너뛰어 옮기면 옛 주·새 주 편집기가 둘 다 CONFLICT 로 막힌다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+    /* 두 주에 메타를 세운다. 옛 주는 **기존 항목을 그대로 실어** 저장한다 — saveWeek 은 전체
+       교체라 빈 배열로 저장하면 방금 만든 항목이 지워져 셋업이 무너진다. */
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-20",
+      revision: null,
+      published: true,
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: row.id }],
+    });
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-27",
+      revision: null,
+      published: true,
+      entries: [],
+    });
     const oldWeek = await authed.schedule.getWeek({ weekStartDate: "2026-07-20" });
     const newWeek = await authed.schedule.getWeek({ weekStartDate: "2026-07-27" });
 
@@ -571,6 +602,27 @@ describe("games 라우터", () => {
         label,
       ).rejects.toMatchObject({ code: "CONFLICT" });
     }
+  });
+
+  /* **알고 수용한 한계**(2026-07-24 사용자 결정): 메타가 없는 주는 청구할 대상이 없어 이
+     보호가 안 선다. 공개 경계를 지키려면 메타를 안 만들어야 하고, 안 만들면 올릴 revision 이
+     없다 — 둘을 동시에 가지려면 보드 표시와 공개 발행을 가르는 표식 컬럼이 필요하다(JIT 로 미룸).
+     이 테스트는 **현재 동작을 있는 그대로 적어 둔다** — 나중에 표식이 생겨 보호가 서면 여기가
+     빨개지고, 그때 이 테스트를 위 CONFLICT 쪽으로 옮기면 된다. */
+  it("메타 없는 주는 stale 편집기 저장을 못 막는다(알고 수용한 한계)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const opened = await authed.schedule.getWeek({ weekStartDate: "2026-07-20" });
+    expect(opened.revision).toBeNull();
+
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+
+    // stale 편집기의 저장이 통과한다 — 그 주를 비우면 게임 폼 항목이 함께 사라진다.
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-20",
+      revision: opened.revision,
+      entries: [],
+    });
+    expect(await authed.games.playDates({ id: row.id })).toEqual([]);
   });
 
   it("remove 는 game:delete 있으면 하드 삭제, 없는 id 는 deleted:false", async () => {
