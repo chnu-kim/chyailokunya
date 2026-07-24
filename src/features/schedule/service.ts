@@ -99,21 +99,36 @@ export class ReferencedGameMissing extends Error {
   }
 }
 
-/* 주 단위 일괄 저장 = 그 주 전체 교체(결정 14). 메타를 upsert 하고, 그 주 날짜 범위의 항목을
-   전부 지운 뒤 보낸 항목을 다시 넣는다 — 클라이언트가 항목별 add/update/delete 를 추적하지 않아도
-   된다. **D1 batch() 로 원자 실행**한다: 지우고 넣는 사이에 깨지면 그 주가 반쯤 빈 채로 남기
-   때문이다. 다른 주의 항목·이관된 과거 아카이브는 날짜 범위 밖이라 안 건드린다.
+/* 다음 revision. revision 은 그 주 메타의 last_updated_at 이지만 **단조 증가가 정본이다** —
+   벽시계 ms 를 그대로 쓰면 같은 ms 에 두 번 저장될 때 새 값이 옛 값과 같아져(now === oldRevision),
+   그 옛 revision 을 든 stale 요청이 CAS(WHERE last_updated_at = revision)를 통과해 남의 저장을
+   덮는다(적대적 리뷰 지적). now 가 크면 now, 아니면 oldRevision+1 로 **무조건 크게** 만들어 저장
+   때마다 값이 반드시 바뀌게 한다(시계가 뒤로 가도 성립). 순수 함수라 단위 테스트가 못박는다. */
+export function nextRevision(oldRevision: number, now: number): number {
+  return now > oldRevision ? now : oldRevision + 1;
+}
+
+/* 주 단위 일괄 저장 = 그 주 전체 교체(결정 14). 그 주 날짜 범위의 항목을 전부 지운 뒤 보낸 항목을
+   다시 넣는다 — 클라이언트가 항목별 add/update/delete 를 추적하지 않는다. 다른 주의 항목·이관된
+   과거 아카이브는 날짜 범위 밖이라 안 건드린다.
 
    ── 낙관적 동시성(revision) ────────────────────────────────────────────────────────
    전체 교체라 **경합의 피해 반경이 크다**: stale 한 초안이 필드 하나를 덮어쓰는 게 아니라 그 주를
-   통째로 지우고 자기 것으로 채운다 — 먼저 저장한 사람의 항목이 통째로 사라진다. 빈도가 낮아도
-   (관리자 소수) 한 번 나면 복구가 없으므로, 불러온 시점의 revision 을 함께 받아 검사한다.
-   revision = 그 주 메타의 last_updated_at, 메타가 없으면 null(= "내가 불러올 땐 이 주가 아직
-   없었다"). 어긋나면 CONFLICT 로 거절한다 — 덮어쓰지 않는다.
+   통째로 지우고 자기 것으로 채운다 — 먼저 저장한 사람의 항목이 통째로 사라진다. 그래서 불러온
+   시점의 revision 을 함께 받아, 그 사이 주가 바뀌었으면 CONFLICT 로 거절한다(덮어쓰지 않는다).
+   검사는 읽고→비교가 아니라 **쓰기의 조건**이다(WHERE last_updated_at = revision) — 읽고 비교하면
+   두 요청이 같은 revision 을 읽고 둘 다 통과하는 창이 생긴다.
 
-   **검사는 읽어서 비교하는 게 아니라 쓰기의 조건이다.** 읽고→비교하고→쓰면 두 요청이 같은
-   revision 을 읽고 둘 다 통과할 수 있어(검사와 쓰기 사이 창) 방어가 이름만 남는다. 아래 1단계의
-   조건부 UPDATE/INSERT 가 그 창을 없앤다 — 자세한 건 거기 주석.
+   ── 세 단계로 나눈 이유: 실패가 발행 상태를 넘지 못하게 ─────────────────────────────
+   D1 은 대화형 트랜잭션이 없어(batch 만 원자적) 메타 청구와 항목 교체가 별개 왕복이다. 그래서
+   순서와 "무엇을 어디서 쓰나"로 안전을 만든다:
+     0. prevalidate — 참조 게임을 미리 확인(없으면 아무것도 쓰기 전에 거절).
+     1. claim — revision 만 원자적으로 잡는다. **user-visible 메타(note·publishedAt)는 여기서 안 쓴다.**
+     2. batch — note·publishedAt·항목 삭제·삽입을 **한 batch** 로(원자).
+   핵심은 **발행 경계를 넘는 값(publishedAt·note)이 2단계 batch 에서만 쓰인다**는 것이다. 2단계가
+   중단·실패하면 셋이 함께 롤백돼 발행 상태가 안 바뀐다. 1단계에서 바뀐 건 revision 뿐이고 그건
+   외부에 안 보인다 — stale 해진 에디터가 다음 저장 때 CONFLICT 를 받아 새로고침하게 될 뿐이다
+   (적대적 리뷰가 "실패가 발행 상태를 바꾼다"로 세 라운드 파고든 자리를 여기서 구조로 닫는다).
 
    발행 시각은 처음 발행할 때만 찍고 이후 저장엔 유지한다(existing ?? now) — 재저장마다 바뀌면
    "언제 발행했나"가 무의미해진다. 발행을 내리면 null 로 되돌린다(다시 초안). */
@@ -122,14 +137,10 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
   const now = Date.now();
 
   /* ── 0단계: 참조 게임을 **메타를 건드리기 전에** 검증한다 ─────────────────────────
-     항목의 gameId 가 없는 게임을 가리키면 2단계 INSERT 가 FK 로 실패한다. 그 실패가 메타 청구
-     (1단계) **뒤에** 나면, 메타(note·publishedAt·revision)는 이미 커밋됐는데 라우터는 실패를
-     돌려주는 상태가 된다 — publishedAt 은 공개 가시성·보드 날짜를 지배하므로(ADR-0022) "저장
-     실패했다는데 그 주가 발행/미발행으로 바뀐" 사용자 가시 결과다(적대적 리뷰가 잡은 자리).
-     참조 게임을 지금 확인해 그 실패 모드를 메타 이전으로 옮긴다: 에디터 로드 후 다른 관리자가
-     게임을 지운 현실적 시나리오는 여기서 걸려 schedule_weeks 가 한 글자도 안 바뀐다.
-     (남는 창은 이 SELECT 와 2단계 INSERT 사이 마이크로초뿐 — 사람이 그 틈에 게임을 지울 수
-     없다. FK 제약은 최종 방어선으로 그대로 두고, 걸리면 라우터가 같은 BAD_REQUEST 로 맵한다.) */
+     gameId 가 없는 게임을 가리키면 2단계 INSERT 가 FK 로 실패한다. 그 실패를 메타 이전으로 옮겨,
+     에디터 로드 후 다른 관리자가 게임을 지운 현실적 시나리오에서 schedule_weeks 가 안 바뀌게 한다.
+     남는 창은 이 SELECT 와 2단계 사이 마이크로초뿐이고, 그 창에 걸려도 위 3단계 구조가 발행
+     상태를 지킨다(2단계 실패 = 메타 롤백). FK 제약은 최종 방어선으로 남긴다. */
   const gameIds = [
     ...new Set(input.entries.map((e) => e.gameId).filter((id): id is number => id !== null)),
   ];
@@ -138,33 +149,30 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
     if (found.length !== gameIds.length) throw new ReferencedGameMissing();
   }
 
-  /* 발행 시각 연속성 때문에 현재 값을 먼저 읽는다. **이 읽기는 검사가 아니다** — 검사는 아래
-     청구문의 WHERE 가 한다. 읽고 나서 남이 저장했더라도 청구가 0행이 되어 걸리므로, 여기서
-     읽은 publishedAt 이 낡은 채로 쓰일 일이 없다. */
+  /* 발행 시각 연속성용 현재 값을 읽는다. 청구가 성공하면 그 사이 아무도 이 주를 못 바꿨으므로
+     (모든 저장이 revision 을 바꾸고, 바꿨으면 아래 청구가 0행이 된다) 이 값은 2단계까지 유효하다. */
   const [existing] = await db
     .select({ publishedAt: scheduleWeeks.publishedAt })
     .from(scheduleWeeks)
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const publishedAt = input.published ? (existing?.publishedAt ?? now) : null;
 
-  /* ── 1단계: 조건부 청구(compare-and-swap) ──────────────────────────────────────
-     revision 검사를 **쓰기 자체의 조건**으로 넣는다. 읽고→비교하고→쓰면 두 요청이 같은
-     revision 을 읽고 **둘 다 통과**할 수 있고, 그다음 전체 교체가 먼저 저장한 사람의 한 주를
-     통째로 지운다(적대적 리뷰가 잡은 자리). WHERE last_updated_at = revision 은 원자적이라
-     동시 요청 중 정확히 하나만 매치한다 — 진 쪽은 0행이라 항목을 건드리기 전에 멈춘다.
-     메타가 없어야 하는 경우(revision null)는 UNIQUE 를 청구로 쓴다: 그 사이 누가 만들었으면
-     onConflictDoNothing 이 0행을 돌려준다. */
+  /* ── 1단계: 청구(claim) — revision 만 원자적으로 잡는다 ────────────────────────────
+     revision 이 있으면 UPDATE … WHERE last_updated_at = revision(그 주가 안 바뀌었을 때만 매치),
+     null 이면 INSERT … onConflictDoNothing(그 사이 아무도 안 만들었을 때만). 어느 쪽이든 0행이면
+     그 사이 누가 손댄 것이라 CONFLICT. **note·publishedAt 은 안 쓴다** — null 청구는 빈 초안
+     placeholder(note·published null)만 만들고, 진짜 메타는 2단계가 쓴다. */
   const claimed =
     input.revision === null
       ? await db
           .insert(scheduleWeeks)
-          .values({ weekStartDate: input.weekStartDate, note: input.note, publishedAt })
+          .values({ weekStartDate: input.weekStartDate })
           .onConflictDoNothing({ target: scheduleWeeks.weekStartDate })
           .returning({ id: scheduleWeeks.id })
       : await db
           .update(scheduleWeeks)
-          // .update() 는 $onUpdate 가 안 도므로 last_updated_at 을 손으로 찍는다(= 새 revision).
-          .set({ note: input.note, publishedAt, lastUpdatedAt: now })
+          // revision 만 단조 증가(nextRevision) — .update() 는 $onUpdate 가 안 돌아 손으로 찍는다.
+          .set({ lastUpdatedAt: nextRevision(input.revision, now) })
           .where(
             and(
               eq(scheduleWeeks.weekStartDate, input.weekStartDate),
@@ -174,11 +182,14 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
           .returning({ id: scheduleWeeks.id });
   if (claimed.length === 0) throw new WeekRevisionConflict();
 
-  /* ── 2단계: 항목 전체 교체 ────────────────────────────────────────────────────
-     청구에 성공한 요청만 여기 온다. 지우기와 넣기는 **한 batch** 로 묶어 원자 실행한다 —
-     그 사이 깨지면 그 주가 반쯤 빈 채로 남기 때문이다. 0단계가 gameId 를 미리 걸렀으므로
-     이 batch 는 현실적으로 실패할 일이 없다 — 그래서 1단계에서 커밋한 메타가 "실패했는데
-     발행 상태만 바뀐" 채로 남는 경로가 닫힌다. */
+  /* ── 2단계: user-visible 메타 + 항목 전체 교체를 한 batch(원자) ──────────────────────
+     note·publishedAt 이 여기서만 쓰인다 — 이 batch 가 실패/중단되면 셋(메타 SET·삭제·삽입)이
+     함께 롤백돼 발행 경계가 안 넘어간다. 0단계가 gameId 를 걸렀으므로 현실적으로 실패하지 않는다.
+     setMeta 는 last_updated_at 을 안 건드린다(1단계가 이미 새 revision 을 박았다). */
+  const setMeta = db
+    .update(scheduleWeeks)
+    .set({ note: input.note, publishedAt })
+    .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const clearEntries = db
     .delete(scheduleEntries)
     .where(
@@ -194,9 +205,9 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
         gameId: e.gameId,
       })),
     );
-    await db.batch([clearEntries, insertEntries]);
+    await db.batch([setMeta, clearEntries, insertEntries]);
   } else {
-    await db.batch([clearEntries]);
+    await db.batch([setMeta, clearEntries]);
   }
 
   return getWeekForEdit(db, input.weekStartDate);

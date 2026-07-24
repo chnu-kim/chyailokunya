@@ -5,7 +5,7 @@ import { makeDb, scheduleEntries } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
-import { getPublishedWeek } from "./service";
+import { getPublishedWeek, nextRevision } from "./service";
 
 /* 일정 라우터 — 주 단위 일괄 저장(전체 교체)의 서버 권위·불변식을 caller 로 직접 증명한다.
    각 it 은 격리 저장소라 마이그레이션된 빈 스키마에서 시작한다(setupFiles). */
@@ -32,6 +32,17 @@ async function saveWeekAsEditor(caller: Caller, input: Omit<SaveInput, "revision
   const { revision } = await caller.schedule.getWeek({ weekStartDate: input.weekStartDate });
   return caller.schedule.saveWeek({ ...input, revision });
 }
+
+describe("nextRevision — CAS 토큰은 단조 증가", () => {
+  it("now 가 크면 now, 아니면 old+1 로 무조건 커진다(같은 ms·시계 역행 방어)", () => {
+    expect(nextRevision(1000, 2000)).toBe(2000); // 정상: 벽시계 전진
+    expect(nextRevision(1000, 1000)).toBe(1001); // 같은 ms 충돌: 그래도 값이 바뀐다
+    expect(nextRevision(5000, 3000)).toBe(5001); // 시계 역행: 여전히 strictly greater
+    // 어느 경우든 결과가 입력보다 크다 = stale revision 이 다음 CAS 를 못 통과한다.
+    expect(nextRevision(1000, 1000)).toBeGreaterThan(1000);
+    expect(nextRevision(5000, 3000)).toBeGreaterThan(5000);
+  });
+});
 
 describe("일정 라우터", () => {
   it("getWeek·saveWeek 은 schedule:write 없으면 FORBIDDEN(서버 권위)", async () => {
