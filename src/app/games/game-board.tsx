@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
-import { ANGLE, axis, formatDate, PATTERNS, ROT } from "@/core/games";
+import { ANGLE, axis, formatDate, isPlayDateEditable, PATTERNS, ROT } from "@/core/games";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
@@ -432,7 +432,7 @@ function GameEditor({
         );
         if (!alive) return;
         setDates(found);
-        // 항목이 하나면 그 날짜가 곧 편집 대상이다. 여럿이면 잠기므로 입력값은 안 쓰인다.
+        // 항목이 하나면 그 날짜가 곧 편집 대상이다. 여럿이면 잠기고 저장에 안 실린다(onSave).
         setPlayedDate(found.length === 1 ? found[0]! : "");
       } catch {
         if (!alive) return;
@@ -450,13 +450,18 @@ function GameEditor({
     startSave(async () => {
       setError("");
       try {
-        // 빈 문자열 → null 전처리의 정본은 서버 updateGameInput(Zod)이다 — 여기서 다시 하지 않는다.
+        /* 여러 날 편성이면 playedDate 를 **아예 안 싣는다** — 필드 부재가 "일정을 안 건드린다"
+           이고(서버 playDateInput 규약), 그래야 잠긴 폼에서도 클리어를 고칠 수 있다. 한때
+           잠금 상태에서 빈 문자열을 실었는데 그게 null 로 접혀 "여러 날을 지우려 한다"로
+           거절돼 **저장이 통째로 막혔다**(codex 리뷰가 잡은 회귀 — e2e 가 지킨다).
+           빈 문자열 → null 전처리의 정본은 서버 updateGameInput(Zod)이다 — 여기서 다시 하지 않는다. */
+        const locked = dates !== null && !isPlayDateEditable(dates);
         const row = await trpc.games.update.mutate(
           {
             id: game.id,
             cleared: draft.cleared,
             clearedDate: draft.clearedDate,
-            playedDate,
+            ...(locked ? {} : { playedDate }),
           },
           // 상한이 없으면 saving 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
           { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },

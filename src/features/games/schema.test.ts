@@ -160,13 +160,18 @@ describe("updateGameInput — 클리어 상태", () => {
 });
 
 describe("updateGameInput — 플레이 날짜", () => {
-  /* clearedDate 와 달리 **빠뜨리면 거절**한다. playedDate 는 null 이 곧 "일정 항목을 지운다"라,
-     기본값을 주면 필드를 안 실은 호출자가 조용히 날짜를 지운다 — 그 실수를 여기서 잡는다. */
-  it("playedDate 를 안 보내면 거절 — '안 보냄'이 '지움'으로 읽히지 않게", () => {
-    expect(updateGameInput.safeParse({ id: 1, cleared: false }).success).toBe(false);
+  /* 세 상태를 값이 아니라 **키의 유무**로 가른다. 초판은 필수로 두고 "안 바꾸려면 기존 날짜를
+     되보내라"였는데, 여러 날 편성이라 잠긴 폼엔 되보낼 값이 하나로 정해지지 않아 빈 값이 나갔고
+     그게 삭제 시도로 거절돼 클리어 수정까지 막혔다(codex 리뷰). */
+  it("playedDate 를 안 보내면 통과하고 undefined 로 남는다 — '일정을 안 건드린다'", () => {
+    const result = updateGameInput.safeParse({ id: 1, cleared: false });
+    expect(result.success).toBe(true);
+    /* null 로 접히면 안 된다 — 그건 "지운다"라 잠긴 폼의 저장이 일정을 날린다. 키가 없다는
+       사실 자체가 값과 구분돼야 서비스가 세 갈래를 가를 수 있다. */
+    if (result.success) expect(result.data.playedDate).toBeUndefined();
     expect(
       updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: "2026-07-20" }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("명시한 null 은 통과 — 그건 지우겠다는 뜻이다", () => {

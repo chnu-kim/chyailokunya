@@ -389,7 +389,11 @@ describe("games 라우터", () => {
     expect(dates).toEqual(["2026-07-20", "2026-07-21"]);
   });
 
-  it("여러 날이어도 기존 날짜를 되보내면 클리어만 고칠 수 있다(잠긴 폼의 정상 저장)", async () => {
+  /* 잠긴 폼의 정상 저장 = playedDate 를 **아예 안 싣는다**. 초판은 "기존 날짜를 되보내면 통과"
+     였는데, 잠긴 폼엔 되보낼 값이 하나로 정해지지 않아(날짜가 여럿이다) 실제로는 빈 값이
+     나갔고 그게 삭제 시도로 거절돼 **클리어 수정이 통째로 막혔다**(codex 리뷰). 서버 규약만
+     테스트하고 폼이 보내는 값을 안 봐서 놓친 자리라, e2e 가 실제 페이로드를 따로 지킨다. */
+  it("여러 날이어도 playedDate 를 안 실으면 클리어만 고칠 수 있다(잠긴 폼의 정상 저장)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
     const db = makeDb(env.DB);
@@ -401,14 +405,25 @@ describe("games 라우터", () => {
       id: row.id,
       cleared: true,
       clearedDate: "2026-07-21",
-      playedDate: "2026-07-20", // 기존 날짜 중 하나 = "안 바꾸겠다"
+      // playedDate 없음 = 일정을 안 건드린다.
     });
     expect(done.cleared).toBe(true);
 
-    /* 통과했다고 항목을 건드리면 안 된다 — 가장 이른 날의 항목을 되보낸 값으로 덮어쓰면
-       "클리어만 고치는" 저장이 조용히 날짜를 옮긴다. 두 날이 그대로여야 한다. */
+    /* 통과했다고 항목을 건드리면 안 된다 — 필드가 없는데 entries[0] 를 UPDATE/DELETE 하면
+       "클리어만 고치는" 저장이 가장 이른 날을 조용히 옮기거나 지운다. 두 날이 그대로여야 한다. */
     const dates = (await db.select().from(scheduleEntries)).map((e) => e.scheduledDate).sort();
     expect(dates).toEqual(["2026-07-20", "2026-07-21"]);
+  });
+
+  /* 항목이 하나인 게임도 같은 규약을 따른다 — 필드가 없으면 안 건드린다. 이게 안 서면 잠기지
+     않은 폼이 클리어만 고치려 할 때(값을 안 실었을 때) 멀쩡한 날짜가 지워진다. */
+  it("항목이 하나여도 playedDate 를 안 실으면 그 항목이 그대로 남는다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
+    const done = await authed.games.update({ id: row.id, cleared: true, clearedDate: null });
+    expect(done.cleared).toBe(true);
+    expect(done.lastPlayed).toBe("2026-07-20");
+    expect(await authed.games.playDates({ id: row.id })).toEqual(["2026-07-20"]);
   });
 
   it("playDates 는 game:write 를 요구한다(초안 주의 날짜라 공개 아님)", async () => {

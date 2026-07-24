@@ -160,15 +160,20 @@ export async function addGame(db: Db, input: AddGameInput): Promise<GameCard> {
 /* 수정 — 클리어 상태와 플레이 날짜를 **한 batch(원자)** 로 쓴다. 따로 쓰면 "클리어는 저장됐는데
    날짜는 안 된" 절반 상태가 남는다(사용자 요청으로 묶었다).
 
-   일정 항목 조작은 현재 항목 수로 갈린다(core.isPlayDateEditable):
+   **playedDate 필드가 아예 없으면 일정을 안 건드린다** — 클리어만 고치는 저장이다. 여러 날
+   편성이라 폼이 날짜를 잠근 경우가 이 길로 온다(schema 의 playDateInput 주석에 있는 회귀:
+   초판은 "안 바꾸려면 기존 날짜를 되보내라"였는데 잠긴 폼엔 되보낼 값이 하나로 안 정해져
+   빈 값이 나갔고, 그게 삭제 시도로 거절돼 **클리어 수정 자체가 막혔다**).
+
+   필드가 있으면 현재 항목 수로 갈린다(core.isPlayDateEditable):
      0개 + 날짜 → INSERT      1개 + 날짜 → 그 항목 UPDATE(시각·제목 보존)
      1개 + null → DELETE      0개 + null → 항목 연산 없음
    1개일 때 지우고 새로 넣지 않고 UPDATE 하는 이유는 그 항목의 start_time·title 을 지키려는
    것이다 — /schedule 에서 "20:00 젤다 2회차"로 짜 둔 걸 게임 폼이 날짜만 옮기려다 지운다.
 
-   **여러 날 편성이면 변경을 거절한다.** 폼이 잠근 상태에서 오는 정상 저장(클리어만 고침)은
-   기존 날짜 중 하나를 그대로 되보내므로 통과하고, 실제로 바꾸려는 값이면 막힌다. null 도
-   막는다 — 여러 날을 한 입력으로 지우는 건 폼이 표현하지 못한 의도다.
+   **여러 날 편성인데 필드가 실려 오면 거절한다.** 날짜든 null 이든 마찬가지다 — 여러 날을
+   입력 하나로 옮기거나 지우는 건 폼이 표현하지 못한 의도라, 위조 클라이언트가 곧장 부르면
+   나머지 날이 조용히 남거나 통째로 사라진다(불변식 3).
 
    ── 알고 수용한 한계: 읽기~batch 사이 gap ────────────────────────────────────────
    항목 조회와 batch 는 별개 왕복이라(D1 엔 대화형 트랜잭션이 없다) 그 사이 다른 관리자가
@@ -186,11 +191,11 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
   ]);
   if (!rows[0]) return null;
 
-  const editable = isPlayDateEditable(entries.map((e) => e.scheduledDate));
-  if (!editable) {
-    const unchanged =
-      input.playedDate !== null && entries.some((e) => e.scheduledDate === input.playedDate);
-    if (!unchanged) throw new MultiDayScheduleLocked();
+  /* 필드 부재 = 일정을 안 건드린다. 여러 날 검사보다 **먼저** 본다 — 잠긴 폼의 정상 저장이
+     여기서 빠져나가야 클리어 수정이 막히지 않는다. */
+  const touchesSchedule = input.playedDate !== undefined;
+  if (touchesSchedule && !isPlayDateEditable(entries.map((e) => e.scheduledDate))) {
+    throw new MultiDayScheduleLocked();
   }
 
   const updateRow = db
@@ -199,12 +204,11 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
     .where(eq(games.id, input.id))
     .returning();
 
-  /* 여러 날 편성이면 항목을 **아예 안 건드린다**(위 검사를 통과했다 = 날짜를 안 바꾸겠다는
-     저장이다). 여기서 entries[0] 를 UPDATE 하면 "클리어만 고치는" 저장이 가장 이른 날의
-     항목을 조용히 다른 날로 옮긴다 — 거절 검사를 통과한 요청이 데이터를 바꾸는 자리라
-     특히 조용하다. */
-  const current = editable ? entries[0] : null;
-  const entryOp = !editable
+  /* 필드가 없으면 항목 연산 자체가 없다 — 위 검사를 안 거쳤으므로 entries 는 여러 날일 수도
+     있는데, 그때 entries[0] 를 건드리면 "클리어만 고치는" 저장이 가장 이른 날을 조용히
+     옮기거나 지운다. undefined 를 여기서 한 번 더 가르는 게 그 자리를 닫는다. */
+  const current = touchesSchedule ? entries[0] : undefined;
+  const entryOp = !touchesSchedule
     ? null
     : input.playedDate === null
       ? current
@@ -216,7 +220,7 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
             .set({ scheduledDate: input.playedDate })
             .where(eq(scheduleEntries.id, current.id))
         : db.insert(scheduleEntries).values({
-            scheduledDate: input.playedDate,
+            scheduledDate: input.playedDate!,
             startTime: null,
             title: rows[0].categoryValue,
             gameId: input.id,
