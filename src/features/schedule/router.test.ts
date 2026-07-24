@@ -21,6 +21,18 @@ function makeCtx(over: { authorities?: ReadonlySet<Authority> } = {}): Context {
 // 2026-07-20 은 월요일 — 주의 시작. 이 주의 7일은 07-20..07-26.
 const MON = "2026-07-20";
 
+type Caller = ReturnType<typeof createCaller>;
+type SaveInput = Parameters<Caller["schedule"]["saveWeek"]>[0];
+
+/* 편집기가 하는 일 그대로 — 그 주를 불러와 revision 을 얻고 그걸로 저장한다. saveWeek 이
+   낙관적 동시성 토큰을 요구하게 된 뒤로 대부분의 테스트는 "경합 없는 정상 경로"를 원하므로
+   여기로 몬다(경합 자체는 전용 테스트가 revision 을 손으로 어긋내 본다).
+   getWeek 이 schedule:write 를 요구하므로 **권한 있는 caller 로만** 쓴다. */
+async function saveWeekAsEditor(caller: Caller, input: Omit<SaveInput, "revision">) {
+  const { revision } = await caller.schedule.getWeek({ weekStartDate: input.weekStartDate });
+  return caller.schedule.saveWeek({ ...input, revision });
+}
+
 describe("일정 라우터", () => {
   it("getWeek·saveWeek 은 schedule:write 없으면 FORBIDDEN(서버 권위)", async () => {
     const caller = createCaller(makeCtx()); // member = 빈 권한
@@ -28,7 +40,7 @@ describe("일정 라우터", () => {
       code: "FORBIDDEN",
     });
     await expect(
-      caller.schedule.saveWeek({ weekStartDate: MON, entries: [] }),
+      caller.schedule.saveWeek({ weekStartDate: MON, revision: null, entries: [] }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
@@ -40,13 +52,14 @@ describe("일정 라우터", () => {
       note: null,
       publishedAt: null,
       hasMeta: false,
+      revision: null,
       entries: [],
     });
   });
 
   it("saveWeek 은 그 주를 저장하고 getWeek 이 되읽는다", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       note: "이번 주는 젤다 위주",
       entries: [
@@ -63,7 +76,7 @@ describe("일정 라우터", () => {
 
   it("하루 안에서는 시각 있는 항목이 먼저, 시각 없는 항목은 끝으로", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       entries: [
         { scheduledDate: "2026-07-20", startTime: null, title: "미정" },
@@ -77,7 +90,7 @@ describe("일정 라우터", () => {
 
   it("일괄 저장은 그 주를 전체 교체한다 — 뺀 항목은 사라진다", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       entries: [
         { scheduledDate: "2026-07-20", title: "A" },
@@ -85,7 +98,7 @@ describe("일정 라우터", () => {
       ],
     });
     // 다시 저장하며 B 를 뺀다 — 전체 교체라 B 는 사라지고 C 가 생긴다.
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       entries: [
         { scheduledDate: "2026-07-20", title: "A" },
@@ -99,12 +112,12 @@ describe("일정 라우터", () => {
   it("전체 교체는 그 주만 건드린다 — 다른 주의 항목은 남는다", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     const nextMon = "2026-07-27";
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: nextMon,
       entries: [{ scheduledDate: "2026-07-28", title: "다음 주 항목" }],
     });
     // MON 주를 저장(교체)해도 다음 주는 그대로여야 한다.
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       entries: [{ scheduledDate: "2026-07-20", title: "이번 주 항목" }],
     });
@@ -114,21 +127,21 @@ describe("일정 라우터", () => {
 
   it("발행 시각은 처음 발행 때만 찍고 재저장엔 유지, 내리면 null", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
-    const first = await caller.schedule.saveWeek({
+    const first = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: true,
       entries: [],
     });
     expect(typeof first.publishedAt).toBe("number");
     // 재저장(계속 발행)엔 발행 시각이 안 바뀐다.
-    const again = await caller.schedule.saveWeek({
+    const again = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: true,
       entries: [],
     });
     expect(again.publishedAt).toBe(first.publishedAt);
     // 발행을 내리면 초안으로 되돌아간다.
-    const draft = await caller.schedule.saveWeek({
+    const draft = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: false,
       entries: [],
@@ -140,7 +153,7 @@ describe("일정 라우터", () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     // 2026-07-21 은 화요일.
     await expect(
-      caller.schedule.saveWeek({ weekStartDate: "2026-07-21", entries: [] }),
+      caller.schedule.saveWeek({ weekStartDate: "2026-07-21", revision: null, entries: [] }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(caller.schedule.getWeek({ weekStartDate: "2026-07-21" })).rejects.toMatchObject({
       code: "BAD_REQUEST",
@@ -152,6 +165,7 @@ describe("일정 라우터", () => {
     await expect(
       caller.schedule.saveWeek({
         weekStartDate: MON,
+        revision: null,
         entries: [{ scheduledDate: "2026-07-27", title: "다음 주로 샌 항목" }],
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -162,12 +176,84 @@ describe("일정 라우터", () => {
     await expect(
       caller.schedule.saveWeek({
         weekStartDate: MON,
+        revision: null,
         entries: [{ scheduledDate: "2026-07-20", title: "유령 게임", gameId: 9999 }],
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     // 롤백됐으면 주도 안 남는다(배치 원자성).
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
     expect(week.entries).toEqual([]);
+  });
+
+  it("stale revision 으로 저장하면 CONFLICT — 남의 항목을 덮어쓰지 않는다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    // 관리자 A 가 주를 연다(이 시점의 revision 을 손에 쥔다).
+    const opened = await caller.schedule.getWeek({ weekStartDate: MON });
+
+    // 그 사이 관리자 B 가 먼저 저장한다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      entries: [{ scheduledDate: "2026-07-20", title: "B 가 넣은 항목" }],
+    });
+
+    /* A 가 자기 초안을 저장한다 — 전체 교체라 그대로 통과시키면 B 의 항목이 **통째로 사라진다**.
+       불러온 시점의 revision 이 지금과 달라 CONFLICT 로 거절돼야 한다. */
+    await expect(
+      caller.schedule.saveWeek({
+        weekStartDate: MON,
+        revision: opened.revision,
+        entries: [{ scheduledDate: "2026-07-21", title: "A 가 넣은 항목" }],
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    // 거절됐으면 B 의 저장이 그대로 남아 있어야 한다(A 가 아무것도 못 지웠다).
+    const after = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(after.entries.map((e) => e.title)).toEqual(["B 가 넣은 항목"]);
+
+    // 새로고침해 최신 revision 을 다시 잡으면 정상 저장된다(막힌 게 아니라 덮어쓰기만 막혔다).
+    const reopened = await caller.schedule.getWeek({ weekStartDate: MON });
+    const ok = await caller.schedule.saveWeek({
+      weekStartDate: MON,
+      revision: reopened.revision,
+      entries: [{ scheduledDate: "2026-07-21", title: "A 가 다시 넣은 항목" }],
+    });
+    expect(ok.entries.map((e) => e.title)).toEqual(["A 가 다시 넣은 항목"]);
+  });
+
+  it("같은 revision 으로 **동시에** 저장하면 하나만 통과한다(검사가 쓰기 조건이라서)", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    // 둘 다 같은 시점의 주를 열었다(= 같은 revision 을 쥔다). 아직 메타가 없어 null.
+    const opened = await caller.schedule.getWeek({ weekStartDate: MON });
+
+    /* 두 저장을 **동시에** 띄운다. 읽고→비교하고→쓰는 방식이면 둘 다 같은 revision 을 읽고
+       통과해 나중 것이 앞의 것을 통째로 지운다 — 이 테스트가 그 창을 겨냥한다. 조건부 청구면
+       정확히 하나만 매치하고 진 쪽은 항목을 건드리기 전에 CONFLICT 로 멈춘다. */
+    const results = await Promise.allSettled([
+      caller.schedule.saveWeek({
+        weekStartDate: MON,
+        revision: opened.revision,
+        entries: [{ scheduledDate: "2026-07-20", title: "A" }],
+      }),
+      caller.schedule.saveWeek({
+        weekStartDate: MON,
+        revision: opened.revision,
+        entries: [{ scheduledDate: "2026-07-21", title: "B" }],
+      }),
+    ]);
+
+    const ok = results.filter((r) => r.status === "fulfilled");
+    const failed = results.filter((r) => r.status === "rejected");
+    expect(ok).toHaveLength(1);
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.status === "rejected" && failed[0]!.reason).toMatchObject({
+      code: "CONFLICT",
+    });
+
+    // 이긴 쪽의 항목만 남는다 — 진 쪽이 아무것도 지우지 못했다.
+    const after = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(after.entries).toHaveLength(1);
+    const winner = ok[0]!.status === "fulfilled" ? ok[0]!.value : null;
+    expect(after.entries[0]!.title).toBe(winner!.entries[0]!.title);
   });
 
   it("이관된 레거시 주(메타 없음)를 편집기 기본값대로 저장해도 보드 날짜가 안 사라진다", async () => {
@@ -197,7 +283,7 @@ describe("일정 라우터", () => {
        published:false 로 저장하면 published_at NULL 인 메타가 생겨 **여기서 날짜가 사라진다**
        (이관이 지킨 "손실 0"이 첫 편집에서 깨지는 경로 — 이 테스트가 그 회귀를 막는다). */
     const published = loaded.publishedAt !== null || !loaded.hasMeta;
-    await authed.schedule.saveWeek({
+    await saveWeekAsEditor(authed, {
       weekStartDate: MON,
       note: loaded.note,
       published,
@@ -215,14 +301,14 @@ describe("일정 라우터", () => {
     const db = makeDb(env.DB);
     const caller = createCaller(makeCtx({ authorities: admin }));
     // 초안으로 저장 — 편집자는 getWeek 으로 보지만 공개 읽기엔 안 뜬다.
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       note: "짜는 중",
       entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
     });
     expect(await getPublishedWeek(db, MON)).toBeNull();
     // 발행하면 공개 읽기가 그 주를 준다(전체 교체라 편집기처럼 note 도 함께 다시 보낸다).
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       note: "짜는 중",
       published: true,
@@ -244,7 +330,7 @@ describe("일정 라우터", () => {
     expect(game.lastPlayed).toBeNull();
     // 일정에 그 게임을 07-20 에 붙이고 **발행**하면 보드가 그 날짜를 되유도한다. 발행이 곧
     // 공개 경계라, 초안으로만 저장하면 아직 보드에 안 뜬다(ADR-0022, games 라우터 테스트가 증명).
-    await caller.schedule.saveWeek({
+    await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: true,
       entries: [{ scheduledDate: "2026-07-20", title: "젤다", gameId: game.id }],

@@ -144,8 +144,10 @@ describe("games 라우터", () => {
     const db = makeDb(env.DB);
     const game = await authed.games.add(eldenring);
     // 2026-07-20 은 월요일. 그 주에 이 게임을 붙여 **초안(미발행)** 으로 저장한다.
-    await authed.schedule.saveWeek({
+    // revision 은 낙관적 동시성 토큰 — 아직 그 주 메타가 없으므로 null 이 맞다.
+    const saved = await authed.schedule.saveWeek({
       weekStartDate: "2026-07-20",
+      revision: null,
       entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: game.id }],
     });
     // 초안 주의 항목은 보드 날짜에 안 센다 — 관리자가 짜는 중인 편성이 미래 날짜로 새면 안 된다.
@@ -153,8 +155,10 @@ describe("games 라우터", () => {
     expect(draft[0]!.lastPlayed).toBeNull();
 
     // 같은 주를 발행하면 그 항목이 보드 날짜로 뜬다(발행이 곧 공개 경계).
+    // 이어 저장이라 방금 저장이 돌려준 revision 을 그대로 잇는다(편집기가 하는 일과 같다).
     await authed.schedule.saveWeek({
       weekStartDate: "2026-07-20",
+      revision: saved.revision,
       published: true,
       entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: game.id }],
     });

@@ -2,8 +2,11 @@
    않는다 — 모든 쓰기가 이 경계를 통과한 뒤 인가·저장으로 간다.
 
    쓰기는 **주 단위 일괄 저장 하나**다(결정 14): 한 주의 원하는 상태(항목 전체 + 메타)를 통째로
-   보내면 서버가 그 주를 전체 교체한다. 항목별 add/update/delete 를 클라이언트가 추적하지 않아
-   (전체 교체라) 동시 편집 충돌면도 작다 — 마지막 저장이 그 주의 정본이 된다. */
+   보내면 서버가 그 주를 전체 교체한다 — 항목별 add/update/delete 를 클라이언트가 추적하지 않는다.
+
+   전체 교체라 **경합의 피해 반경이 크다**(먼저 저장한 사람의 항목이 통째로 지워진다). 그래서
+   "마지막 저장이 이긴다"로 두지 않고 낙관적 동시성을 건다 — 불러온 시점의 revision 을 함께
+   받아 어긋나면 CONFLICT 로 거절한다(service.saveWeek·아래 revision 필드). */
 
 import { z } from "zod";
 import { isIsoDate, toIsoDate, weekStartOf } from "@/core/calendar";
@@ -41,6 +44,11 @@ const entryInput = z.object({
 export const saveWeekInput = z
   .object({
     weekStartDate: isoDate,
+    /* 불러온 시점의 주 revision(= 메타의 last_updated_at, 메타가 없었으면 null). **선택이 아니라
+       필수다** — 생략을 허용하면 "검사 없이 덮어쓰기"가 조용한 기본값이 되고, 그건 전체 교체에서
+       남의 한 주를 통째로 지우는 경로다(service.saveWeek 의 낙관적 동시성 주석). 새 주를 처음
+       저장하는 정당한 경우는 null 로 명시한다. */
+    revision: z.number().int().nullable(),
     note: z.preprocess(
       (v) => (typeof v === "string" && v.trim() === "" ? null : v),
       z.string().trim().max(500).nullable().default(null),

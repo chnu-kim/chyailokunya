@@ -62,6 +62,11 @@ function saveErrorMessage(e: unknown): string {
   const code = (e as { data?: { code?: string } } | null)?.data?.code ?? null;
   if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
     return "로그인이 만료됐거나 권한이 없어요. 다시 로그인해 주세요.";
+  /* 낙관적 동시성 거절. **저장되지 않았다고 단정할 수 있다** — 서버가 쓰기 전에 막았다.
+     덮어쓰기를 막은 것이므로 "다시 시도"가 아니라 새로고침해서 남의 저장 위에서 다시 편집하라고
+     말한다(그냥 재시도하면 같은 revision 이라 또 걸린다). */
+  if (code === "CONFLICT")
+    return "다른 곳에서 이 주를 먼저 저장했어요. 저장하지 않았어요 — 새로고침해서 다시 편집해 주세요.";
   // saveWeek 의 BAD_REQUEST: 삭제된 게임을 가리켰거나(FK) 날짜가 그 주를 벗어남(Zod).
   if (code === "BAD_REQUEST")
     return "저장할 수 없는 일정이에요 — 지워진 게임을 가리켰거나 날짜가 그 주를 벗어났을 수 있어요.";
@@ -82,6 +87,11 @@ export function ScheduleEditor({
   const [draft, setDraft] = useState<WeekDraft>(() => weekToDraft(initialWeek));
   // 마지막으로 저장된 기준선. dirty 판정과 "이탈 경고"가 이걸 draft 와 견준다.
   const [baseline, setBaseline] = useState<WeekDraft>(() => weekToDraft(initialWeek));
+  /* 불러온 시점의 주 revision. 저장에 되돌려 보내 그 사이 누가 저장했는지 서버가 판정한다
+     (service.saveWeek). draft 가 아니라 여기 따로 두는 이유: 편집 내용이 아니라 서버가 준
+     동시성 토큰이라 core 의 WeekDraft 에 섞으면 dirty 비교에 끼어든다. 저장이 성공하면 서버가
+     준 새 값으로 갈아 끼워야 연속 저장이 이어진다(안 갈면 두 번째 저장이 자기 자신과 충돌한다). */
+  const [revision, setRevision] = useState(initialWeek.revision);
   const [error, setError] = useState("");
   const [announcement, setAnnouncement] = useState("");
   const [saving, startSave] = useTransition();
@@ -148,6 +158,7 @@ export function ScheduleEditor({
         const saved = await trpc.schedule.saveWeek.mutate(
           {
             weekStartDate,
+            revision,
             note: draft.note,
             published: draft.published,
             entries: draftEntryInputs(draft),
@@ -157,6 +168,7 @@ export function ScheduleEditor({
         const next = weekToDraft(saved);
         setDraft(next);
         setBaseline(next);
+        setRevision(saved.revision);
         setAnnouncement(draft.published ? "일정을 저장하고 발행했어요" : "일정을 저장했어요(초안)");
       } catch (e) {
         setError(saveErrorMessage(e));

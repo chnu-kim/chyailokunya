@@ -5,7 +5,7 @@
 import { TRPCError } from "@trpc/server";
 import { authorizedProcedure, router } from "../trpc/init";
 import { getWeekInput, saveWeekInput } from "./schema";
-import { getWeekForEdit, saveWeek } from "./service";
+import { getWeekForEdit, saveWeek, WeekRevisionConflict } from "./service";
 
 export const scheduleRouter = router({
   // 편집 화면이 한 주를 불러온다 — 발행 여부와 무관하게(초안 편집). 읽기지만 초안이 새지 않게
@@ -22,6 +22,14 @@ export const scheduleRouter = router({
       try {
         return await saveWeek(ctx.db, input);
       } catch (e) {
+        /* 불러온 뒤 누군가 이 주를 먼저 저장했다. 전체 교체라 그대로 진행하면 그 사람의 항목이
+           통째로 사라지므로 덮어쓰지 않고 거절한다 — 편집기가 이 코드를 받아 안내한다. */
+        if (e instanceof WeekRevisionConflict) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "다른 곳에서 이 주를 먼저 저장했어요.",
+          });
+        }
         if (isForeignKeyViolation(e)) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "보드에 없는 게임을 가리켰어요." });
         }

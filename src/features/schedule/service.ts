@@ -23,6 +23,11 @@ export type WeekView = {
      편집에서 깨진다. 그래서 편집기는 메타 없는 주를 "이미 공개 중"으로 열어야 하고(발행 체크됨),
      그 판단 근거가 이 필드다. */
   hasMeta: boolean;
+  /* 낙관적 동시성의 토큰 — 이 주 메타의 last_updated_at(메타가 없으면 null). 편집기는 불러온
+     이 값을 저장에 되돌려 보내고, 서버는 그 사이 주가 바뀌었는지 이걸로 판정한다(saveWeek).
+     별도 revision 컬럼을 안 두는 이유: last_updated_at 이 이미 "이 주가 마지막으로 바뀐 순간"
+     이라 같은 사실을 두 곳에 적을 필요가 없다. */
+  revision: number | null;
   entries: ScheduleEntry[];
 };
 
@@ -60,6 +65,7 @@ export async function getWeekForEdit(db: Db, weekStartDate: string): Promise<Wee
     note: meta?.note ?? null,
     publishedAt: meta?.publishedAt ?? null,
     hasMeta: meta !== undefined,
+    revision: meta?.lastUpdatedAt ?? null,
     entries,
   };
 }
@@ -73,11 +79,31 @@ export async function getPublishedWeek(db: Db, weekStartDate: string): Promise<W
   return week.publishedAt !== null ? week : null;
 }
 
+/* 다른 편집자(또는 다른 탭)가 먼저 저장해 revision 이 어긋났다. 라우터가 CONFLICT 로 올린다.
+   서비스는 tRPC 무관이라 TRPCError 를 안 쓰고 도메인 오류로 던진다(games 의 "없으면 null" 과
+   같은 결 — 매핑은 라우터가 한다). */
+export class WeekRevisionConflict extends Error {
+  constructor() {
+    super("week revision conflict");
+    this.name = "WeekRevisionConflict";
+  }
+}
+
 /* 주 단위 일괄 저장 = 그 주 전체 교체(결정 14). 메타를 upsert 하고, 그 주 날짜 범위의 항목을
    전부 지운 뒤 보낸 항목을 다시 넣는다 — 클라이언트가 항목별 add/update/delete 를 추적하지 않아도
-   되고, 마지막 저장이 그 주의 정본이 된다. **D1 batch() 로 원자 실행**한다: 지우고 넣는 사이에
-   깨지면 그 주가 반쯤 빈 채로 남기 때문이다. 다른 주의 항목·이관된 과거 아카이브는 날짜 범위
-   밖이라 안 건드린다.
+   된다. **D1 batch() 로 원자 실행**한다: 지우고 넣는 사이에 깨지면 그 주가 반쯤 빈 채로 남기
+   때문이다. 다른 주의 항목·이관된 과거 아카이브는 날짜 범위 밖이라 안 건드린다.
+
+   ── 낙관적 동시성(revision) ────────────────────────────────────────────────────────
+   전체 교체라 **경합의 피해 반경이 크다**: stale 한 초안이 필드 하나를 덮어쓰는 게 아니라 그 주를
+   통째로 지우고 자기 것으로 채운다 — 먼저 저장한 사람의 항목이 통째로 사라진다. 빈도가 낮아도
+   (관리자 소수) 한 번 나면 복구가 없으므로, 불러온 시점의 revision 을 함께 받아 검사한다.
+   revision = 그 주 메타의 last_updated_at, 메타가 없으면 null(= "내가 불러올 땐 이 주가 아직
+   없었다"). 어긋나면 CONFLICT 로 거절한다 — 덮어쓰지 않는다.
+
+   **검사는 읽어서 비교하는 게 아니라 쓰기의 조건이다.** 읽고→비교하고→쓰면 두 요청이 같은
+   revision 을 읽고 둘 다 통과할 수 있어(검사와 쓰기 사이 창) 방어가 이름만 남는다. 아래 1단계의
+   조건부 UPDATE/INSERT 가 그 창을 없앤다 — 자세한 건 거기 주석.
 
    발행 시각은 처음 발행할 때만 찍고 이후 저장엔 유지한다(existing ?? now) — 재저장마다 바뀌면
    "언제 발행했나"가 무의미해진다. 발행을 내리면 null 로 되돌린다(다시 초안). */
@@ -85,20 +111,52 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
   const { monday, sunday } = weekBounds(input.weekStartDate);
   const now = Date.now();
 
+  /* 발행 시각 연속성 때문에 현재 값을 먼저 읽는다. **이 읽기는 검사가 아니다** — 검사는 아래
+     청구문의 WHERE 가 한다. 읽고 나서 남이 저장했더라도 청구가 0행이 되어 걸리므로, 여기서
+     읽은 publishedAt 이 낡은 채로 쓰일 일이 없다. */
   const [existing] = await db
     .select({ publishedAt: scheduleWeeks.publishedAt })
     .from(scheduleWeeks)
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const publishedAt = input.published ? (existing?.publishedAt ?? now) : null;
 
-  const upsertWeek = db
-    .insert(scheduleWeeks)
-    .values({ weekStartDate: input.weekStartDate, note: input.note, publishedAt })
-    // onConflictDoUpdate 는 .update() 가 아니라 $onUpdate 가 안 돈다 — last_updated_at 을 손으로 찍는다.
-    .onConflictDoUpdate({
-      target: scheduleWeeks.weekStartDate,
-      set: { note: input.note, publishedAt, lastUpdatedAt: now },
-    });
+  /* ── 1단계: 조건부 청구(compare-and-swap) ──────────────────────────────────────
+     revision 검사를 **쓰기 자체의 조건**으로 넣는다. 읽고→비교하고→쓰면 두 요청이 같은
+     revision 을 읽고 **둘 다 통과**할 수 있고, 그다음 전체 교체가 먼저 저장한 사람의 한 주를
+     통째로 지운다(적대적 리뷰가 잡은 자리). WHERE last_updated_at = revision 은 원자적이라
+     동시 요청 중 정확히 하나만 매치한다 — 진 쪽은 0행이라 항목을 건드리기 전에 멈춘다.
+     메타가 없어야 하는 경우(revision null)는 UNIQUE 를 청구로 쓴다: 그 사이 누가 만들었으면
+     onConflictDoNothing 이 0행을 돌려준다. */
+  const claimed =
+    input.revision === null
+      ? await db
+          .insert(scheduleWeeks)
+          .values({ weekStartDate: input.weekStartDate, note: input.note, publishedAt })
+          .onConflictDoNothing({ target: scheduleWeeks.weekStartDate })
+          .returning({ id: scheduleWeeks.id })
+      : await db
+          .update(scheduleWeeks)
+          // .update() 는 $onUpdate 가 안 도므로 last_updated_at 을 손으로 찍는다(= 새 revision).
+          .set({ note: input.note, publishedAt, lastUpdatedAt: now })
+          .where(
+            and(
+              eq(scheduleWeeks.weekStartDate, input.weekStartDate),
+              eq(scheduleWeeks.lastUpdatedAt, input.revision),
+            ),
+          )
+          .returning({ id: scheduleWeeks.id });
+  if (claimed.length === 0) throw new WeekRevisionConflict();
+
+  /* ── 2단계: 항목 전체 교체 ────────────────────────────────────────────────────
+     청구에 성공한 요청만 여기 온다. 지우기와 넣기는 **한 batch** 로 묶어 원자 실행한다 —
+     그 사이 깨지면 그 주가 반쯤 빈 채로 남기 때문이다.
+
+     청구를 batch 밖으로 뺀 대가가 하나 있다: 이 batch 가 실패하면(예: 없는 gameId → FK)
+     메타 청구는 이미 커밋돼 **항목은 그대로인데 메타(공지·발행·revision)만 갱신된 주**가
+     남는다. 되돌릴 수 없는 손실이 아니라 다시 저장하면 정리되는 상태이고, 반대쪽 대가는
+     "남의 한 주가 통째로 사라짐"이라 이쪽을 택했다. 셋을 한 batch 에 넣으면서 청구 실패 시
+     뒤를 건너뛰려면 DELETE·INSERT 마다 EXISTS 가드를 손 SQL 로 붙여야 하는데, 그 복잡도가
+     이 실패 양상의 무게보다 크다. */
   const clearEntries = db
     .delete(scheduleEntries)
     .where(
@@ -114,9 +172,9 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
         gameId: e.gameId,
       })),
     );
-    await db.batch([upsertWeek, clearEntries, insertEntries]);
+    await db.batch([clearEntries, insertEntries]);
   } else {
-    await db.batch([upsertWeek, clearEntries]);
+    await db.batch([clearEntries]);
   }
 
   return getWeekForEdit(db, input.weekStartDate);
