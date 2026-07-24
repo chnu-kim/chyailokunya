@@ -83,3 +83,19 @@ test("관리자: 이관된 레거시 주는 '이미 공개 중'으로 열린다(
      (이관이 지킨 "손실 0"이 첫 편집에서 깨지는 경로). */
   await expect(page.locator('[data-od-id="schedule-publish"]')).toBeChecked();
 });
+
+test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 안 됨 — 결정 13)", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 픽스처가 안 건드리는 먼 미래 주 — 메타도 항목도 없는 브랜드-뉴 주.
+  await page.goto("/schedule?week=2028-01-03");
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+  // 항목이 하나도 없다(레거시가 아니다).
+  await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveCount(0);
+  /* 발행은 **꺼진 채** 열려야 한다 — 다음 주를 처음 짜는 자리라 초안이 기본이고, 발행은 다
+     되면 관리자가 켠다(결정 13). 레거시 주와 달리 지킬 과거 날짜가 없어 published 로 열 이유가
+     없다(레거시 테스트와 정반대 단언 — 무메타 기본값을 "항목 유무"로 가른다는 규칙의 두 쪽). */
+  await expect(page.locator('[data-od-id="schedule-publish"]')).not.toBeChecked();
+});
