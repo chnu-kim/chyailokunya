@@ -106,6 +106,22 @@ export function writeErrorMessage(e: unknown): string {
   return "저장됐는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
 }
 
+/* 수정 실패. writeErrorMessage 와 **CONFLICT 의 뜻이 다르다** — 그 하나 때문에 갈랐다.
+
+   add 의 CONFLICT 는 category_id UNIQUE, 즉 "이미 보드에 있는 게임"이다. update 는 그 제약을
+   건드리지 않으므로 그 코드가 올 길이 없고, 대신 **폼이 읽은 플레이 날짜가 낡았을 때** 서버가
+   CONFLICT 로 거절한다(features/games/service 의 PlayDateChangedElsewhere). 둘을 한 문구로
+   뭉치면 남의 일정 변경을 덮지 않으려고 막은 저장에 "이미 보드에 있는 게임이에요"가 뜬다 —
+   사용자는 원인도 못 알아보고 할 일(새로고침)도 못 듣는다(적대적 리뷰 7라운드가 잡은 자리).
+
+   나머지 분기는 저장 어휘가 그대로 맞으므로 writeErrorMessage 에 위임한다 — deleteErrorMessage
+   와 달리 조작 명사가 같아서(둘 다 저장한다) 문구를 다시 쓸 이유가 없다. */
+export function updateErrorMessage(e: unknown): string {
+  if (codeOf(e) === "CONFLICT")
+    return "다른 곳에서 이 게임의 플레이 날짜를 먼저 바꿨어요. 저장하지 않았어요 — 새로고침해서 다시 편집해 주세요.";
+  return writeErrorMessage(e);
+}
+
 /* 삭제 실패. writeErrorMessage 를 그대로 쓰면 안 된다 — 그 문구는 전부 **저장** 기준이라
    삭제를 누른 사용자에게 뜻이 정확히 뒤집혀 전달된다("저장됐을 수도 있으니 새로고침해
    확인해 주세요"). 삭제가 이 갈래를 못 받은 건 역사 때문이다: 지연 커밋 시절엔 실패가

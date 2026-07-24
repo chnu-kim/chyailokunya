@@ -5,7 +5,12 @@ import { ANGLE, axis, formatDate, isPlayDateEditable, PATTERNS, ROT } from "@/co
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
-import { deleteErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
+import {
+  deleteErrorMessage,
+  REQUEST_TIMEOUT_MS,
+  updateErrorMessage,
+  writeErrorMessage,
+} from "./error-message";
 import { ClearedFields, GameDialog, PlayedDateField, useClearedDraft } from "./game-dialog";
 
 /* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
@@ -484,7 +489,8 @@ function GameEditor({
         setSaved(row);
         setClosing(true);
       } catch (e) {
-        setError(writeErrorMessage(e));
+        // 수정 전용 문구다 — 이 경로의 CONFLICT 는 중복 게임이 아니라 낡은 플레이 날짜다.
+        setError(updateErrorMessage(e));
       }
     });
   }

@@ -3,6 +3,7 @@ import {
   deleteErrorMessage,
   isAborted,
   readErrorMessage,
+  updateErrorMessage,
   writeErrorMessage,
 } from "./error-message";
 
@@ -96,6 +97,30 @@ describe("writeErrorMessage — 확인 안 된 것은 말하지 않는다", () =
     const msg = writeErrorMessage(trpc("INTERNAL_SERVER_ERROR"));
     expect(msg).toContain("확인하지 못했어요");
     expect(msg).not.toContain("저장되지 않았");
+  });
+});
+
+/* 수정 경로의 CONFLICT 는 **뜻이 다르다.** add 는 category_id UNIQUE("이미 보드에 있는 게임"),
+   update 는 폼이 읽은 플레이 날짜가 낡았다는 신호다. 한 문구로 뭉치면 남의 일정 변경을 덮지
+   않으려고 막은 저장에 "이미 보드에 있는 게임이에요"가 떠, 사용자가 원인도 못 알아보고 할 일
+   (새로고침)도 못 듣는다 — 새 서버 오류를 더하면서 클라이언트 매퍼를 안 본 자리다(리뷰 7라운드). */
+describe("updateErrorMessage — 수정의 CONFLICT 는 중복이 아니라 낡은 날짜다", () => {
+  it("CONFLICT 에 중복 게임 문구를 쓰지 않고, 새로고침을 안내한다", () => {
+    const msg = updateErrorMessage(trpc("CONFLICT"));
+    expect(msg).not.toContain("이미 보드에 있는");
+    expect(msg).toContain("새로고침");
+    // 서버가 쓰기 전에 막았으므로 저장 여부를 단정할 수 있다 — "저장됐을 수도"는 거짓말이다.
+    expect(msg).toContain("저장하지 않았어요");
+    expect(msg).not.toContain("저장됐을 수도");
+  });
+
+  /* CONFLICT 말고는 저장 어휘가 그대로 맞다 — 조작 명사가 같아서(둘 다 저장한다) 문구를 다시
+     쓸 이유가 없다. 갈라진 건 그 한 갈래뿐임을 못박는다. */
+  it("나머지 코드는 writeErrorMessage 와 같은 문구다", () => {
+    for (const code of ["NOT_FOUND", "FORBIDDEN", "UNAUTHORIZED", "BAD_REQUEST"] as const) {
+      expect(updateErrorMessage(trpc(code))).toBe(writeErrorMessage(trpc(code)));
+    }
+    expect(updateErrorMessage(wrapped(timeout()))).toBe(writeErrorMessage(wrapped(timeout())));
   });
 });
 
