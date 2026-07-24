@@ -2,6 +2,7 @@
    재사용한다 — 공개 읽기(RSC)는 tRPC HTTP 를 왕복하지 않고 listGames 를 직접 부른다. */
 
 import { asc, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { toIsoDate, weekStartOf } from "@/core/calendar";
 import { isPlayDateEditable } from "@/core/games";
 import { games, scheduleEntries, scheduleWeeks, type Db, type GameRow } from "@/db";
 import type { AddGameInput, UpdateGameInput } from "./schema";
@@ -108,6 +109,35 @@ export function playEntriesOf(db: Db, gameId: number) {
     .orderBy(asc(scheduleEntries.scheduledDate));
 }
 
+/* 게임 폼이 일정 항목을 건드린 주를 **청구(claim)한다.** 하는 일이 둘이다:
+
+   1. 메타가 있으면 revision(last_updated_at)만 단조 증가시킨다. published_at 은 안 건드린다 —
+      초안으로 두기로 한 결정을 게임 폼이 뒤집으면 안 된다(결정 13).
+   2. 메타가 없으면 **발행된 채로 만든다.** 메타 부재는 "표시"였으므로(ADR-0022 레거시 규칙)
+      published_at 을 채워야 결과가 같다. NULL 로 만들면 그 주가 초안으로 뒤집혀 방금 넣은
+      날짜가 보드에서 사라진다.
+
+   왜 필요한가 — **없으면 편집기의 낙관적 동시성이 뚫린다.** saveWeek 은 그 주를 통째로 교체
+   하면서 revision CAS 로 "그 사이 바뀌었으면 거절"을 보장하는데, 게임 폼이 revision 밖에서
+   항목을 만들면 열어 둔 편집기가 stale 인 채 CAS 를 통과해 그 항목을 지운다. 메타 없는 주는
+   더 나쁘다: 편집기가 revision=null 로 열고 게임 폼이 메타를 안 만들면 null 청구가 그대로
+   성공한다. 여기서 행을 만들어 두면 그 청구가 0행이 돼 CONFLICT 로 걸린다(적대적 리뷰 3라운드).
+
+   revision 은 nextRevision 과 같은 규칙으로 단조 증가시킨다 — 같은 ms 안에 두 번 쓰면
+   now 가 기존 값과 같아 revision 이 안 바뀌고, 그럼 CAS 가 통과해 보호가 도로 뚫린다. */
+function claimWeek(db: Db, date: string, now: number) {
+  const weekStart = weekStartOf(toIsoDate(date));
+  return db
+    .insert(scheduleWeeks)
+    .values({ weekStartDate: weekStart, publishedAt: now, lastUpdatedAt: now })
+    .onConflictDoUpdate({
+      target: scheduleWeeks.weekStartDate,
+      set: {
+        lastUpdatedAt: sql`max(${scheduleWeeks.lastUpdatedAt} + 1, ${now})`,
+      },
+    });
+}
+
 /* 추가 — category 스냅샷을 denormalize 저장하고, 날짜를 받았으면 그 날의 일정 항목까지
    **한 batch(원자)** 로 만든다. 둘을 따로 쓰면 항목만 실패했을 때 "게임은 올라갔는데 날짜가
    없는" 절반 상태가 남고, 관리자는 성공/실패 중 뭘 본 건지 모른다.
@@ -122,9 +152,8 @@ export function playEntriesOf(db: Db, gameId: number) {
    항목의 title 은 게임 제목을 그대로 쓴다(schedule_entries.title 은 NOT NULL). start_time 은
    null — 폼이 시각을 안 받는다(시각·제목을 손보려면 /schedule 로 간다).
 
-   주 메타(schedule_weeks)는 **만들지도 바꾸지도 않는다.** 메타가 없는 주는 "부재 = 표시"라
-   (ADR-0022 레거시 규칙) 항목이 곧바로 보드에 뜨고, 이미 초안인 주라면 안 뜨는 게 맞다 —
-   관리자가 그 주를 초안으로 두기로 한 결정을 게임 폼이 뒤집으면 결정 13 이 깨진다.
+   그 주의 메타는 claimWeek 이 청구한다(같은 batch 안) — 편집기의 revision CAS 가 이 쓰기를
+   보게 하려면 필요하다. 초안 주의 발행 상태는 그대로 둔다(claimWeek 주석).
 
    categoryId 가 null 이면 수동 입력 게임이다. category_id UNIQUE 위반은 라우터가 CONFLICT 로
    맵하고, NULL 은 SQLite 에서 중복이 허용되므로 수동 입력끼리는 충돌하지 않는다. */
@@ -151,7 +180,14 @@ export async function addGame(db: Db, input: AddGameInput): Promise<GameCard> {
     title: input.categoryValue,
     gameId: sql<number>`last_insert_rowid()`,
   });
-  const [rows] = await db.batch([insertGame, insertEntry]);
+  /* **순서가 계약이다: claimWeek 은 반드시 insertEntry 뒤에 온다.** claimWeek 도 INSERT 라
+     앞에 두면 last_insert_rowid() 가 schedule_weeks 의 id 를 가리켜 항목이 엉뚱한 게임에
+     붙는다 — 바로 위 주석이 말한 그 조용한 오염을 우리 손으로 만드는 셈이다. */
+  const [rows] = await db.batch([
+    insertGame,
+    insertEntry,
+    claimWeek(db, input.playedDate, Date.now()),
+  ]);
   /* 되유도해서 돌려준다 — 방금 만든 항목이 보드 날짜에 기여하는지는 그 주의 발행 상태가
      정하므로(초안 주면 lastPlayed 는 null 이다) 입력 날짜를 그대로 믿으면 안 된다. */
   return gameCard(db, rows[0]!);
@@ -238,7 +274,27 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
             gameId: input.id,
           });
 
-  const [updated] = entryOp ? await db.batch([updateRow, entryOp]) : await db.batch([updateRow]);
+  /* 건드린 주를 전부 청구한다(claimWeek 주석 — 없으면 열어 둔 편집기가 stale 인 채 CAS 를
+     통과해 이 쓰기를 지운다). **날짜를 옮기면 주가 둘이다**: 옛 항목이 있던 주와 새 주. 한쪽만
+     올리면 다른 쪽 편집기가 그대로 통과한다. 같은 주면 중복 청구가 되므로 집합으로 접는다. */
+  const now = Date.now();
+  const touchedWeeks = touchesSchedule
+    ? [
+        ...new Set(
+          [current?.scheduledDate, input.playedDate].filter((d): d is string => Boolean(d)),
+        ),
+      ]
+    : [];
+  /* batch 문 수가 가변이라(항목 연산 유무 · 주 1~2개) drizzle 의 튜플 추론이 안 선다. 첫 문이
+     updateRow 인 것만 보장하면 되므로 그 자리만 단언한다 — 순서를 바꾸면 이 단언이 거짓말이
+     되니 updateRow 는 항상 맨 앞이다. */
+  type Op = typeof updateRow | NonNullable<typeof entryOp> | ReturnType<typeof claimWeek>;
+  const ops: [Op, ...Op[]] = [updateRow];
+  if (entryOp) ops.push(entryOp);
+  for (const d of touchedWeeks) ops.push(claimWeek(db, d, now));
+
+  const results = await db.batch(ops);
+  const updated = results[0] as Awaited<typeof updateRow>;
   return updated[0] ? gameCard(db, updated[0]) : null;
 }
 

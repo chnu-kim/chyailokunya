@@ -59,48 +59,48 @@ test("게임: D1 에서 읽어 렌더 · 날짜 표시", async ({ page }) => {
   ]);
 });
 
-/* 여러 날 편성 게임의 클리어 수정. **서버 단위 테스트로는 못 잡는 자리다** — 계약("playedDate
-   를 안 실으면 일정을 안 건드린다")은 라우터 테스트가 덮지만, 폼이 그 계약을 지키는지는 실제
-   제출 페이로드를 태워야 안다. 초판이 정확히 거기서 깨졌다: 잠긴 폼이 빈 문자열을 실었고 그게
-   null 로 접혀 "여러 날을 지우려 한다"로 거절돼 **클리어 수정 자체가 막혔다**(codex 리뷰).
-   그래서 이 스펙은 UI 로 저장까지 눌러 성공을 확인한다. */
-test("관리자: 여러 날 편성 게임도 클리어만 고쳐 저장된다", async ({ page, baseURL }) => {
+/* 여러 날 편성 게임의 저장. **서버 단위 테스트로는 못 잡는 자리다** — 계약("playedDate 를 안
+   실으면 일정을 안 건드린다")은 라우터 테스트가 덮지만, 폼이 그 계약을 지키는지는 실제 제출
+   페이로드를 태워야 안다. 초판이 정확히 거기서 깨졌다: 잠긴 폼이 빈 문자열을 실었고 그게 null
+   로 접혀 "여러 날을 지우려 한다"로 거절돼 **저장이 통째로 막혔다**(codex 리뷰).
+
+   ── 공유 픽스처를 **관찰 가능하게 바꾸지 않는다** ────────────────────────────────
+   playwright 는 fullyParallel 이라 이 스펙이 읽기 전용 스펙과 동시에 돈다. 그래서 그쪽이 보는
+   상태를 건드리면 타이밍에 따라 빨개진다(리뷰가 잡은 flakiness). 두 가지로 피한다:
+
+   1. **클리어를 안 켠다.** 위 읽기 스펙이 "엘든 링엔 클리어 칩이 없다"를 못박는다. 회귀는
+      "저장이 거절됐다"였으므로 값을 안 바꾼 저장이 통과하는지만 봐도 똑같이 잡힌다.
+   2. **기존 항목보다 이른 날짜에 붙인다.** 보드 날짜·정렬은 MAX(scheduled_date)라, 2026-03-01
+      보다 이른 날을 더하면 카드의 "2026.03.01 플레이"도 정렬 위치도 그대로다. 주(2026-02-16)는
+      다른 스펙이 쓰지 않는다 — 한때 픽스처와 같은 주에 붙였다가 schedule.spec 의 레거시 주
+      스펙을 깼다(그쪽 `.first()` 를 날짜순으로 앞선 내 항목이 가로챘다). */
+test("관리자: 여러 날 편성 게임도 저장이 통과한다", async ({ page, baseURL }) => {
   await signIn(page.context(), baseURL!);
 
-  /* 엘든 링(픽스처 항목 2026-03-01)에 둘째 날을 붙여 여러 날 상태를 만든다.
-
-     **다른 스펙이 안 쓰는 먼 주에 붙인다.** 여러 날 판정은 그 게임의 항목 전부를 세므로
-     (playEntriesOf 는 주를 안 가린다) 같은 주일 필요가 없다. 처음엔 픽스처 항목과 같은 주에
-     붙였다가 schedule.spec 의 레거시 주 스펙을 깼다 — 그쪽이 `.first()` 로 "엘든 링"을 집는데
-     날짜순으로 앞선 내 항목이 가로챘다. 스펙끼리 같은 주를 나눠 쓰면 병렬 실행에서 조용히
-     오염된다(같은 로컬 D1 을 공유한다). */
-  await page.goto("/schedule?week=2029-05-07");
+  await page.goto("/schedule?week=2026-02-16");
   await expectSignedIn(page);
-  await page.locator('[data-od-id="schedule-day-add-2029-05-07"]').click();
-  const day = page.locator('[data-od-id="schedule-day-2029-05-07"]');
-  await day.locator('[data-od-id^="schedule-entry-title-"]').fill("엘든 링 2일차");
+  await page.locator('[data-od-id="schedule-day-add-2026-02-17"]').click();
+  const day = page.locator('[data-od-id="schedule-day-2026-02-17"]');
+  await day.locator('[data-od-id^="schedule-entry-title-"]').fill("엘든 링 1일차");
   await day.locator('[data-od-id^="schedule-entry-game-"]').selectOption({ label: "엘든 링" });
   const save = page.locator('[data-od-id="schedule-save"]');
   await save.click();
   await expect(save).toHaveText("저장됨");
 
-  // 이제 게임 폼은 날짜를 잠근다 — 고칠 수 있는 건 클리어뿐이다.
+  // 이제 게임 폼은 날짜를 잠근다 — 입력이 사라지고 날짜 나열만 남는다.
   await page.goto("/games");
   await page.locator('[data-od-id="game-edit-1"]').click();
   await expect(page.locator('[data-od-id="editor-locked"]')).toBeVisible();
   await expect(page.locator('[data-od-id="editor-played"]')).toHaveCount(0);
 
-  await page.locator('[data-od-id="editor-clear-cleared"]').check();
+  // 아무것도 안 바꾸고 저장만 누른다 — 옛 코드에선 이것도 BAD_REQUEST 로 막혔다.
   await page.locator('[data-od-id="game-editor-submit"]').click();
 
-  // 저장이 성공해야 한다 — 여기서 오류 문구가 뜨면 그 회귀가 돌아온 것이다.
+  /* 저장이 성공하면 모달이 닫힌다. 실패하면 오류 문구를 띄운 채 열려 있다 — 그게 회귀의 모습이다. */
   await expect(page.locator('dialog[data-od-id="game-editor"]')).toHaveCount(0);
-  // 칩을 지목한다 — getByText("클리어")는 수정 버튼의 sr-only 라벨까지 잡는다.
-  const elden = page.locator(CARDS).filter({ hasText: "엘든 링" }).first();
-  await expect(elden.locator(".chip--ok")).toBeVisible();
 
-  /* 그리고 일정은 그대로다 — 클리어만 고치는 저장이 날짜를 지우거나 옮기면 안 된다. 그
-     회귀에서 서버가 거절하지 않고 통과했다면 여기 항목이 사라지거나 다른 날로 옮겨 간다. */
-  await page.goto("/schedule?week=2029-05-07");
-  await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveValue("엘든 링 2일차");
+  /* 그리고 일정은 그대로다 — 저장이 날짜를 지우거나 옮기면 안 된다. 서버가 거절하지 않고
+     통과했다면 여기 항목이 사라지거나 다른 날로 옮겨 간다. */
+  await page.goto("/schedule?week=2026-02-16");
+  await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveValue("엘든 링 1일차");
 });
