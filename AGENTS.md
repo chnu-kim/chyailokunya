@@ -250,6 +250,37 @@ Phase 4(인증)에서 밟은 것:
   로그인 상태 e2e 의 나머지 배선(왜 process.env 로는 안 되는지, 왜 webServer 커맨드에서
   심는지, 왜 `https://localhost` url 인지)은 전부 ADR-0021 에 있다.
 
+주간 일정(#56, 일정 정본 도입)에서 밟은 것들:
+
+- **마이그레이션 이관을 스크래치 sqlite CLI 로만 검증하면 트랜잭션 의존 결함을 놓친다 —
+  하마터면 프로덕션 데이터가 소실될 뻔했다.** 0007 이 `games` 를 재생성하며(SQLite 는 컬럼 드롭이
+  없다) 옛 `played_at` 을 `schedule_entries` 로 이관하는데, 초판은 자식 행을 먼저 채운 뒤
+  `PRAGMA foreign_keys=OFF` 로 `DROP TABLE games` 의 `ON DELETE SET NULL` 을 막으려 했다. **그
+  pragma 는 pending BEGIN 이 있으면 무시된다**(SQLite 명세) — 러너가 마이그레이션을 트랜잭션으로
+  감싸면 DROP 이 SET NULL 을 발동시켜 방금 이관한 `game_id` 가 전부 NULL 이 돼 **과거 플레이
+  날짜가 통째로 사라진다**(결정 16 "손실 0"이 깨진다). `sqlite3` CLI 는 자동커밋이라 pragma 가
+  먹어 통과하므로 그 차이가 가려졌다(실측: 자동커밋 `game_id=1` · 트랜잭션 `game_id=NULL`).
+  그래서 **자식 행을 부모 재생성 전에 만들지 말고**(FK 없는 임시 테이블로 옮긴 뒤 재생성하고
+  자식은 그다음에 되채운다), 이관 검증은 `BEGIN…COMMIT` 안에서 재생한다. `e2e/migration-0007.spec.ts`
+  가 그 회귀를 못박는다(`node:sqlite`, `foreign_keys=ON`, 트랜잭션 안 — 옛 순서로 되돌리면
+  빨개진다). 게이트 8종이 전부 초록이어도 이건 안 잡힌다 — 적대적 리뷰가 잡았다.
+
+- **상태를 바꾸는 tRPC 뮤테이션 e2e 는 `.dev.vars.e2e` 에 `AUTH_URL` 이 있어야 통과한다.**
+  `rejectForeignOrigin`(CSRF, fail-closed)이 요청 Origin 을 `AUTH_URL` 과 **정확히(포트 포함)**
+  대조하는데(`isAllowedOrigin` = `URL.origin` 완전 일치), e2e 환경은 공개 읽기만 하던 시절
+  AUTH_URL 을 안 넣었다. 그래서 저장소 **첫 쓰기 e2e**(일정 저장)가 403 "forbidden origin" 으로
+  걸렸다. `scripts/e2e-dev-vars.mjs` 가 이제 `AUTH_URL=http://localhost:PORT` 를 넣고, 재사용 시에도
+  그 줄만 현재 포트로 맞춘다(키는 보존 — 살아 있는 서버의 검증을 안 흔든다). 포트를 바꿔 돌려도
+  스크립트가 자가 치유한다.
+
+- **D1 은 대화형 트랜잭션이 없어(`batch()` 만 원자적) "조건부 CAS + 원자적 전체 교체"를 완벽히
+  못 만든다.** batch 안에서 앞 문의 rowcount 로 뒤 문을 조건부로 건너뛸 수 없어서, 낙관적 동시성이
+  필요한 쓰기(일정 주 단위 일괄 저장, 결정 14)에서 설계가 한 구멍을 다른 구멍으로 옮긴다(경합 →
+  발행 경계 → sub-ms gap). 완벽을 쫓지 말고 **현실적 사고(분 단위 stale 저장)를 막는 선에서 수용
+  경계를 긋고**, 남는 gap 은 코드 주석에 "알고 수용한 한계"로 명시한다(`saveWeek` 주석 참고 —
+  이론적 sub-ms 경합은 2026-07-24 사용자 결정으로 수용). D1 에서 원자성이 필요한 새 쓰기를 짤 땐
+  이 벽을 먼저 떠올린다.
+
 ## 접근성 기준 (협상 대상 아님)
 
 구 사이트에서 검증된 기준을 그대로 잇는다.
