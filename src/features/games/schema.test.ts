@@ -94,14 +94,20 @@ describe("updateGameInput — 클리어 상태", () => {
   });
 
   it("clearedDate 를 안 보내면 null — cleared=true 면 '깼는데 날짜 모름'", () => {
-    const result = updateGameInput.safeParse({ id: 7, cleared: true });
+    const result = updateGameInput.safeParse({ id: 7, cleared: true, playedDate: null });
     expect(result.success).toBe(true);
-    if (result.success) expect(result.data).toEqual({ id: 7, cleared: true, clearedDate: null });
+    if (result.success)
+      expect(result.data).toEqual({ id: 7, cleared: true, clearedDate: null, playedDate: null });
   });
 
   it("clearedDate 의 빈 문자열·공백만은 null 로 접힌다(빈 date 입력이 보내는 값)", () => {
     for (const empty of ["", "   "]) {
-      const result = updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: empty });
+      const result = updateGameInput.safeParse({
+        id: 1,
+        cleared: true,
+        clearedDate: empty,
+        playedDate: null,
+      });
       expect(result.success).toBe(true);
       if (result.success) expect(result.data.clearedDate).toBeNull();
     }
@@ -109,28 +115,91 @@ describe("updateGameInput — 클리어 상태", () => {
 
   it("실재하지 않는 clearedDate 는 거절 — 형식만 맞는 값이 새지 않는다", () => {
     for (const bad of ["2026-02-31", "2025-02-29", "2026-13-01", "2026-07-32", "2026-7-20"]) {
-      expect(updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: bad }).success).toBe(
-        false,
-      );
+      expect(
+        updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: bad, playedDate: null })
+          .success,
+      ).toBe(false);
     }
   });
 
   it("미래 clearedDate 는 허용", () => {
     expect(
-      updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: "2099-01-01" }).success,
+      updateGameInput.safeParse({
+        id: 1,
+        cleared: true,
+        clearedDate: "2099-01-01",
+        playedDate: null,
+      }).success,
     ).toBe(true);
   });
 
   it("안 깼는데 클리어 날짜가 있으면 거절(DB CHECK 의 Zod 짝), path 는 clearedDate", () => {
-    const bad = updateGameInput.safeParse({ id: 1, cleared: false, clearedDate: "2026-07-20" });
+    const bad = updateGameInput.safeParse({
+      id: 1,
+      cleared: false,
+      clearedDate: "2026-07-20",
+      playedDate: null,
+    });
     expect(bad.success).toBe(false);
     if (!bad.success) expect(bad.error.issues[0]!.path).toEqual(["clearedDate"]);
   });
 
   it("깬 채 날짜 있음·날짜 없음은 둘 다 통과", () => {
     expect(
-      updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: "2026-07-20" }).success,
+      updateGameInput.safeParse({
+        id: 1,
+        cleared: true,
+        clearedDate: "2026-07-20",
+        playedDate: null,
+      }).success,
     ).toBe(true);
-    expect(updateGameInput.safeParse({ id: 1, cleared: true }).success).toBe(true);
+    expect(updateGameInput.safeParse({ id: 1, cleared: true, playedDate: null }).success).toBe(
+      true,
+    );
+  });
+});
+
+describe("updateGameInput — 플레이 날짜", () => {
+  /* clearedDate 와 달리 **빠뜨리면 거절**한다. playedDate 는 null 이 곧 "일정 항목을 지운다"라,
+     기본값을 주면 필드를 안 실은 호출자가 조용히 날짜를 지운다 — 그 실수를 여기서 잡는다. */
+  it("playedDate 를 안 보내면 거절 — '안 보냄'이 '지움'으로 읽히지 않게", () => {
+    expect(updateGameInput.safeParse({ id: 1, cleared: false }).success).toBe(false);
+    expect(
+      updateGameInput.safeParse({ id: 1, cleared: true, clearedDate: "2026-07-20" }).success,
+    ).toBe(false);
+  });
+
+  it("명시한 null 은 통과 — 그건 지우겠다는 뜻이다", () => {
+    const result = updateGameInput.safeParse({ id: 1, cleared: false, playedDate: null });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.playedDate).toBeNull();
+  });
+
+  it("빈 문자열은 null 로 접힌다(빈 date 입력이 보내는 값)", () => {
+    const result = updateGameInput.safeParse({ id: 1, cleared: false, playedDate: "" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.playedDate).toBeNull();
+  });
+
+  it("실재하지 않는 날짜는 거절, 미래 날짜는 허용", () => {
+    expect(
+      updateGameInput.safeParse({ id: 1, cleared: false, playedDate: "2026-02-31" }).success,
+    ).toBe(false);
+    expect(
+      updateGameInput.safeParse({ id: 1, cleared: false, playedDate: "2099-01-01" }).success,
+    ).toBe(true);
+  });
+
+  /* add 쪽은 기본값을 남긴다 — 새 게임엔 지울 항목이 없어 "안 보냄 = 지움" 사고가 성립하지
+     않는다(seed 처럼 날짜를 모르는 호출자가 필드를 안 실어도 안전하다). */
+  it("addGameInput 의 playedDate 는 선택 — 없으면 null 로 시작한다", () => {
+    const result = addGameInput.safeParse({
+      categoryId: "elden-ring",
+      categoryType: "GAME",
+      categoryValue: "엘든 링",
+      posterImageUrl: null,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.playedDate).toBeNull();
   });
 });

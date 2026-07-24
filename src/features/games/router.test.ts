@@ -1,7 +1,8 @@
 import { env } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { authoritiesFor, type Authority } from "@/core/authorities";
-import { makeDb, scheduleEntries } from "@/db";
+import { makeDb, scheduleEntries, scheduleWeeks } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
@@ -184,6 +185,7 @@ describe("games 라우터", () => {
         id: row.id,
         cleared: true,
         clearedDate: "2026-07-20",
+        playedDate: null,
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     // 막혔으면 저장도 안 됐다.
@@ -199,12 +201,13 @@ describe("games 라우터", () => {
       id: row.id,
       cleared: true,
       clearedDate: "2026-07-20",
+      playedDate: null,
     });
     expect(done.cleared).toBe(true);
     expect(done.clearedDate).toBe("2026-07-20");
 
     // cleared=false 로 보내면 클리어가 풀린다(부분 patch 가 아니라 전체 치환). 날짜도 함께 빠진다.
-    const undone = await authed.games.update({ id: row.id, cleared: false });
+    const undone = await authed.games.update({ id: row.id, cleared: false, playedDate: null });
     expect(undone.cleared).toBe(false);
     expect(undone.clearedDate).toBeNull();
   });
@@ -212,14 +215,16 @@ describe("games 라우터", () => {
   it("update 는 '깼는데 날짜 모름'을 받는다(cleared=true·date 없음)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add(eldenring);
-    const done = await authed.games.update({ id: row.id, cleared: true });
+    const done = await authed.games.update({ id: row.id, cleared: true, playedDate: null });
     expect(done.cleared).toBe(true);
     expect(done.clearedDate).toBeNull();
   });
 
   it("update 는 없는 id 면 NOT_FOUND(삭제와 달리 조용히 성공하지 않는다)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
-    await expect(authed.games.update({ id: 9999, cleared: false })).rejects.toMatchObject({
+    await expect(
+      authed.games.update({ id: 9999, cleared: false, playedDate: null }),
+    ).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
   });
@@ -229,17 +234,206 @@ describe("games 라우터", () => {
     const row = await authed.games.add(eldenring);
     // 안 깼는데 클리어 날짜 → 거절(isClearedStateValid).
     await expect(
-      authed.games.update({ id: row.id, cleared: false, clearedDate: "2026-07-20" }),
+      authed.games.update({
+        id: row.id,
+        cleared: false,
+        clearedDate: "2026-07-20",
+        playedDate: null,
+      }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     // 실재하지 않는 날짜 → 거절.
     await expect(
-      authed.games.update({ id: row.id, cleared: true, clearedDate: "2026-02-31" }),
+      authed.games.update({
+        id: row.id,
+        cleared: true,
+        clearedDate: "2026-02-31",
+        playedDate: null,
+      }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("remove 는 game:delete 없으면 FORBIDDEN", async () => {
     const caller = createCaller(makeCtx());
     await expect(caller.games.remove({ id: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  /* ── 플레이 날짜 = 일정 항목 ────────────────────────────────────────────────────
+     게임 폼이 날짜를 다루지만 정본은 여전히 schedule_entries 다. 여기서 증명하는 건 그
+     "입구"가 정본을 올바르게 건드리는가다. */
+
+  it("add 에 날짜를 주면 일정 항목이 서고 보드 날짜로 유도된다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+    expect(row.lastPlayed).toBe("2026-07-22");
+
+    // 정본은 games 컬럼이 아니라 일정 항목이다 — 실제로 그 행이 섰는지 본다.
+    const db = makeDb(env.DB);
+    const entries = await db.select().from(scheduleEntries);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.scheduledDate).toBe("2026-07-22");
+    expect(entries[0]!.title).toBe("엘든링"); // NOT NULL 이라 게임 제목을 싣는다
+    expect(entries[0]!.startTime).toBeNull(); // 시각은 /schedule 소관
+  });
+
+  /* last_insert_rowid() 회귀. **이 가정이 깨지면 항목이 엉뚱한 게임에 붙는 조용한 오염이라**
+     타입도 게이트도 못 잡는다 — 게임을 둘 만들어 "두 번째 항목이 두 번째 게임에 붙었나"를
+     직접 본다(한 개만 있으면 id 가 우연히 맞아도 통과한다). */
+  it("add 의 일정 항목은 방금 넣은 게임에 붙는다(last_insert_rowid)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const first = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
+    const second = await authed.games.add({
+      categoryId: "c2",
+      categoryType: "GAME",
+      categoryValue: "젤다",
+      playedDate: "2026-07-22",
+    });
+    expect(second.id).not.toBe(first.id);
+
+    const db = makeDb(env.DB);
+    const entries = await db.select().from(scheduleEntries);
+    const byGame = new Map(entries.map((e) => [e.gameId, e.scheduledDate]));
+    expect(byGame.get(first.id)).toBe("2026-07-20");
+    expect(byGame.get(second.id)).toBe("2026-07-22");
+  });
+
+  it("add 가 실패하면 일정 항목도 안 남는다(한 batch 라 함께 롤백)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    await authed.games.add(eldenring);
+    // 같은 category_id 재추가 → UNIQUE 위반. 항목 INSERT 가 앞 문과 한 batch 라 함께 죽는다.
+    await expect(
+      authed.games.add({ ...eldenring, playedDate: "2026-07-22" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const db = makeDb(env.DB);
+    expect(await db.select().from(scheduleEntries)).toEqual([]);
+  });
+
+  it("update 로 날짜를 옮기면 항목이 UPDATE 된다 — 시각·제목은 보존", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
+
+    /* /schedule 에서 시각·제목을 손봐 둔 상태를 만든다. 게임 폼이 날짜만 옮길 때 이게 살아야
+       한다 — 지우고 새로 넣으면 "20:00 2회차"가 조용히 사라진다. */
+    const db = makeDb(env.DB);
+    await db
+      .update(scheduleEntries)
+      .set({ startTime: "20:00", title: "엘든링 2회차" })
+      .where(eq(scheduleEntries.gameId, row.id));
+
+    const moved = await authed.games.update({
+      id: row.id,
+      cleared: false,
+      clearedDate: null,
+      playedDate: "2026-07-23",
+    });
+    expect(moved.lastPlayed).toBe("2026-07-23");
+
+    const entries = await db.select().from(scheduleEntries);
+    expect(entries).toHaveLength(1); // 새로 만든 게 아니라 옮긴 것
+    expect(entries[0]!.scheduledDate).toBe("2026-07-23");
+    expect(entries[0]!.startTime).toBe("20:00");
+    expect(entries[0]!.title).toBe("엘든링 2회차");
+  });
+
+  it("update 에 날짜를 비우면 항목이 지워진다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
+    const cleared = await authed.games.update({
+      id: row.id,
+      cleared: false,
+      clearedDate: null,
+      playedDate: null,
+    });
+    expect(cleared.lastPlayed).toBeNull();
+    expect(await makeDb(env.DB).select().from(scheduleEntries)).toEqual([]);
+  });
+
+  it("update 는 날짜 없던 게임에 항목을 새로 만든다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add(eldenring); // 날짜 없이 추가
+    const dated = await authed.games.update({
+      id: row.id,
+      cleared: false,
+      clearedDate: null,
+      playedDate: "2026-07-22",
+    });
+    expect(dated.lastPlayed).toBe("2026-07-22");
+    const entries = await makeDb(env.DB).select().from(scheduleEntries);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.gameId).toBe(row.id);
+  });
+
+  it("여러 날 편성이면 날짜 변경을 거절한다(폼 잠금의 서버 짝)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
+    const db = makeDb(env.DB);
+    // /schedule 에서 둘째 날을 더한 상태("월·화 젤다").
+    await db
+      .insert(scheduleEntries)
+      .values({ scheduledDate: "2026-07-21", title: "엘든링", gameId: row.id });
+
+    await expect(
+      authed.games.update({
+        id: row.id,
+        cleared: false,
+        clearedDate: null,
+        playedDate: "2026-07-25",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // null(지우기)도 막는다 — 여러 날을 한 입력으로 지우는 건 폼이 표현하지 못한 의도다.
+    await expect(
+      authed.games.update({ id: row.id, cleared: false, clearedDate: null, playedDate: null }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // 거절된 저장은 일정을 안 건드렸다.
+    const dates = (await db.select().from(scheduleEntries)).map((e) => e.scheduledDate).sort();
+    expect(dates).toEqual(["2026-07-20", "2026-07-21"]);
+  });
+
+  it("여러 날이어도 기존 날짜를 되보내면 클리어만 고칠 수 있다(잠긴 폼의 정상 저장)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
+    const db = makeDb(env.DB);
+    await db
+      .insert(scheduleEntries)
+      .values({ scheduledDate: "2026-07-21", title: "엘든링", gameId: row.id });
+
+    const done = await authed.games.update({
+      id: row.id,
+      cleared: true,
+      clearedDate: "2026-07-21",
+      playedDate: "2026-07-20", // 기존 날짜 중 하나 = "안 바꾸겠다"
+    });
+    expect(done.cleared).toBe(true);
+
+    /* 통과했다고 항목을 건드리면 안 된다 — 가장 이른 날의 항목을 되보낸 값으로 덮어쓰면
+       "클리어만 고치는" 저장이 조용히 날짜를 옮긴다. 두 날이 그대로여야 한다. */
+    const dates = (await db.select().from(scheduleEntries)).map((e) => e.scheduledDate).sort();
+    expect(dates).toEqual(["2026-07-20", "2026-07-21"]);
+  });
+
+  it("playDates 는 game:write 를 요구한다(초안 주의 날짜라 공개 아님)", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
+    await expect(createCaller(makeCtx()).games.playDates({ id: row.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(await authed.games.playDates({ id: row.id })).toEqual(["2026-07-20"]);
+  });
+
+  /* 발행 경계와의 관계. 보드 표시(lastPlayed)는 발행된 항목만 세지만, 편집용 playDates 는
+     초안까지 센다 — 안 그러면 폼이 "0개"로 보고 새로 만들어 발행 순간 날짜가 둘이 된다. */
+  it("초안 주의 항목은 보드에 안 뜨지만 편집 조회엔 잡힌다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+    expect(row.lastPlayed).toBe("2026-07-22"); // 주 메타가 없으면 표시(레거시 규칙)
+
+    // 그 주를 초안으로 만든다(published_at NULL).
+    const db = makeDb(env.DB);
+    await db.insert(scheduleWeeks).values({ weekStartDate: "2026-07-20", publishedAt: null });
+
+    const [listed] = await createCaller(makeCtx()).games.list();
+    expect(listed!.lastPlayed).toBeNull(); // 보드에선 숨는다
+    expect(await authed.games.playDates({ id: row.id })).toEqual(["2026-07-22"]); // 편집엔 보인다
   });
 
   it("remove 는 game:delete 있으면 하드 삭제, 없는 id 는 deleted:false", async () => {

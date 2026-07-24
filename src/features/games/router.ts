@@ -3,11 +3,29 @@
 
 import { TRPCError } from "@trpc/server";
 import { authorizedProcedure, publicProcedure, router } from "../trpc/init";
-import { addGameInput, removeGameInput, updateGameInput } from "./schema";
-import { addGame, listGames, removeGame, updateGame } from "./service";
+import { addGameInput, playDatesInput, removeGameInput, updateGameInput } from "./schema";
+import {
+  addGame,
+  listGames,
+  MultiDayScheduleLocked,
+  playEntriesOf,
+  removeGame,
+  updateGame,
+} from "./service";
 
 export const gamesRouter = router({
   list: publicProcedure.query(({ ctx }) => listGames(ctx.db)),
+
+  /* 편집용 플레이 날짜. **공개가 아니다** — 발행 경계를 안 걸고 읽으므로(초안 주의 항목도
+     센다) 공개로 열면 미완성 주간표의 날짜가 새어나가 결정 13 을 우회한다. list 에 실지 않고
+     별도 프로시저로 둔 이유가 그것이고, 그래서 쓰기와 같은 game:write 를 요구한다 — 이 값을
+     쓰는 자리가 "고칠 수 있나"를 판정하는 폼뿐이라 권한이 곧 용도와 맞는다. */
+  playDates: authorizedProcedure("game:write")
+    .input(playDatesInput)
+    .query(async ({ ctx, input }) => {
+      const entries = await playEntriesOf(ctx.db, input.id);
+      return entries.map((e) => e.scheduledDate);
+    }),
 
   add: authorizedProcedure("game:write")
     .input(addGameInput)
@@ -28,7 +46,20 @@ export const gamesRouter = router({
   update: authorizedProcedure("game:write")
     .input(updateGameInput)
     .mutation(async ({ ctx, input }) => {
-      const row = await updateGame(ctx.db, input);
+      let row;
+      try {
+        row = await updateGame(ctx.db, input);
+      } catch (e) {
+        /* 여러 날 편성된 게임의 날짜를 바꾸려 했다. 폼이 이미 잠갔으므로 정상 경로에선 안 오고,
+           와도 사용자가 손쓸 곳은 /schedule 이라 그리로 가리킨다. */
+        if (e instanceof MultiDayScheduleLocked) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "여러 날 편성된 게임이라 여기선 날짜를 못 고쳐요 — 일정에서 고쳐 주세요.",
+          });
+        }
+        throw e;
+      }
       if (!row) {
         throw new TRPCError({ code: "NOT_FOUND", message: "보드에 없는 게임이에요." });
       }

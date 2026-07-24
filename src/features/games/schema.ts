@@ -15,9 +15,22 @@ const dateInput = z.preprocess(
   z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 해요").nullable().default(null),
 );
 
-/* 추가 입력 = 치지직 category 스냅샷 4필드. 우리 도메인 날짜는 여기 없다 — 플레이 날짜의
-   정본은 일정(schedule_entries)이고(이슈 #56 결정 3), 클리어는 추가 뒤 편집으로 붙인다.
-   그래서 새 게임은 항상 "안 깬 채, 일정 없음"으로 시작한다(games.cleared 기본 false).
+/* 같은 날짜 입력이되 **기본값이 없다** — 안 보내면 통과가 아니라 오류다. playedDate 처럼
+   "null = 지운다"가 실제 삭제로 이어지는 자리에 dateInput 을 그대로 쓰면 필드를 빠뜨린 호출자가
+   조용히 일정 항목을 지운다(수정 폼이 한 필드를 안 실었을 뿐인데 날짜가 사라진다). 기본값을
+   없애면 그 실수가 타입·런타임 양쪽에서 즉시 걸린다 — "안 보냄"과 "지움"을 구분하는 유일한
+   방법이 필수화다(부분 patch 를 안 쓰기로 한 결정의 짝). */
+const requiredDateInput = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+  z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 해요").nullable(),
+);
+
+/* 추가 입력 = 치지직 category 스냅샷 4필드 + 플레이 날짜. **날짜의 정본은 여전히 일정
+   (schedule_entries)이다**(이슈 #56 결정 3) — 이 필드는 games 컬럼으로 돌아가지 않고 서버가
+   그 날짜의 일정 항목을 만드는 데 쓴다(service.addGame). 게임 폼은 정본을 옮기는 게 아니라
+   **또 하나의 입구**다: 한때 이 단계가 없어 새 게임의 날짜를 붙이려면 /games 에서 추가한 뒤
+   /schedule 로 건너가야 했는데, 그 왕복이 "추가할 때 날짜를 못 넣는다"로 드러났다.
+   비워 두면(null) 항목을 안 만든다 — 날짜를 모르는 게임을 먼저 올릴 수 있어야 한다.
    categoryType 은 GAME 리터럴로 못박아 보드 불변식을 입력 경계에서 강제한다(DB CHECK 와 이중).
    categoryId·poster 는 nullable — categoryId 가 null 인 건 검색에 없어 손으로 넣은 게임이다.
 
@@ -60,14 +73,22 @@ export const addGameInput = z.object({
       .nullable()
       .default(null),
   ),
+  // 플레이 날짜(선택) — 있으면 서버가 이 날짜의 일정 항목을 게임과 **한 batch** 로 만든다.
+  playedDate: dateInput,
 });
 export type AddGameInput = z.infer<typeof addGameInput>;
 
-/* 수정 입력 — 클리어 상태만 고친다. 제목·포스터·categoryId 는 치지직 스냅샷(또는 최초 수동
-   입력)이라 여기서 못 바꾼다: 스냅샷을 사후 편집할 수 있게 하면 categoryId 와 표시명이 갈라져
-   "이 카드가 어느 게임인가"가 흐려진다. 플레이 날짜도 여기 없다 — 일정 정본으로 옮겨갔다.
-   cleared·clearedDate 는 둘 다 명시적으로 보낸다(부분 patch 아님) — optional 로 두면
-   "안 보냄"과 "지움"이 구분되지 않는다.
+/* 수정 입력 — 클리어 상태와 플레이 날짜. 제목·포스터·categoryId 는 치지직 스냅샷(또는 최초
+   수동 입력)이라 여기서 못 바꾼다: 스냅샷을 사후 편집할 수 있게 하면 categoryId 와 표시명이
+   갈라져 "이 카드가 어느 게임인가"가 흐려진다.
+   세 필드 모두 명시적으로 보낸다(부분 patch 아님) — optional 로 두면 "안 보냄"과 "지움"이
+   구분되지 않는다. playedDate 가 null 이면 그 게임의 일정 항목을 **지운다**(날짜를 비우는 것이
+   곧 "그날 안 했다"이므로). 이게 부분 patch 를 안 쓰는 대가이자 이유다.
+
+   playedDate 는 games 컬럼이 아니라 일정 항목으로 간다 — 정본은 그대로 schedule_entries 다
+   (addGameInput 주석). **여러 날 편성된 게임은 서버가 변경을 거절한다**(core.isPlayDateEditable):
+   입력 하나로 여러 날을 표현할 수 없어서다. 폼도 같은 판정으로 입력을 잠그지만, 잠금은 편의고
+   진짜 방어선은 서버다(불변식 3).
 
    cleared 가 false 인데 clearedDate 가 있으면 거절한다(DB CHECK 의 Zod 짝, core.isClearedStateValid).
    "깼는데 날짜 모름"(cleared=true·date=null)은 통과한다 — 그 표현을 살리는 게 플래그를 날짜와
@@ -77,6 +98,8 @@ export const updateGameInput = z
     id: z.number().int().positive(),
     cleared: z.boolean(),
     clearedDate: dateInput,
+    // 기본값 없는 쪽을 쓴다 — 안 보내면 삭제로 읽히는 필드라(requiredDateInput 주석).
+    playedDate: requiredDateInput,
   })
   .refine((v) => isClearedStateValid(v.cleared, v.clearedDate), {
     // path 를 clearedDate 에 준다 — 폼이 어느 입력 아래에 오류를 띄울지 알아야 한다.
@@ -84,6 +107,9 @@ export const updateGameInput = z
     path: ["clearedDate"],
   });
 export type UpdateGameInput = z.infer<typeof updateGameInput>;
+
+// 편집용 날짜 조회 입력 = surrogate 정수 PK. 응답이 초안 주까지 담으므로 권한은 라우터가 건다.
+export const playDatesInput = z.object({ id: z.number().int().positive() });
 
 // 삭제 입력 = surrogate 정수 PK.
 export const removeGameInput = z.object({ id: z.number().int().positive() });

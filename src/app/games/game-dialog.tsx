@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatMD } from "@/core/calendar";
+import { isPlayDateEditable } from "@/core/games";
 
 /* 게임 보드의 모달 키트 — 컴포저(추가)와 클리어 수정이 둘 다 쓴다. 두 번째 호출자가 생기면서
    드러난 seam 이라 여기로 뺐다(ADR-0010 의 JIT 추상화). 담는 건 둘이다: 네이티브 dialog 셸과
@@ -173,6 +176,65 @@ export type ClearedDraft = { cleared: boolean; clearedDate: string };
 export function useClearedDraft(initial: ClearedDraft) {
   const [draft, setDraft] = useState(initial);
   return { draft, setDraft };
+}
+
+/* 플레이 날짜 입력. 컴포저(추가)와 클리어 수정이 둘 다 쓴다.
+
+   **여기서 고치는 건 games 컬럼이 아니라 일정 항목이다**(정본은 schedule_entries, 이슈 #56
+   결정 3). 그래서 잠기는 경우가 있다: 그 게임이 여러 날 편성돼 있으면(월·화 젤다) 입력 하나로
+   표현할 수 없어 날짜를 나열만 하고 /schedule 로 보낸다(core.isPlayDateEditable — 서버도 같은
+   판정으로 거절한다).
+
+   dates 가 null 이면 아직 불러오는 중이다. 그동안 입력을 잠그는 이유: 열자마자 빈 칸이 보이면
+   "날짜가 없는 게임"으로 읽혀, 응답이 오기 전에 저장한 사용자가 멀쩡한 날짜를 지운다.
+
+   발행 안 내 주의 항목은 보드에 안 뜬다(ADR-0022) — 저장은 되는데 카드에 날짜가 안 보이는
+   자리라 안내 한 줄로 미리 말한다. 게임 폼은 주 메타를 안 건드리므로(service.addGame 주석)
+   초안을 함부로 발행하지 않는다. */
+export function PlayedDateField({
+  value,
+  onChange,
+  idPrefix,
+  dates,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  idPrefix: string;
+  /* 이 게임에 걸린 일정 날짜 전부. null = 불러오는 중, [] = 없음(새 게임 포함). */
+  dates: readonly string[] | null;
+  disabled?: boolean;
+}) {
+  const locked = dates !== null && !isPlayDateEditable(dates);
+
+  if (locked) {
+    return (
+      <div className="datefield" data-od-id={idPrefix + "-locked"}>
+        <span className="datefield__label">플레이한 날</span>
+        <p className="datefield__locked">
+          {dates.map(formatMD).join(" · ")} <span>({dates.length}일)</span>
+        </p>
+        <p className="composer__hint">
+          여러 날 편성이라 여기선 못 고쳐요 — <Link href="/schedule">일정</Link>에서 고쳐 주세요.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <label className="datefield">
+      <span className="datefield__label">플레이한 날 (모르면 비워 둬요)</span>
+      <input
+        className="field"
+        type="date"
+        value={value}
+        id={idPrefix + "-played"}
+        data-od-id={idPrefix + "-played"}
+        disabled={disabled || dates === null}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
 }
 
 /* 클리어 플래그 + 선택적 날짜. 체크가 정본이고 날짜는 그 아래 딸린다 — 안 깬 게임에 날짜만

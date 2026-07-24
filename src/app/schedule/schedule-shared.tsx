@@ -3,15 +3,11 @@
    와 core/calendar(순수)만 끌어와 서버·클라이언트 어느 쪽에서도 안전하다. */
 
 import Link from "next/link";
-import { addWeeks, toIsoDate } from "@/core/calendar";
+import { addWeeks, formatMD, toIsoDate } from "@/core/calendar";
 
-/* 'YYYY-MM-DD' → 'M.D'. 연도를 뗀다 — 한 주는 같은 해라 제목·요일 라벨에 연도가 반복되면
-   시선만 벌린다(연도가 필요한 자리는 주 범위 제목뿐). 문자열이 이미 실재하는 날짜라(경계에서
-   toIsoDate 검증) split 으로 충분하고 Temporal 왕복이 필요 없다. */
-export function formatMD(iso: string): string {
-  const [, m, d] = iso.split("-");
-  return `${Number(m)}.${Number(d)}`;
-}
+/* formatMD 는 core/calendar 로 올라갔다(게임 폼도 같은 표기를 쓴다). 이 화면들이 이미 이
+   이름으로 부르고 있어 여기서 그대로 다시 내보낸다 — 정의는 core 한 곳뿐이다. */
+export { formatMD };
 
 /* 하루 중 시각 라벨. '' 는 "미정"으로 — 시각 없는 편성을 빈칸으로 두면 "시각을 못 불러왔나"로
    읽힌다(결정 8: 시각 미정은 정상 상태라 그렇게 말한다). */

@@ -6,6 +6,7 @@ import {
   hash,
   isClearedStateValid,
   isGameCategory,
+  isPlayDateEditable,
   PATTERNS,
   ROT,
   type ChzzkCategory,
@@ -33,6 +34,21 @@ describe("isClearedStateValid", () => {
 
   it("안 깼고 날짜도 없으면 참 — 기본 상태", () => {
     expect(isClearedStateValid(false, null)).toBe(true);
+  });
+});
+
+describe("isPlayDateEditable", () => {
+  it("항목이 없으면 참 — 폼이 새로 만든다", () => {
+    expect(isPlayDateEditable([])).toBe(true);
+  });
+
+  it("항목이 하나면 참 — 그 항목의 날짜를 옮긴다", () => {
+    expect(isPlayDateEditable(["2026-07-22"])).toBe(true);
+  });
+
+  it("여러 날 편성이면 거짓 — 입력 하나로 표현이 안 돼 /schedule 로 보낸다", () => {
+    expect(isPlayDateEditable(["2026-07-21", "2026-07-22"])).toBe(false);
+    expect(isPlayDateEditable(["2026-07-21", "2026-07-22", "2026-07-23"])).toBe(false);
   });
 });
 

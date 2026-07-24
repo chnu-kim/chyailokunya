@@ -10,7 +10,7 @@ import {
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
-import { GameDialog } from "./game-dialog";
+import { GameDialog, PlayedDateField } from "./game-dialog";
 
 /* 게임 추가 컴포저(ADR-0015·0017). 두 단계다:
 
@@ -19,8 +19,14 @@ import { GameDialog } from "./game-dialog";
 
    결과 클릭이 곧 추가였던 한 단계짜리를 나눈 이유: 클릭 한 번이 곧 서버 쓰기면 잘못 고른 걸
    되돌리는 유일한 길이 삭제였다. detail 은 뒤로 갈 수 있고(결과 목록은 그대로 남는다) 그때까지
-   서버는 안 건드린다. 한때 detail 에서 플레이·클리어 날짜를 함께 넣었지만, 플레이 날짜가 일정
-   정본으로 옮겨가며(이슈 #56) 그 단계가 사라졌다 — 클리어는 추가 뒤 카드에서 붙인다.
+   서버는 안 건드린다.
+
+   detail 에서 플레이 날짜를 받는다. 한때 이 입력이 사라졌었다 — 플레이 날짜의 정본이 일정으로
+   옮겨가며(이슈 #56) 게임 폼에서 뺐는데, 그러자 새 게임에 날짜를 붙이려면 /games 에서 추가한 뒤
+   /schedule 로 건너가야 했다. **정본은 그대로 일정에 두고 입구만 되돌린 것이다**: 여기서 넣은
+   날짜는 games 컬럼이 아니라 그 날의 일정 항목이 되고, 서버가 게임 행과 **한 batch** 로 함께
+   쓴다(service.addGame — 절반만 성공하는 상태가 없다). 클리어는 여전히 추가 뒤 카드에서 붙인다:
+   추가하는 순간 이미 깬 게임은 드물어 매번 묻는 값이 낮다.
 
    단계 사이의 전이 규칙(선택·뒤로·수동 입력 비상구)은 전부 core/games-composer 의 순수 리듀서가
    쥔다 — 이 파일은 그리기와 통신만 한다. 그래야 "뒤로 갔다 다른 게임을 고르면 결과 목록이
@@ -39,6 +45,10 @@ export function GameComposer({
   /* 상세 단계의 서버 쓰기 에러만 여기 든다. 검색 에러(state.searchError)는 리듀서 소관이다 —
      응답이 늦게 도착할 때 어느 단계에 속한 문구인지 판단하는 건 전이 규칙이라서. */
   const [addError, setAddError] = useState("");
+  /* 플레이 날짜(선택). 리듀서가 아니라 여기 사는 이유: 단계 전이 규칙이 아니라 폼 값이라서다.
+     대신 단계를 옮기는 두 핸들러(뒤로·다른 게임 선택)가 이 값을 직접 비운다 — effect 로 step
+     을 보고 비우면 effect 안 동기 setState 라 set-state-in-effect(Next 16 error)에 걸린다. */
+  const [playedDate, setPlayedDate] = useState("");
   /* 닫기 신호와, 닫힌 뒤에 부모에게 넘길 행. 추가 성공 즉시 onAdded 를 부르면 부모가 같은
      커밋에서 컴포저를 언마운트해 닫기 effect 가 아예 안 돌고, 열린 채로 DOM 에서 빠져 포커스가
      body 로 떨어진다. 그래서 성공은 행을 쥐고 신호만 세우고, 실제 인계는 브라우저가 dialog 를
@@ -108,6 +118,7 @@ export function GameComposer({
             categoryType: "GAME",
             categoryValue: selected.categoryValue,
             posterImageUrl: selected.posterImageUrl,
+            playedDate,
           },
           // 상한이 없으면 busy 가 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
           { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
@@ -151,6 +162,15 @@ export function GameComposer({
             <span className="composer__chosenname">{selected.categoryValue}</span>
           </div>
 
+          {/* 새 게임이라 일정 항목이 있을 수 없다 — 빈 배열을 넘겨 잠금 분기를 끈다(조회 불필요). */}
+          <PlayedDateField
+            value={playedDate}
+            onChange={setPlayedDate}
+            idPrefix="composer"
+            dates={[]}
+            disabled={adding}
+          />
+
           {addError && (
             <p className="err" role="alert">
               {addError}
@@ -167,6 +187,8 @@ export function GameComposer({
               onClick={() => {
                 dispatch({ type: "back" });
                 setAddError("");
+                // 고른 게임을 물렸으니 그 게임에 넣던 날짜도 함께 버린다.
+                setPlayedDate("");
               }}
             >
               뒤로
@@ -222,7 +244,9 @@ export function GameComposer({
                 <button
                   className="composer__pick"
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    // 다른 게임을 고르면 앞 게임에 넣던 날짜가 따라오면 안 된다.
+                    setPlayedDate("");
                     dispatch({
                       type: "picked",
                       selection: {
@@ -230,8 +254,8 @@ export function GameComposer({
                         categoryValue: c.categoryValue,
                         posterImageUrl: c.posterImageUrl,
                       },
-                    })
-                  }
+                    });
+                  }}
                 >
                   {c.posterImageUrl ? (
                     <img
