@@ -559,6 +559,40 @@ describe("games 라우터", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  /* 거짓 충돌을 안 만든다. 항목이 하나인 게임은 폼이 그 날짜를 입력에 채워 두므로 클리어만
+     고친 저장도 같은 값을 실어 온다 — 그걸 일정 변경으로 취급하면 revision 이 올라가 열어 둔
+     편집기가 **원인 없는 CONFLICT** 를 받는다. revision 은 파괴적 전체 교체를 막는 마지막
+     방어선이라 거짓 경보가 섞이면 진짜 경합의 신호가 흐려진다(적대적 리뷰 5라운드). */
+  it("날짜가 그대로면 주 revision 을 안 올린다 — 클리어만 고친 저장", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-20",
+      revision: null,
+      published: true,
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: row.id }],
+    });
+    const opened = await authed.schedule.getWeek({ weekStartDate: "2026-07-20" });
+
+    // 폼이 하는 그대로 — 같은 날짜를 되실어 클리어만 켠다.
+    await authed.games.update({
+      id: row.id,
+      cleared: true,
+      clearedDate: null,
+      playedDate: "2026-07-22",
+    });
+
+    // revision 이 그대로라 열어 둔 편집기가 계속 저장할 수 있다.
+    const after = await authed.schedule.getWeek({ weekStartDate: "2026-07-20" });
+    expect(after.revision).toBe(opened.revision);
+    await authed.schedule.saveWeek({
+      weekStartDate: "2026-07-20",
+      revision: opened.revision,
+      published: true,
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: row.id }],
+    });
+  });
+
   /* 날짜를 다른 주로 옮기면 주가 둘이다 — 옛 주와 새 주. 한쪽만 올리면 다른 쪽 편집기가
      그대로 통과해 지운다. 둘 다 메타가 있는 경우로 세워 그걸 본다. */
   it("주를 건너뛰어 옮기면 옛 주·새 주 편집기가 둘 다 CONFLICT 로 막힌다", async () => {

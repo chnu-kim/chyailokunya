@@ -256,41 +256,55 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
      있는데, 그때 entries[0] 를 건드리면 "클리어만 고치는" 저장이 가장 이른 날을 조용히
      옮기거나 지운다. undefined 를 여기서 한 번 더 가르는 게 그 자리를 닫는다. */
   const current = touchesSchedule ? entries[0] : undefined;
-  const entryOp = !touchesSchedule
-    ? null
-    : input.playedDate === null
-      ? current
-        ? /* 날짜를 비우면 항목을 **지우지 않고 연결만 푼다.** 그 행은 "그날 방송이 있었다"는
+
+  /* 날짜가 **그대로면** 일정을 안 건드린다. 항목이 하나인 게임은 폼이 그 날짜를 입력에 채워
+     두므로, 클리어만 고친 저장도 같은 값을 그대로 실어 온다 — 걸러내지 않으면 일정을 바꾸지
+     않은 저장이 UPDATE 를 날리고 claimWeek 이 revision 을 올려, 열어 둔 편집기가 **원인 없는
+     CONFLICT** 를 받는다. 관리자는 무엇과 충돌했는지 알 길이 없고, revision 은 파괴적 전체
+     교체를 막는 마지막 방어선이라 거짓 경보가 섞이면 진짜 경합의 신호가 흐려진다
+     (적대적 리뷰 5라운드). */
+  const unchangedDate = current !== undefined && input.playedDate === current.scheduledDate;
+
+  const entryOp =
+    !touchesSchedule || unchangedDate
+      ? null
+      : input.playedDate === null
+        ? current
+          ? /* 날짜를 비우면 항목을 **지우지 않고 연결만 푼다.** 그 행은 "그날 방송이 있었다"는
              정본 사실이고 /schedule 이 쥔 start_time·자유 title 을 담을 수 있다 — 게임 폼이
              만든 행인지 일정에서 짠 행인지 구분할 표식이 없어서, 지우면 어느 쪽이든 날아간다.
              게임을 **삭제**해도 항목은 ON DELETE SET NULL 로 남는데(schema 주석) 날짜만 비운
              게 더 파괴적이면 앞뒤가 안 맞고, 폼 문구도 "모르면 비워 둬요"라 파괴 신호가 없다.
              "이 게임을 그날 한 게 아니다"는 연결 해제이지 "그날 방송이 없었다"가 아니다. */
-          db.update(scheduleEntries).set({ gameId: null }).where(eq(scheduleEntries.id, current.id))
-        : null
-      : current
-        ? db
-            .update(scheduleEntries)
-            .set({ scheduledDate: input.playedDate })
-            .where(eq(scheduleEntries.id, current.id))
-        : db.insert(scheduleEntries).values({
-            scheduledDate: input.playedDate!,
-            startTime: null,
-            title: rows[0].categoryValue,
-            gameId: input.id,
-          });
+            db
+              .update(scheduleEntries)
+              .set({ gameId: null })
+              .where(eq(scheduleEntries.id, current.id))
+          : null
+        : current
+          ? db
+              .update(scheduleEntries)
+              .set({ scheduledDate: input.playedDate })
+              .where(eq(scheduleEntries.id, current.id))
+          : db.insert(scheduleEntries).values({
+              scheduledDate: input.playedDate!,
+              startTime: null,
+              title: rows[0].categoryValue,
+              gameId: input.id,
+            });
 
   /* 건드린 주를 전부 청구한다(claimWeek 주석 — 없으면 열어 둔 편집기가 stale 인 채 CAS 를
      통과해 이 쓰기를 지운다). **날짜를 옮기면 주가 둘이다**: 옛 항목이 있던 주와 새 주. 한쪽만
      올리면 다른 쪽 편집기가 그대로 통과한다. 같은 주면 중복 청구가 되므로 집합으로 접는다. */
   const now = Date.now();
-  const touchedWeeks = touchesSchedule
-    ? [
-        ...new Set(
-          [current?.scheduledDate, input.playedDate].filter((d): d is string => Boolean(d)),
-        ),
-      ]
-    : [];
+  const touchedWeeks =
+    touchesSchedule && !unchangedDate
+      ? [
+          ...new Set(
+            [current?.scheduledDate, input.playedDate].filter((d): d is string => Boolean(d)),
+          ),
+        ]
+      : [];
   /* batch 문 수가 가변이라(항목 연산 유무 · 주 1~2개) drizzle 의 튜플 추론이 안 선다. 첫 문이
      updateRow 인 것만 보장하면 되므로 그 자리만 단언한다 — 순서를 바꾸면 이 단언이 거짓말이
      되니 updateRow 는 항상 맨 앞이다. */
