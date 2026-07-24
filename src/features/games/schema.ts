@@ -48,8 +48,9 @@ const playDateInput = z
    이 스키마가 category 4필드 정규화(trim·empty→null·GAME 필터·상한)의 유일한 정본이다.
    features/chzzk/client.ts::toCategory 는 다른 경계다: 치지직 검색 응답(신뢰 안 되는 외부
    JSON)을 타입으로 좁히는 파싱이고, 저장 시 정규화는 여전히 여기서만 한다. */
-export const addGameInput = z.object({
-  /* trim 후 non-empty — 공백만·패딩 값(' abc ')이 빈 카드로 저장되거나 'abc'/' abc ' 로
+export const addGameInput = z
+  .object({
+    /* trim 후 non-empty — 공백만·패딩 값(' abc ')이 빈 카드로 저장되거나 'abc'/' abc ' 로
      category_id UNIQUE 를 우회하는 걸 입력 경계에서 막는다.
 
      .max(200) — 한때 64였는데 **프로덕션에서 실제로 터졌다.** 치지직 categoryId 는 짧은
@@ -60,33 +61,49 @@ export const addGameInput = z.object({
 
      nullable — 검색에 없어 손으로 넣은 게임엔 치지직 키가 없다. 빈 문자열은 null 로 접는다:
      ''가 그대로 저장되면 두 번째 수동 입력이 UNIQUE 로 충돌한다(NULL 만 중복이 허용된다). */
-  categoryId: z
-    .preprocess(
+    categoryId: z
+      .preprocess(
+        (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+        z.string().trim().min(1).max(200).nullable().default(null),
+      )
+      .describe("치지직 categoryId. 수동 입력 게임은 null"),
+    categoryType: z.literal("GAME"),
+    // .max(200) — 치지직 categoryValue(게임 제목) 실측 대비 여유. 이유는 categoryId 와 동일.
+    categoryValue: z.string().trim().min(1).max(200),
+    // 빈 문자열은 저장 전에 null 로 접는다(preprocess) — "포스터 없음"의 유일한 표현은 null
+    // 이어야 카드 렌더의 이니셜 폴백 분기(poster 유무)가 하나로 맞는다. .max(2048) 은 URL
+    // 길이 상한, https 스킴 강제는 별개 이유: game-board 가 이 값을 그대로 <img src> 로
+    // 렌더하므로 javascript:/data: 등 비-http(s) 스킴이 들어오면 XSS 로 이어진다.
+    posterImageUrl: z.preprocess(
       (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-      z.string().trim().min(1).max(200).nullable().default(null),
-    )
-    .describe("치지직 categoryId. 수동 입력 게임은 null"),
-  categoryType: z.literal("GAME"),
-  // .max(200) — 치지직 categoryValue(게임 제목) 실측 대비 여유. 이유는 categoryId 와 동일.
-  categoryValue: z.string().trim().min(1).max(200),
-  // 빈 문자열은 저장 전에 null 로 접는다(preprocess) — "포스터 없음"의 유일한 표현은 null
-  // 이어야 카드 렌더의 이니셜 폴백 분기(poster 유무)가 하나로 맞는다. .max(2048) 은 URL
-  // 길이 상한, https 스킴 강제는 별개 이유: game-board 가 이 값을 그대로 <img src> 로
-  // 렌더하므로 javascript:/data: 등 비-http(s) 스킴이 들어오면 XSS 로 이어진다.
-  posterImageUrl: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z
-      .string()
-      .trim()
-      .min(1)
-      .max(2048)
-      .regex(/^https:\/\//, "https URL 이어야 해요")
-      .nullable()
-      .default(null),
-  ),
-  // 플레이 날짜(선택) — 있으면 서버가 이 날짜의 일정 항목을 게임과 **한 batch** 로 만든다.
-  playedDate: dateInput,
-});
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(2048)
+        .regex(/^https:\/\//, "https URL 이어야 해요")
+        .nullable()
+        .default(null),
+    ),
+    // 플레이 날짜(선택) — 있으면 서버가 이 날짜의 일정 항목을 게임과 **한 batch** 로 만든다.
+    playedDate: dateInput,
+    /* 클리어 상태(선택). 한때 추가 단계에 없었고 근거는 "추가하는 순간 이미 깬 게임은 드물어
+     매번 묻는 값이 낮다"였는데, 그 전제가 이 보드에선 틀렸다: 여긴 **이미 한 방송을 기록하는**
+     보드라 과거 플레이를 소급 입력하는 게 정상 경로다(플레이 날짜를 추가 폼에 되돌린 것과 같은
+     이유 — 그때도 왕복이 문제였다). 없으면 추가 → 카드 열기 → 수정 → 저장으로 왕복이 하나 더 든다.
+
+     default(false) 라 안 보내는 호출자는 "안 깬 게임"으로 떨어진다 — 추가는 새 행을 만드는
+     연산이라 updateGameInput 의 "부분 patch 금지"(안 보냄과 지움이 구분 안 된다)가 성립하지
+     않는다. 지울 이전 상태가 없다. */
+    cleared: z.boolean().default(false),
+    clearedDate: dateInput,
+  })
+  /* 안 깬 게임에 클리어 날짜가 붙는 모순을 입력 경계에서 막는다 — DB CHECK 와 이중이고
+     판정은 updateGameInput 과 같은 core 함수를 나눠 쓴다(둘이 갈리면 폼마다 다른 걸 허용한다). */
+  .refine((v) => isClearedStateValid(v.cleared, v.clearedDate), {
+    message: "클리어 표시를 해야 클리어한 날짜를 넣을 수 있어요",
+    path: ["clearedDate"],
+  });
 export type AddGameInput = z.infer<typeof addGameInput>;
 
 /* 수정 입력 — 클리어 상태와 플레이 날짜. 제목·포스터·categoryId 는 치지직 스냅샷(또는 최초

@@ -114,9 +114,11 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     await expectSignedIn(page);
     await page.evaluate(() => document.fonts.ready);
-    // 액션이 DOM 에 실제로 섰는지 먼저 못박는다 — 권한이 빠지면 이 스냅샷은 위 로그아웃
-    // 두 장과 같은 그림이 되어 "찍었는데 아무것도 안 본" 초록이 된다.
-    await expect(page.locator('[data-od-id="game-edit-1"]')).toBeVisible();
+    /* 쓰기 권한이 격자에 실제로 드러났는지 먼저 못박는다 — 권한이 빠지면 이 스냅샷은 위
+       로그아웃 두 장과 같은 그림이 되어 "찍었는데 아무것도 안 본" 초록이 된다.
+       한때 여기서 카드의 수정 버튼을 봤는데, 수정·삭제가 상세 모달로 내려가며 격자에서
+       사라졌다 — 지금 격자에 남은 권한의 흔적은 첫 칸의 빈 종이 하나뿐이다. */
+    await expect(page.locator('[data-od-id="composer-open"]')).toBeVisible();
 
     await expect(page.locator(".games")).toHaveScreenshot(`games-signed-in-${theme}.png`, {
       animations: "disabled",

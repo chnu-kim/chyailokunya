@@ -55,7 +55,7 @@ describe("addGameInput", () => {
     }
   });
 
-  it("정상 치지직 category 스냅샷은 통과 — add 는 카테고리 4필드만 받는다(날짜 없음)", () => {
+  it("정상 치지직 category 스냅샷은 통과 — 날짜·클리어를 안 주면 빈 값으로 떨어진다", () => {
     const result = addGameInput.safeParse({
       ...base,
       posterImageUrl: "https://ssl.pstatic.net/cmcp/section/2024/game/poster.jpg",
@@ -64,10 +64,35 @@ describe("addGameInput", () => {
     if (result.success) {
       expect(result.data.categoryId).toBe("c1");
       expect(result.data.categoryValue).toBe("엘든링");
-      // 클리어·플레이 날짜는 add 입력에 없다 — 플레이는 일정 정본, 클리어는 추가 뒤 편집.
-      expect(result.data).not.toHaveProperty("clearedDate");
-      expect(result.data).not.toHaveProperty("cleared");
+      /* 날짜와 클리어는 **선택**이다 — 몰라도 게임을 먼저 올릴 수 있어야 한다. 안 보낸
+         호출자가 "안 깬 게임 · 일정 항목 없음"으로 떨어지는 게 그 계약이고, 실수로 빠뜨려도
+         파괴가 아니라 무동작이 된다(playDateInput 이 update 쪽에서 세운 것과 같은 방향). */
+      expect(result.data.playedDate).toBeNull();
+      expect(result.data.cleared).toBe(false);
+      expect(result.data.clearedDate).toBeNull();
     }
+  });
+
+  it("이미 깬 게임은 클리어 상태를 실어 올릴 수 있다", () => {
+    const result = addGameInput.safeParse({ ...base, cleared: true, clearedDate: "2026-03-01" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.cleared).toBe(true);
+      expect(result.data.clearedDate).toBe("2026-03-01");
+    }
+  });
+
+  // 안 깼는데 클리어 날짜만 있는 모순 — update 와 같은 판정을 add 도 거친다(우회로 금지).
+  it("안 깬 게임에 클리어 날짜가 붙으면 거절한다", () => {
+    expect(
+      addGameInput.safeParse({ ...base, cleared: false, clearedDate: "2026-03-01" }).success,
+    ).toBe(false);
+  });
+
+  it("'깼는데 날짜 모름'은 통과한다 — 플래그가 정본이라 날짜 없이도 유효하다", () => {
+    const result = addGameInput.safeParse({ ...base, cleared: true });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.clearedDate).toBeNull();
   });
 
   it("categoryId 없이도 통과 — 수동 입력 게임(치지직 키 없음)", () => {

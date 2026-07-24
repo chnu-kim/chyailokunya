@@ -191,6 +191,9 @@ export async function addGame(db: Db, input: AddGameInput): Promise<GameCard> {
       categoryType: input.categoryType,
       categoryValue: input.categoryValue,
       posterImageUrl: input.posterImageUrl,
+      // 이미 깬 게임을 그대로 올릴 수 있다 — 소급 입력이 이 보드의 정상 경로다(addGameInput 주석).
+      cleared: input.cleared,
+      clearedDate: input.clearedDate,
     })
     .returning();
 
