@@ -76,14 +76,37 @@ export function GameBoard({
   // "무엇을 떼는지"를 되짚어 줘야 하고, 되돌릴 수 없는 행동일수록 그 확인이 정확해야 한다.
   const [deleting, setDeleting] = useState<GameCard | null>(null);
   const addSlotRef = useRef<HTMLButtonElement>(null);
+  /* 방금 붙인 카드. 정렬이 그 카드를 어디로 보내든 사용자가 그것을 찾을 수 있어야 한다
+     (아래 onAdded 주석). */
+  const [justAdded, setJustAdded] = useState<number | null>(null);
+  const justAddedRef = useRef<HTMLButtonElement | null>(null);
 
   function onAdded(row: GameCard) {
-    // 최신 추가가 위로(구 보드의 prepend). 서버 정본과 같은 정렬은 아니지만(날짜순) 다음
-    // 새로고침이 맞춰 준다 — 방금 붙인 카드는 눈에 보이는 자리에 있어야 한다.
-    setGames((prev) => [row, ...prev]);
+    /* **정렬해서 넣는다.** 한때 맨 앞에 붙였고(구 보드의 prepend) 근거는 "방금 붙인 카드는
+       눈에 보이는 자리에 있어야 한다"였는데, 그 근거가 정렬을 이길 수 있었던 건 추가 폼이
+       날짜를 안 받던 시절뿐이다. 지금은 과거 날짜를 실어 소급 입력하는 게 정상 경로라
+       (addGameInput 주석), prepend 하면 2026-01-05 짜리 카드가 최근 플레이 위에 앉는다 —
+       보드가 "플레이한 날 내림차순"이라고 스스로 말하는 자리에서 그건 틀린 그림이고,
+       새로고침 한 번에 카드가 다른 데로 튄다(적대적 리뷰가 잡았다).
+
+       onUpdated 가 같은 이유로 이미 정렬한다 — 두 쓰기 경로가 다른 규칙을 쓸 이유가 없다. */
+    setGames((prev) => sortGameCards([row, ...prev]));
     setComposing(false);
     setAnnouncement(row.categoryValue + " 추가됨");
+    /* 정렬이 카드를 화면 밖으로 보낼 수 있으므로(날짜를 안 넣으면 날짜 있는 게임들 뒤로
+       간다) 그 카드로 포커스를 옮긴다. 스크롤이 아니라 포커스인 이유: 스크롤만 하면 키보드
+       사용자는 뷰포트와 포커스가 갈린 채 남는다(모달이 닫히며 포커스는 추가 슬롯으로
+       복원된다). focus() 가 스크롤도 함께 하므로 시각 사용자에게도 같은 결과다. */
+    setJustAdded(row.id);
   }
+
+  /* 위 setJustAdded 의 짝. effect 안에서 상태를 안 건드리므로 set-state-in-effect 규칙에
+     걸리지 않는다. 모달이 닫히며 브라우저가 추가 슬롯으로 되돌린 포커스를 여기서 덮는다 —
+     close 이벤트가 리렌더보다 먼저라 이 effect 가 나중이다. */
+  useEffect(() => {
+    if (justAdded === null) return;
+    justAddedRef.current?.focus();
+  }, [justAdded]);
 
   /* 날짜를 고치면 lastPlayed 가 바뀌어 **자리도 달라져야 한다** — 제자리 교체만 하면 새로고침
      전까지 보드가 날짜순이 아닌 채로 남는다. 정렬 규칙은 core 가 쥔다(서버 SQL 의 짝). */
@@ -241,6 +264,8 @@ export function GameBoard({
                         type="button"
                         aria-label={g.categoryValue + " 자세히"}
                         data-od-id={"game-open-" + g.id}
+                        // 방금 붙인 카드에만 걸린다 — 정렬 뒤 그 카드를 찾아 주는 손잡이다.
+                        ref={g.id === justAdded ? justAddedRef : undefined}
                         onClick={() => setDetail(g)}
                       >
                         {/* 두 줄 말줄임은 이 span 이 진다 — 버튼에 직접 걸면 함께 필요한
