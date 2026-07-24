@@ -90,6 +90,17 @@ export class MultiDayScheduleLocked extends Error {
   }
 }
 
+/* 폼이 열린 뒤 그 게임의 일정 날짜가 딴 데서 바뀌었다. 라우터가 CONFLICT 로 올린다.
+   덮어쓰지 않고 거절하는 게 핵심이다 — 그냥 쓰면 남의 일정 작업이 조용히 되돌아간다
+   (적대적 리뷰 6라운드). saveWeek 의 revision CONFLICT 와 같은 처방: 새로고침해서 지금 값
+   위에서 다시 편집하게 한다. */
+export class PlayDateChangedElsewhere extends Error {
+  constructor() {
+    super("play date changed after the form was opened");
+    this.name = "PlayDateChangedElsewhere";
+  }
+}
+
 /* 이 게임에 걸린 일정 항목 — **발행 경계를 걸지 않는다.** lastPlayedExpr 와 일부러 다르다:
    보드는 발행된 항목만 그리지만, "폼이 이 게임의 날짜를 고칠 수 있나"는 초안 주의 항목까지
    세야 한다. 안 세면 초안에 항목이 둘 있는 게임을 폼이 "0개"로 보고 새로 만들어, 그 주를
@@ -244,6 +255,19 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
   const touchesSchedule = input.playedDate !== undefined;
   if (touchesSchedule && !isPlayDateEditable(entries.map((e) => e.scheduledDate))) {
     throw new MultiDayScheduleLocked();
+  }
+
+  /* 낙관적 동시성: 폼이 열릴 때 읽은 날짜(playedDateWas)가 지금 값과 같아야 쓴다. 다르면 그
+     사이 다른 관리자가 /schedule 에서 옮긴 것이라, 그대로 쓰면 **남의 일정 작업이 조용히
+     되돌아간다**(적대적 리뷰 6라운드). 폼도 "안 바뀌었으면 안 싣는다"로 대부분 막지만 그건
+     클라이언트 신뢰다 — 진짜 방어선은 여기다(불변식 3).
+
+     검사가 읽고→비교라 여기와 batch 사이에 창이 남는다(D1 엔 대화형 트랜잭션이 없다). saveWeek
+     이 CAS 를 쓰기 조건으로 옮겨 닫은 것과 달리 여기선 그대로 둔다 — 항목 하나를 건드리는
+     쓰기라 피해 반경이 주 전체 교체와 다르고, 현실적으로 나는 건 "분 단위로 벌어진 stale
+     저장"이며 그건 이 검사가 잡는다(AGENTS.md 의 D1 수용 경계와 같은 판단). */
+  if (touchesSchedule && (input.playedDateWas ?? null) !== (entries[0]?.scheduledDate ?? null)) {
+    throw new PlayDateChangedElsewhere();
   }
 
   const updateRow = db

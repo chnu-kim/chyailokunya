@@ -104,3 +104,46 @@ test("관리자: 여러 날 편성 게임도 저장이 통과한다", async ({ p
   await page.goto("/schedule?week=2026-02-16");
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveValue("엘든 링 1일차");
 });
+
+/* 폼이 열린 뒤 일정이 딴 데서 바뀌었을 때, **날짜 칸을 안 건드린 저장은 그걸 되돌리지 않는다.**
+   서버 precondition(playedDateWas)이 최종 방어선이지만 그 앞에 폼의 규약이 있다: 사용자가 날짜를
+   고치지 않았으면 아예 안 싣는다. 안 실으면 서버는 일정을 건드리지 않으므로 CONFLICT 조차 안
+   난다 — 클리어만 고치려던 관리자가 남의 일정 변경 때문에 막히면 그것대로 나쁘다.
+   라우터 테스트는 "낡은 값을 실으면 CONFLICT"를 덮지만, **폼이 애초에 안 싣는지**는 실제 제출
+   페이로드를 태워야 안다(리뷰 6라운드). */
+test("관리자: 폼이 열린 뒤 일정이 바뀌어도 클리어만 고친 저장은 그대로 통과한다", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+
+  // 마인크래프트(id 2)는 항목이 하나라(2026-07-12) 폼이 그 날짜를 읽고 편집 가능한 상태로 연다.
+  await page.goto("/games");
+  await expectSignedIn(page);
+  await page.locator('[data-od-id="game-edit-2"]').click();
+  await expect(page.locator('[data-od-id="editor-played"]')).toHaveValue("2026-07-12");
+
+  /* 폼이 열린 채로 그 **날짜**가 딴 데서 옮겨진 상황을 만든다 — 다른 탭의 관리자가 하는 일이다.
+     날짜여야 한다: 시각·제목만 바꾸면 precondition(playedDateWas)이 안 걸려 이 스펙이 아무것도
+     증명하지 못한다(실제로 처음엔 시각을 바꿨다가 검출력이 0인 걸 확인했다). 07-13 으로 옮기는
+     건 마인크래프트가 보드 1위(MAX)를 유지해 읽기 전용 스펙의 정렬 검증을 안 흔들기 때문이다. */
+  const other = await page.context().newPage();
+  await other.goto("/games");
+  await other.locator('[data-od-id="game-edit-2"]').click();
+  await other.locator('[data-od-id="editor-played"]').fill("2026-07-13");
+  await other.locator('[data-od-id="game-editor-submit"]').click();
+  await expect(other.locator('dialog[data-od-id="game-editor"]')).toHaveCount(0);
+  await other.close();
+
+  /* 원래 폼에서 그대로 저장. 날짜 칸을 안 건드렸으므로 playedDate 를 안 싣고, 서버는 일정을
+     건드리지 않아 **CONFLICT 조차 안 난다** — 클리어만 고치려던 관리자가 남의 일정 변경 때문에
+     막히면 그것대로 나쁘다. 폼이 늘 싣던 시절엔 stale 한 07-12 가 실려 CONFLICT 로 막혔다.
+     클리어를 안 켜는 건 읽기 전용 스펙이 보는 픽스처 상태를 안 흔들기 위해서다. */
+  await page.locator('[data-od-id="game-editor-submit"]').click();
+  await expect(page.locator('dialog[data-od-id="game-editor"]')).toHaveCount(0);
+
+  // 남의 변경(07-13)이 살아 있다 — stale 한 폼이 07-12 로 되돌리지 않았다.
+  await page.reload();
+  await page.locator('[data-od-id="game-edit-2"]').click();
+  await expect(page.locator('[data-od-id="editor-played"]')).toHaveValue("2026-07-13");
+});

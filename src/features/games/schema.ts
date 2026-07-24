@@ -109,14 +109,30 @@ export const updateGameInput = z
     id: z.number().int().positive(),
     cleared: z.boolean(),
     clearedDate: dateInput,
-    /* 안 보내면 "일정을 안 건드린다" — 여러 날 편성이라 폼이 날짜를 잠근 저장이 이 길로 온다
-       (playDateInput 주석의 회귀). */
+    /* 안 보내면 "일정을 안 건드린다" — 여러 날 편성이라 폼이 날짜를 잠근 저장과, 사용자가
+       날짜 칸을 아예 안 건드린 저장이 이 길로 온다(playDateInput 주석의 회귀). */
     playedDate: playDateInput,
+    /* playedDate 를 실을 때 **함께 보내는 precondition** — 폼이 열릴 때 읽은 날짜다. 서버가
+       현재 항목과 대조해 다르면 CONFLICT 로 거절한다(낙관적 동시성, saveWeek 의 revision 과
+       같은 결).
+
+       왜 필요한가: 폼은 열릴 때 날짜를 로컬 상태로 읽는다. 그 사이 다른 관리자가 /schedule
+       에서 그 항목을 옮기면, 클리어만 고친 저장이 **stale 한 날짜를 되돌려 놓는다** — 남의
+       일정 작업이 조용히 사라진다(적대적 리뷰 6라운드). 폼이 "안 바뀌었으면 안 싣는다"로도
+       대부분 막히지만 그건 클라이언트 신뢰라, 진짜 방어선은 여기 둔다(불변식 3). */
+    playedDateWas: playDateInput,
   })
   .refine((v) => isClearedStateValid(v.cleared, v.clearedDate), {
     // path 를 clearedDate 에 준다 — 폼이 어느 입력 아래에 오류를 띄울지 알아야 한다.
     message: "클리어 표시를 해야 클리어한 날짜를 넣을 수 있어요",
     path: ["clearedDate"],
+  })
+  /* 날짜를 바꾸겠다면 "무엇에서 바꾸는지"를 반드시 함께 말해야 한다 — precondition 없이
+     playedDate 만 오면 서버가 stale 여부를 판단할 수 없다. 키가 하나만 실린 요청은 규약을
+     모르는 호출자이므로 입력 경계에서 막는다. */
+  .refine((v) => (v.playedDate === undefined) === (v.playedDateWas === undefined), {
+    message: "플레이 날짜를 바꿀 땐 열었을 때의 날짜도 함께 보내야 해요",
+    path: ["playedDateWas"],
   });
 export type UpdateGameInput = z.infer<typeof updateGameInput>;
 

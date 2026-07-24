@@ -412,6 +412,10 @@ function GameEditor({
      주석의 "빈 칸을 날짜 없음으로 오해해 지우는" 자리). */
   const [dates, setDates] = useState<string[] | null>(null);
   const [playedDate, setPlayedDate] = useState("");
+  /* 열릴 때 읽은 날짜. 두 곳에 쓴다: (1) 사용자가 실제로 고쳤는지 판별해 안 고쳤으면 저장에
+     안 싣고, (2) 실을 땐 precondition 으로 함께 보내 그 사이 딴 데서 바뀌었으면 서버가
+     CONFLICT 를 낸다(schema.playedDateWas). */
+  const [loadedDate, setLoadedDate] = useState("");
   const [loadFailed, setLoadFailed] = useState(false);
   // 닫기 신호와 인계할 행. 컴포저와 같은 이유로 성공 즉시 onUpdated 를 부르지 않는다 —
   // 부모가 같은 커밋에서 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
@@ -433,7 +437,9 @@ function GameEditor({
         if (!alive) return;
         setDates(found);
         // 항목이 하나면 그 날짜가 곧 편집 대상이다. 여럿이면 잠기고 저장에 안 실린다(onSave).
-        setPlayedDate(found.length === 1 ? found[0]! : "");
+        const loaded = found.length === 1 ? found[0]! : "";
+        setPlayedDate(loaded);
+        setLoadedDate(loaded);
       } catch {
         if (!alive) return;
         setLoadFailed(true);
@@ -450,18 +456,27 @@ function GameEditor({
     startSave(async () => {
       setError("");
       try {
-        /* 여러 날 편성이면 playedDate 를 **아예 안 싣는다** — 필드 부재가 "일정을 안 건드린다"
-           이고(서버 playDateInput 규약), 그래야 잠긴 폼에서도 클리어를 고칠 수 있다. 한때
-           잠금 상태에서 빈 문자열을 실었는데 그게 null 로 접혀 "여러 날을 지우려 한다"로
-           거절돼 **저장이 통째로 막혔다**(codex 리뷰가 잡은 회귀 — e2e 가 지킨다).
+        /* playedDate 를 **싣지 않는 경우가 둘**이고, 둘 다 "일정을 안 건드린다"는 뜻이다
+           (서버 playDateInput 규약 — 필드 부재).
+
+           1. 여러 날 편성이라 입력이 잠겼다. 한때 잠금 상태에서 빈 문자열을 실었는데 그게
+              null 로 접혀 "여러 날을 지우려 한다"로 거절돼 **저장이 통째로 막혔다**.
+           2. 사용자가 날짜 칸을 **안 건드렸다.** 안 실어야 하는 이유가 둘이다: 같은 값을
+              되보내면 주 revision 이 올라 열어 둔 편집기가 원인 없는 CONFLICT 를 받고, 더
+              나쁘게는 폼이 열린 뒤 딴 데서 그 항목이 옮겨졌을 때 **stale 한 값이 남의 일정
+              작업을 되돌려 놓는다**(적대적 리뷰 5·6라운드 — 서버도 precondition 으로 막는다).
+
+           날짜를 실제로 고쳤으면 playedDateWas 를 함께 보낸다 — 열었을 때의 값이라 서버가
+           그 사이 바뀌었는지 판정할 수 있다.
            빈 문자열 → null 전처리의 정본은 서버 updateGameInput(Zod)이다 — 여기서 다시 하지 않는다. */
         const locked = dates !== null && !isPlayDateEditable(dates);
+        const dateEdited = !locked && playedDate !== loadedDate;
         const row = await trpc.games.update.mutate(
           {
             id: game.id,
             cleared: draft.cleared,
             clearedDate: draft.clearedDate,
-            ...(locked ? {} : { playedDate }),
+            ...(dateEdited ? { playedDate, playedDateWas: loadedDate } : {}),
           },
           // 상한이 없으면 saving 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
           { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },

@@ -187,6 +187,7 @@ describe("games 라우터", () => {
         cleared: true,
         clearedDate: "2026-07-20",
         playedDate: null,
+        playedDateWas: null,
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     // 막혔으면 저장도 안 됐다.
@@ -203,12 +204,18 @@ describe("games 라우터", () => {
       cleared: true,
       clearedDate: "2026-07-20",
       playedDate: null,
+      playedDateWas: null,
     });
     expect(done.cleared).toBe(true);
     expect(done.clearedDate).toBe("2026-07-20");
 
     // cleared=false 로 보내면 클리어가 풀린다(부분 patch 가 아니라 전체 치환). 날짜도 함께 빠진다.
-    const undone = await authed.games.update({ id: row.id, cleared: false, playedDate: null });
+    const undone = await authed.games.update({
+      id: row.id,
+      cleared: false,
+      playedDate: null,
+      playedDateWas: null,
+    });
     expect(undone.cleared).toBe(false);
     expect(undone.clearedDate).toBeNull();
   });
@@ -216,7 +223,12 @@ describe("games 라우터", () => {
   it("update 는 '깼는데 날짜 모름'을 받는다(cleared=true·date 없음)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add(eldenring);
-    const done = await authed.games.update({ id: row.id, cleared: true, playedDate: null });
+    const done = await authed.games.update({
+      id: row.id,
+      cleared: true,
+      playedDate: null,
+      playedDateWas: null,
+    });
     expect(done.cleared).toBe(true);
     expect(done.clearedDate).toBeNull();
   });
@@ -224,7 +236,7 @@ describe("games 라우터", () => {
   it("update 는 없는 id 면 NOT_FOUND(삭제와 달리 조용히 성공하지 않는다)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     await expect(
-      authed.games.update({ id: 9999, cleared: false, playedDate: null }),
+      authed.games.update({ id: 9999, cleared: false, playedDate: null, playedDateWas: null }),
     ).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
@@ -240,6 +252,7 @@ describe("games 라우터", () => {
         cleared: false,
         clearedDate: "2026-07-20",
         playedDate: null,
+        playedDateWas: null,
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     // 실재하지 않는 날짜 → 거절.
@@ -249,6 +262,7 @@ describe("games 라우터", () => {
         cleared: true,
         clearedDate: "2026-02-31",
         playedDate: null,
+        playedDateWas: null,
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
@@ -325,6 +339,7 @@ describe("games 라우터", () => {
       cleared: false,
       clearedDate: null,
       playedDate: "2026-07-23",
+      playedDateWas: "2026-07-20",
     });
     expect(moved.lastPlayed).toBe("2026-07-23");
 
@@ -343,6 +358,7 @@ describe("games 라우터", () => {
       cleared: false,
       clearedDate: null,
       playedDate: null,
+      playedDateWas: "2026-07-20",
     });
     expect(cleared.lastPlayed).toBeNull();
 
@@ -373,6 +389,7 @@ describe("games 라우터", () => {
       cleared: false,
       clearedDate: null,
       playedDate: null,
+      playedDateWas: "2026-07-20",
     });
 
     const entries = await db.select().from(scheduleEntries);
@@ -390,6 +407,7 @@ describe("games 라우터", () => {
       cleared: false,
       clearedDate: null,
       playedDate: "2026-07-22",
+      playedDateWas: null,
     });
     expect(dated.lastPlayed).toBe("2026-07-22");
     const entries = await makeDb(env.DB).select().from(scheduleEntries);
@@ -412,11 +430,18 @@ describe("games 라우터", () => {
         cleared: false,
         clearedDate: null,
         playedDate: "2026-07-25",
+        playedDateWas: "2026-07-20",
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     // null(지우기)도 막는다 — 여러 날을 한 입력으로 지우는 건 폼이 표현하지 못한 의도다.
     await expect(
-      authed.games.update({ id: row.id, cleared: false, clearedDate: null, playedDate: null }),
+      authed.games.update({
+        id: row.id,
+        cleared: false,
+        clearedDate: null,
+        playedDate: null,
+        playedDateWas: "2026-07-20",
+      }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     // 거절된 저장은 일정을 안 건드렸다.
@@ -517,6 +542,7 @@ describe("games 라우터", () => {
       cleared: false,
       clearedDate: null,
       playedDate: "2026-07-22",
+      playedDateWas: null,
     });
 
     const published = await getPublishedWeek(makeDb(env.DB), "2026-07-20");
@@ -548,6 +574,7 @@ describe("games 라우터", () => {
       cleared: false,
       clearedDate: null,
       playedDate: "2026-07-23",
+      playedDateWas: "2026-07-22",
     });
 
     await expect(
@@ -580,6 +607,7 @@ describe("games 라우터", () => {
       cleared: true,
       clearedDate: null,
       playedDate: "2026-07-22",
+      playedDateWas: "2026-07-22",
     });
 
     // revision 이 그대로라 열어 둔 편집기가 계속 저장할 수 있다.
@@ -591,6 +619,54 @@ describe("games 라우터", () => {
       published: true,
       entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: row.id }],
     });
+  });
+
+  /* ── 폼이 열린 뒤 일정이 딴 데서 바뀌면 덮어쓰지 않는다 ──────────────────────────────
+     폼은 열릴 때 날짜를 로컬 상태로 읽는다. 그 사이 다른 관리자가 그 항목을 옮기면, 그 stale
+     한 값을 그대로 쓰는 순간 **남의 일정 작업이 조용히 되돌아간다**(적대적 리뷰 6라운드).
+     precondition(playedDateWas)이 그걸 CONFLICT 로 막는다 — saveWeek 의 revision 과 같은 결. */
+  it("폼이 읽은 날짜가 낡았으면 CONFLICT — 남의 일정 변경을 되돌리지 않는다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+
+    // 폼이 2026-07-22 를 읽고 열린 사이, 다른 관리자가 그 항목을 옮긴다.
+    await makeDb(env.DB)
+      .update(scheduleEntries)
+      .set({ scheduledDate: "2026-07-25" })
+      .where(eq(scheduleEntries.gameId, row.id));
+
+    await expect(
+      authed.games.update({
+        id: row.id,
+        cleared: true,
+        clearedDate: null,
+        playedDate: "2026-07-22",
+        playedDateWas: "2026-07-22", // 폼이 열릴 때 읽은 값 — 이제 낡았다
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    // 거절됐으니 남의 변경이 그대로 살아 있다.
+    expect(await authed.games.playDates({ id: row.id })).toEqual(["2026-07-25"]);
+  });
+
+  it("항목이 사라진 뒤의 저장도 CONFLICT — was 가 null 이 아닌데 지금은 없다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-22" });
+    // 다른 관리자가 그 항목의 게임 연결을 풀었다.
+    await makeDb(env.DB)
+      .update(scheduleEntries)
+      .set({ gameId: null })
+      .where(eq(scheduleEntries.gameId, row.id));
+
+    await expect(
+      authed.games.update({
+        id: row.id,
+        cleared: false,
+        clearedDate: null,
+        playedDate: "2026-07-23",
+        playedDateWas: "2026-07-22",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   /* 날짜를 다른 주로 옮기면 주가 둘이다 — 옛 주와 새 주. 한쪽만 올리면 다른 쪽 편집기가
@@ -621,6 +697,7 @@ describe("games 라우터", () => {
       cleared: false,
       clearedDate: null,
       playedDate: "2026-07-29",
+      playedDateWas: "2026-07-22",
     });
 
     for (const [label, week] of [
