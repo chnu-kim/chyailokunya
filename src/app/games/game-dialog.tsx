@@ -221,9 +221,18 @@ export function PlayedDateField({
     );
   }
 
+  /* 이미 걸린 항목이 있으면 비우기의 뜻이 "모름"이 아니라 **연결 해제**다 — 그 행은 일정에
+     남고 이 게임과의 연결만 풀린다(service.updateGame). 새 게임엔 풀 연결이 없어 "모르면
+     비워 둬요"가 그대로 맞다. 같은 빈 칸이 두 뜻을 가지므로 라벨이 그걸 말해야 한다. */
+  const hasEntry = dates !== null && dates.length === 1;
+
   return (
     <label className="datefield">
-      <span className="datefield__label">플레이한 날 (모르면 비워 둬요)</span>
+      <span className="datefield__label">
+        {hasEntry
+          ? "플레이한 날 (비우면 일정에서 연결만 풀려요)"
+          : "플레이한 날 (모르면 비워 둬요)"}
+      </span>
       <input
         className="field"
         type="date"

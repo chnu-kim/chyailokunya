@@ -334,7 +334,7 @@ describe("games 라우터", () => {
     expect(entries[0]!.title).toBe("엘든링 2회차");
   });
 
-  it("update 에 날짜를 비우면 항목이 지워진다", async () => {
+  it("update 에 날짜를 비우면 항목이 지워지지 않고 연결만 풀린다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
     const cleared = await authed.games.update({
@@ -344,7 +344,41 @@ describe("games 라우터", () => {
       playedDate: null,
     });
     expect(cleared.lastPlayed).toBeNull();
-    expect(await makeDb(env.DB).select().from(scheduleEntries)).toEqual([]);
+
+    /* 행은 남는다 — "그날 방송이 있었다"는 사실은 이 게임과 독립이다. 게임을 **삭제**해도
+       항목이 ON DELETE SET NULL 로 남는데 날짜만 비운 게 더 파괴적이면 앞뒤가 안 맞는다. */
+    const entries = await makeDb(env.DB).select().from(scheduleEntries);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.gameId).toBeNull();
+    expect(entries[0]!.scheduledDate).toBe("2026-07-20");
+    // 연결이 풀렸으니 편집 조회에도 더는 안 잡힌다(그 게임의 항목이 아니다).
+    expect(await authed.games.playDates({ id: row.id })).toEqual([]);
+  });
+
+  /* 적대적 리뷰가 지목한 최악의 경로: /schedule 에서 시각·자유 제목까지 짜 둔 항목을 게임
+     폼에서 날짜만 비웠을 때. 게임 폼이 만든 행인지 일정에서 짠 행인지 구분할 표식이 없으므로,
+     지우는 순간 어느 쪽이든 날아간다 — 그래서 아예 안 지운다. */
+  it("일정에서 짠 항목(시각·자유 제목)도 날짜를 비워 잃지 않는다", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const row = await authed.games.add({ ...eldenring, playedDate: "2026-07-20" });
+    const db = makeDb(env.DB);
+    await db
+      .update(scheduleEntries)
+      .set({ startTime: "20:00", title: "엘든링 2회차 · 마지막 보스" })
+      .where(eq(scheduleEntries.gameId, row.id));
+
+    await authed.games.update({
+      id: row.id,
+      cleared: false,
+      clearedDate: null,
+      playedDate: null,
+    });
+
+    const entries = await db.select().from(scheduleEntries);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.startTime).toBe("20:00");
+    expect(entries[0]!.title).toBe("엘든링 2회차 · 마지막 보스");
+    expect(entries[0]!.gameId).toBeNull();
   });
 
   it("update 는 날짜 없던 게임에 항목을 새로 만든다", async () => {

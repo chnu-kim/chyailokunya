@@ -167,9 +167,15 @@ export async function addGame(db: Db, input: AddGameInput): Promise<GameCard> {
 
    필드가 있으면 현재 항목 수로 갈린다(core.isPlayDateEditable):
      0개 + 날짜 → INSERT      1개 + 날짜 → 그 항목 UPDATE(시각·제목 보존)
-     1개 + null → DELETE      0개 + null → 항목 연산 없음
-   1개일 때 지우고 새로 넣지 않고 UPDATE 하는 이유는 그 항목의 start_time·title 을 지키려는
-   것이다 — /schedule 에서 "20:00 젤다 2회차"로 짜 둔 걸 게임 폼이 날짜만 옮기려다 지운다.
+     1개 + null → **연결 해제**(gameId=null, 행은 남는다)   0개 + null → 항목 연산 없음
+   두 경우 모두 행을 안 지우는 이유는 같다: 그 행은 "그날 방송이 있었다"는 정본 사실이고
+   /schedule 이 쥔 start_time·자유 title 을 담을 수 있다 — 게임 폼이 만든 행인지 일정에서 짠
+   행인지 구분할 표식이 없어 지우면 어느 쪽이든 날아간다(적대적 리뷰가 잡은 자리).
+
+   대가는 안다: 비웠다가 다시 넣으면 옛 행이 연결 없이 남고 새 행이 선다(찌꺼기 한 줄).
+   그래도 소실보다 낫고 **조용하지 않다** — 그 행은 /schedule 에 그대로 보여 지울 수 있다.
+   표식 컬럼(provenance)을 더해 "폼이 만든 행만 지운다"로 갈 수도 있지만, 두 번째 요구가
+   실제로 설 때 JIT 로 연다(ADR-0010).
 
    **여러 날 편성인데 필드가 실려 오면 거절한다.** 날짜든 null 이든 마찬가지다 — 여러 날을
    입력 하나로 옮기거나 지우는 건 폼이 표현하지 못한 의도라, 위조 클라이언트가 곧장 부르면
@@ -212,7 +218,13 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
     ? null
     : input.playedDate === null
       ? current
-        ? db.delete(scheduleEntries).where(eq(scheduleEntries.id, current.id))
+        ? /* 날짜를 비우면 항목을 **지우지 않고 연결만 푼다.** 그 행은 "그날 방송이 있었다"는
+             정본 사실이고 /schedule 이 쥔 start_time·자유 title 을 담을 수 있다 — 게임 폼이
+             만든 행인지 일정에서 짠 행인지 구분할 표식이 없어서, 지우면 어느 쪽이든 날아간다.
+             게임을 **삭제**해도 항목은 ON DELETE SET NULL 로 남는데(schema 주석) 날짜만 비운
+             게 더 파괴적이면 앞뒤가 안 맞고, 폼 문구도 "모르면 비워 둬요"라 파괴 신호가 없다.
+             "이 게임을 그날 한 게 아니다"는 연결 해제이지 "그날 방송이 없었다"가 아니다. */
+          db.update(scheduleEntries).set({ gameId: null }).where(eq(scheduleEntries.id, current.id))
         : null
       : current
         ? db
