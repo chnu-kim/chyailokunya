@@ -70,9 +70,7 @@ export default function Landing() {
           </div>
           <div className="profile__grid">
             <figure className="polaroid profile__photo" data-od-id="profile-photo">
-              <span className="tape" aria-hidden="true">
-                Kunya ♡
-              </span>
+              <span className="tape" aria-hidden="true" />
               <img
                 src="/assets/kunya-portrait-600.png"
                 width={600}

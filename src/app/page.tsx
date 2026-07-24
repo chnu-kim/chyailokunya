@@ -113,9 +113,7 @@ export default function Home() {
                 목적지가 다른 두 카드가 같은 라벨을 달게 된다. 목적지 이름은 h2 가 말하고,
                 눌린다는 신호는 hover·focus lift 와 커서가 맡는다. */}
             <Link className="paper navcard" href="/landing" data-od-id="nav-card-about">
-              <span className="tape" aria-hidden="true">
-                쿠냐 ♡
-              </span>
+              <span className="tape" aria-hidden="true" />
               {/* 고양이 얼굴 — 이 사이트의 아이콘 언어는 고양이·발바닥·카오모지다. 눈은
                   h 0.01 선분에 stroke-linecap:round 를 걸어 점으로 만든다(옆 게임패드
                   아이콘과 같은 관용구). */}
