@@ -254,12 +254,17 @@ test.describe("본문 터치 타깃", () => {
    canDelete 뒤라 로그아웃 상태로 좁은 폭을 재면 이 페이지의 터치 타깃 검사가 0 건이 된다
    (검사한 척만 하는 초록이다). 그래서 픽스처가 user 1 에 admin 을 부여한다(e2e/fixtures/games.sql).
 
-   수정·삭제는 **상시 보인다** — 사진 밑 크림 여백에 in-flow 로 서므로 hover 로 띄울 필요가
-   없다. 한때 썸네일 위 오버레이라 opacity:0 + pointer-events:none 이었고 그때는 hover 가
-   필수였는데, 배치를 내리면서 그 조건이 사라졌다(games.css 의 액션 블록 주석). */
+   수정·삭제는 이제 카드가 아니라 **상세 모달** 안에 있다(game-board 주석) — 그래서 이 스펙도
+   카드를 먼저 연다. 카드를 여는 손잡이 자체의 터치 타깃은 boundingBox 로 못 잰다: 히트 영역을
+   제목 버튼의 ::after 가 카드 전체로 넓히는데 그 의사요소는 요소 상자에 안 잡힌다(games.css).
+   그래서 **카드 네 귀퉁이를 히트테스트**해 실제로 그 버튼이 잡히는지로 판정한다 — 44 하한은
+   카드 크기가 이미 압도하므로 여기서 재야 할 것은 크기가 아니라 "정말 카드 전체가 눌리는가"다. */
 test.describe("본문 터치 타깃 — 쓰기 권한", () => {
   for (const width of NARROW) {
-    test(`${width}px /games: 추가·수정·삭제가 44 하한을 지킨다`, async ({ page, baseURL }) => {
+    test(`${width}px /games: 추가·카드 열기·수정·삭제가 44 하한을 지킨다`, async ({
+      page,
+      baseURL,
+    }) => {
       await page.setViewportSize({ width, height: 800 });
       await signIn(page.context(), baseURL!);
       await page.goto("/games");
@@ -268,17 +273,53 @@ test.describe("본문 터치 타깃 — 쓰기 권한", () => {
 
       await expectTouchTarget(page.locator('[data-od-id="composer-open"]'), "게임 추가");
 
-      for (const id of ["game-edit-1", "game-del-1"]) {
-        await expectTouchTarget(page.locator(`[data-od-id="${id}"]`), id);
+      /* 카드 전체가 열기 버튼이다. 집게(.clip)가 z-index 로 카드 위쪽 가운데를 덮고 있어
+         pointer-events 를 끄지 않으면 그 띠가 클릭을 삼키는데, 그게 정확히 여기서 잡힌다.
+
+         **먼저 뷰포트 한가운데로 스크롤한다.** elementFromPoint 는 뷰포트 좌표를 받으므로
+         화면 밖 카드는 통째로 null 을 돌려준다(2열 격자의 첫 카드는 390×800 에서 접힌 아래에
+         있다 — 실측). center 로 넣는 건 sticky nav(69px)가 카드 윗변을 덮는 걸 함께 피한다. */
+      /* behavior:"instant" 가 필수다 — 사이트가 `scroll-behavior: smooth` 를 켜 두고 있어
+         기본값이면 스크롤이 애니메이션으로 진행되고, 곧바로 좌표를 읽으면 **스크롤 전 위치**가
+         잡힌다(실측: 390 에서 top 이 541 그대로라 카드 아래쪽이 뷰포트 800 밖이었다). */
+      await page
+        .locator('[data-od-id="game-card-1"]')
+        .evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+      /* **세로 중심선 위에서만 찍는다.** 카드는 `--rest-rot` 로 기울어 있어
+         getBoundingClientRect 가 회전 AABB 를 주는데, 그 네 모서리는 원래 카드 바깥 여백이다
+         (390 에서 오른쪽 아래 모서리 안쪽 6px 이 실제로 카드 밖이었다). 회전 중심이 카드
+         중심이라 중심선 위의 점만 각도와 무관하게 카드 안이 보장된다. */
+      const hits = await page.evaluate(() => {
+        const card = document.querySelector('[data-od-id="game-card-1"]') as HTMLElement;
+        const r = card.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const pts: [string, number, number][] = [
+          ["집게 아래", cx, r.top + 10],
+          ["썸네일 한가운데", cx, r.top + r.height / 3],
+          ["이름 줄", cx, r.bottom - 24],
+        ];
+        return pts.map(([name, x, y]) => {
+          const el = document.elementFromPoint(x, y);
+          return { name, od: el?.getAttribute("data-od-id") ?? el?.tagName ?? "none" };
+        });
+      });
+      for (const h of hits) {
+        expect(h.od, `${width}px: 카드 ${h.name} 이 열기 버튼에 안 걸린다`).toBe("game-open-1");
       }
 
-      // 액션 버튼은 광학 정렬 때문에 텍스트 칼럼 밖으로 13px 씩 빠져 있다(games.css). 그건
-      // 의도지만 **카드 밖으로는 못 나간다** — 나가면 잘려서 실제로 못 누른다. 카드 상자를
-      // 기준으로 못박는다. 페이지 전체 넘침 스펙이 못 보는 카드 단위 자리다.
+      // 조작은 카드를 연 다음에 만난다.
+      await page.locator('[data-od-id="game-open-1"]').click({ timeout: 3000 });
+      const detail = page.locator('dialog[data-od-id="game-detail"]');
+      await expect(detail).toBeVisible();
+
       const edit = page.locator('[data-od-id="game-edit-1"]');
       const del = page.locator('[data-od-id="game-del-1"]');
-      const [cardBox, editBox, delBox] = await Promise.all([
-        page.locator('[data-od-id="game-card-1"]').boundingBox(),
+      await expectTouchTarget(edit, "수정");
+      await expectTouchTarget(del, "삭제");
+
+      // 상세 카드 밖으로 새면 잘려서 못 누른다 — 페이지 전체 넘침 스펙이 못 보는 자리다.
+      const [dialogBox, editBox, delBox] = await Promise.all([
+        detail.boundingBox(),
         edit.boundingBox(),
         del.boundingBox(),
       ]);
@@ -286,11 +327,11 @@ test.describe("본문 터치 타깃 — 쓰기 권한", () => {
         ["수정", editBox],
         ["삭제", delBox],
       ] as const) {
-        expect(b!.x, `${width}px: ${name} 이 카드 왼쪽으로 샜다`).toBeGreaterThanOrEqual(
-          cardBox!.x - 0.5,
+        expect(b!.x, `${width}px: ${name} 이 상세 왼쪽으로 샜다`).toBeGreaterThanOrEqual(
+          dialogBox!.x - 0.5,
         );
-        expect(b!.x + b!.width, `${width}px: ${name} 이 카드 오른쪽으로 샜다`).toBeLessThanOrEqual(
-          cardBox!.x + cardBox!.width + 0.5,
+        expect(b!.x + b!.width, `${width}px: ${name} 이 상세 오른쪽으로 샜다`).toBeLessThanOrEqual(
+          dialogBox!.x + dialogBox!.width + 0.5,
         );
       }
 
@@ -306,8 +347,8 @@ test.describe("본문 터치 타깃 — 쓰기 권한", () => {
 });
 
 /* `.addslot`(빈 종이)은 게임 카드 키를 따라 늘어나지 않는다 — `align-self: start`(games.css).
-   격자가 `grid-auto-rows: 1fr` 라 기본값 stretch 로 두면 액션 줄이 카드를 50px 키운 만큼
-   빈 종이 안쪽에 아무것도 없는 여백이 생긴다. 그 회귀를 **로컬 시각 스냅샷만** 잡고 있었고
+   격자가 `grid-auto-rows: 1fr` 라 기본값 stretch 로 두면 카드가 큰 만큼 빈 종이 안쪽에
+   아무것도 없는 여백이 생긴다. 그 회귀를 **로컬 시각 스냅샷만** 잡고 있었고
    (다크만 빨개진다, 라이트는 흰 종이 → 흰 배경이라 threshold 아래) 베이스라인은 darwin
    전용이라 CI 에 없다 — 리눅스 CI 가 보는 자리는 여기뿐이라 여기에 못박는다.
 
@@ -315,11 +356,16 @@ test.describe("본문 터치 타깃 — 쓰기 권한", () => {
    회전 AABB 를 준다. 각도는 **좁은 폭에서도 안 풀린다** — 2열로 접히는 480 아래에서도 남긴다는
    게 명시된 결정이고 열 gap 침범 계산이 붙어 있다(games.css 의 480 미디어 쿼리).
 
-   하한 50 은 관측값이 아니라 **유도값**이다 — 액션 줄이 카드에 더하는 높이(44 버튼 + 6 마진)
-   그대로다. 실측 차는 320 에서 135, 390 에서 114 로 훨씬 크지만 그 여유의 사유는 여기가 아니라
-   games.css 의 addslot 주석이 들고 있다(320 만 큰 건 아직 원인 미상으로 기록돼 있다). 사유가
-   불분명한 값을 게이트로 삼지 않으려고 하한만 쓴다 — stretch 로 되돌리면 차가 0 이 되므로
-   이 하한으로도 이빨은 난다. */
+   하한은 관측값이 아니라 **유도값**이다. 앞에서는 액션 줄(44 버튼 + 6 마진 = 50)이 그 차이를
+   냈는데, 수정·삭제가 상세 모달로 내려가며 카드에서 사라졌다. 지금 남은 차이는 **클리어 칩
+   줄** 하나다 — `.game__meta` = padding-top 8 + 칩 27 = 35. 그게 격자 전체에 퍼지는 건
+   `grid-auto-rows: 1fr` 때문이다: 칩 있는 카드가 한 장이라도 있으면 **모든 행**이 그 키로
+   수렴한다(실측: 8장이 폭마다 한 값 — 320/390/1280 에서 253·300·348).
+
+   30 을 쓰는 건 35 에서 서브픽셀 반올림 여유를 뺀 값이다(실측 차 34~35). 하한만 보는 이유는
+   그대로다 — `align-self` 를 stretch 로 되돌리면 차가 0 이 되므로 이빨은 이 하한으로도 난다.
+   **픽스처에서 클리어 칩이 전부 사라지면 이 스펙은 이빨을 잃는다**(차이가 0 이 되어 무엇을
+   해도 통과한다) — 칩 있는 게임을 지울 땐 여기부터 본다. */
 test.describe("빈 종이 키", () => {
   for (const width of NARROW) {
     test(`${width}px /games: 빈 종이가 카드 키를 따라가지 않는다`, async ({ page, baseURL }) => {
@@ -337,7 +383,7 @@ test.describe("빈 종이 키", () => {
       expect(
         heights.game - heights.add,
         `${width}px: 빈 종이(${heights.add})가 카드(${heights.game}) 키까지 늘어났다`,
-      ).toBeGreaterThanOrEqual(50);
+      ).toBeGreaterThanOrEqual(30);
     });
   }
 });
