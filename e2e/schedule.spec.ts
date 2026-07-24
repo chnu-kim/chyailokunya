@@ -65,23 +65,26 @@ test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 
   await expect(page.locator('[data-od-id="schedule-note-input"]')).toHaveValue("");
 });
 
-test("관리자: 이관된 레거시 주는 '이미 공개 중'으로 열린다(발행 체크됨)", async ({
+test("관리자: 이관된 레거시 주는 항목이 있어도 발행이 꺼진 채 열린다", async ({
   page,
   baseURL,
 }) => {
   await signIn(page.context(), baseURL!);
   /* 픽스처의 일정 항목엔 schedule_weeks 메타가 없다 — 마이그레이션 0007 이 옛 played_at 을
-     이관해 놓은 과거 아카이브와 같은 모양이고, 보드는 그걸 발행과 무관하게 센다(ADR-0022). */
+     이관해 놓은 과거 아카이브와 같은 모양이고, 보드는 그걸 초안이 아닌 주로 센다(ADR-0022). */
   await page.goto("/schedule?week=2026-03-01");
   await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]').first()).toHaveValue(
     "엘든 링",
   );
 
-  /* 발행이 **체크된 채** 열려야 한다. 풀린 채 열리면 관리자가 무심코 저장하는 순간
-     published_at NULL 인 메타가 생겨 그 주의 과거 플레이 날짜가 보드에서 사라진다
-     (이관이 지킨 "손실 0"이 첫 편집에서 깨지는 경로). */
-  await expect(page.locator('[data-od-id="schedule-publish"]')).toBeChecked();
+  /* 발행은 **꺼진 채** 열린다 — 이 주는 주간표로 공개된 적이 없으니 그게 사실이다.
+     한때는 체크된 채 열었다: 발행을 끄고 저장하면 published_at NULL 인 메타가 생겨 그 주의
+     과거 플레이 날짜가 보드에서 사라졌기 때문이다(손실 0 이 첫 편집에서 깨지는 경로). draft
+     축이 그 결합을 끊어서(ADR-0022 갱신) 이제 꺼진 채 저장해도 날짜가 산다 — 화면이 서버의
+     구현 사정을 흉내 낼 필요가 없어졌다. 저장 후 날짜가 실제로 사는지는 단위 테스트가 본다
+     (여기서 저장하면 공유 픽스처가 오염돼 다른 스펙이 조용히 깨진다). */
+  await expect(page.locator('[data-od-id="schedule-publish"]')).not.toBeChecked();
 });
 
 test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 안 됨 — 결정 13)", async ({
@@ -95,7 +98,8 @@ test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 �
   // 항목이 하나도 없다(레거시가 아니다).
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveCount(0);
   /* 발행은 **꺼진 채** 열려야 한다 — 다음 주를 처음 짜는 자리라 초안이 기본이고, 발행은 다
-     되면 관리자가 켠다(결정 13). 레거시 주와 달리 지킬 과거 날짜가 없어 published 로 열 이유가
-     없다(레거시 테스트와 정반대 단언 — 무메타 기본값을 "항목 유무"로 가른다는 규칙의 두 쪽). */
+     되면 관리자가 켠다(결정 13). 레거시 주와 화면상 같은 단언이지만 서버가 쥔 상태는 다르다:
+     항목 없는 이 주는 draft(보드에도 안 뜸)이고, 레거시 주는 확정 비공개(보드엔 뜸)다.
+     그 차이는 화면에 안 나오므로 단위 테스트가 draft 축을 직접 본다. */
   await expect(page.locator('[data-od-id="schedule-publish"]')).not.toBeChecked();
 });
