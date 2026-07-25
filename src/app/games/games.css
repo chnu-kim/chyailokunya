@@ -150,8 +150,14 @@
    **바깥**(outline-offset 양수)에 그려져 뒤에 깔린 건 크림 사진지가 아니라 페이지 배경이다
    (.addslot 이 이미 이 자리를 쓴다 — chrome.css 의 [data-theme="dark"] .polaroid 다크 재선언
    목록에 --focus 가 없는 이유이기도 하다. 그 목록은 카드 **안쪽** 링만 위한 것이다).
-   계산: 라이트 --focus(#b25a68) on 페이지(#fff) 4.61:1 · 다크 --focus(#e9b6bd) on 페이지
-   (#15110f) 10.63:1 — 둘 다 UI 컴포넌트 3:1 을 넉넉히 넘는다(스크립트로 계산, 손계산 아님).
+   **뒤에 깔린 페이지 배경이 한 색이 아니다.** globals.css 가 본문에 줄노트를 깐다
+   (repeating-linear-gradient: --bg 31px / --bg-rule 1px) — 링이 그 줄을 가로지르는 자리가
+   최악값이고, 종이만 재면 실제보다 후하게 나온다. 이 저장소가 이미 겪었다(hero 최악이 종이
+   6.39 가 아니라 줄 4.96 이었다).
+   계산(스크립트, 손계산 아님): 라이트 --focus(#b25a68) on 종이(#ffffff) 4.61:1 · **on 줄
+   (#dfe3ea) 3.58:1** · 다크 --focus(#e9b6bd) on 종이(#15110f) 10.63:1 · **on 줄(#2a2320)
+   8.75:1**. 최악 3.58 로 UI 컴포넌트 3:1 은 넘지만 **라이트 여유가 0.58 뿐**이다 — --focus 나
+   --brand-line 이 조금만 밝아지면 조용히 미달하니 둘 중 하나를 건드릴 땐 여기를 다시 잰다.
 
    전역 :focus-visible(globals.css)과 값을 맞춘다(2px·offset 2) — "방금 추가됨"과 "포커스"가
    같은 언어로 읽히게. transition 을 안 붙인다: 타이머로 클래스를 통째로 떼는 게 계약이라
@@ -400,10 +406,24 @@ dialog.composer[open]::backdrop {
   font-size: var(--text-xs);
   margin: var(--space-3) 0 0;
 }
-/* 결과 목록 — 포스터(세로) + 이름 한 줄을 세로로 쌓는다. 스크롤은 .composer__body.
+/* 결과 목록 — 포스터(세로) + 이름 한 줄을 세로로 쌓는다.
    한 줄이 li > button 이었다가 **li 자체**가 됐다(WAI-ARIA 콤보박스: ul=listbox, li=option).
    그래서 아래 .composer__pick 은 이제 li 가 입는다 — 크기·여백은 그대로고, 버튼에만 걸리던
-   :disabled 규칙은 li 에 걸릴 수 없어 사라졌다(애초에 여기선 아무도 안 껐다). */
+   :disabled 규칙은 li 에 걸릴 수 없어 사라졌다(애초에 여기선 아무도 안 껐다).
+
+   **스크롤을 이 목록이 진다.** 한때 .composer__body 가 졌는데, 그건 제목·라벨·검색 입력까지
+   담은 상자라 ↓ 로 목록을 내리면 **입력이 상자 밖으로 밀려 나갔다** — 320×568 에서 ↓ 8번에
+   입력 top 이 -114px, 13번에 -499px 이고 Home 으로 되돌려도 안 돌아왔다(실측). 포커스는
+   입력에 남아 계속 칠 수 있는데 정작 입력도, 친 검색어도, 그 검색어를 되읊는 직접 추가 줄도
+   화면에 없는 상태다. 스크롤 대상을 목록으로 좁히면 입력이 시트 상단에 고정된다.
+
+   44vh 는 작은 폰이 기준이다: 바텀시트가 88vh 이고 그 위쪽 절반을 제목·라벨·입력·안내가
+   쓰므로 목록에 남는 몫이 대략 그만큼이다(320×568 에서 250px — 항목 53 + gap 6 이라 네 줄이
+   온전히 보이고 다섯째가 걸쳐 "더 있다"가 읽힌다). 상한 380px 은 큰 화면에서 목록만 끝없이
+   길어지지 않게 하는 값이다.
+
+   **포커스 링은 안 잘린다** — 이 목록의 포커스는 입력에 머물고(콤보박스 규약) 항목의 활성
+   표시는 outline 이 아니라 안쪽 border 다. 링을 쓰는 부품을 여기 넣게 되면 이 줄부터 다시 본다. */
 .composer__results {
   list-style: none;
   margin: var(--space-4) 0 0;
@@ -411,6 +431,15 @@ dialog.composer[open]::backdrop {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: min(44vh, 380px);
+  overflow-y: auto;
+}
+/* 비었을 때는 접근성 트리에서도 사라져야 한다 — 입력이 aria-expanded="false" 라고 말하는데
+   빈 listbox 가 트리에 남아 있으면 스크린리더에 "목록, 항목 0"이 걸린다(APG 는 접힌 팝업을
+   숨기라고 한다). 요소 자체는 지우지 않는다: 입력의 aria-controls 가 이 id 를 가리키므로
+   사라지면 IDREF 가 깨진다. display:none 이라 빈 상태의 위 마진도 함께 접힌다. */
+.composer__results[hidden] {
+  display: none;
 }
 .composer__pick {
   width: 100%;
@@ -504,6 +533,19 @@ dialog.composer[open]::backdrop {
 .composer__pick--direct {
   margin-bottom: var(--space-2);
   box-shadow: 0 1px 0 var(--border);
+}
+/* 이 줄의 라벨만 **검색어를 그대로 되읊는다** — 길이가 사용자 입력을 그대로 따라가고, 서버
+   상한이 100자라 320px 에서 이 줄 하나가 351px 을 먹어 첫 결과를 화면 밖으로 밀었다(실측:
+   directH 351 · firstTop 596 · bodyBottom 567). 목록 끝에 있던 시절엔 없던 상태고, 맨 위로
+   옮긴 대가다. 두 줄에서 자른다 — 이 줄이 답할 것은 "무엇을 넣게 되는지"이고 그건 앞부분으로
+   족하다. 실사용 10~20자에선 애초에 한 줄이라 아무것도 안 바뀐다.
+   -webkit- 접두 3종은 한 벌이라 따로 못 쓴다(.game__nametext 와 같은 규약). */
+.composer__pick--direct .composer__pickname {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 /* 닫기는 액션 줄에서 모서리로 옮겼다 — 액션 줄에 두면 "붙이기" 옆에서 같은 무게로 읽혀
    결정이 둘로 보인다. 이 카드의 결정은 하나뿐(붙이거나 말거나)이라 나가는 문은 모달이 늘

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   composerActiveOption,
+  composerNeedsSearch,
   composerOptionCount,
   composerReducer,
   composerResultIndex,
@@ -66,6 +67,75 @@ describe("단계 전이", () => {
     expect(s.selected).toBeNull();
     expect(s.results).toHaveLength(2);
     expect(s.query).toBe("젤다");
+  });
+});
+
+/* 언제 요청을 내보내는가. 화면의 debounce effect 가 이 판정 하나만 보고 쏘므로 여기가 정본이다.
+   걸린 것은 낭비가 아니라 **커서 소실**이다: 같은 검색어를 한 번 더 받아 오면 목록은 글자 하나
+   안 바뀐 채 searchSucceeded 가 사용자가 방금 세운 커서를 접는다. 화면에 원인이 안 남는 종류라
+   눈으로는 못 지킨다. */
+describe("검색 발사 판정", () => {
+  it("검색어를 치면 내보낸다", () => {
+    expect(composerNeedsSearch(run({ type: "queryChanged", query: "게임" }))).toBe(true);
+  });
+
+  it("열자마자·공백뿐인 검색어는 안 내보낸다 — 보낼 것이 없다", () => {
+    expect(composerNeedsSearch(initialComposerState)).toBe(false);
+    expect(composerNeedsSearch(run({ type: "queryChanged", query: "   " }))).toBe(false);
+  });
+
+  it("결과가 이미 화면에 있으면 안 내보낸다 — 지금 검색어의 결론이 이미 났다", () => {
+    expect(composerNeedsSearch(run(...searched("게임", [zelda, mario])))).toBe(false);
+  });
+
+  /* 이 한 줄이 이 describe 의 이유다. 「뒤로」는 검색어도 목록도 그대로 두는데(위 '단계 전이'),
+     발사 판정이 그걸 안 보면 상세에서 돌아오는 것만으로 같은 검색을 다시 쏜다. */
+  it("「뒤로」로 검색 화면에 돌아와도 다시 안 내보낸다 — 목록이 그대로 남아 있으므로", () => {
+    const s = run(...searched("게임", [zelda, mario]), pick(zelda), { type: "back" });
+    expect(s.results).toHaveLength(2);
+    expect(composerNeedsSearch(s)).toBe(false);
+  });
+
+  it("검색이 실패했으면 같은 검색어라도 내보낸다 — 실패는 완료가 아니다", () => {
+    const s = run(
+      { type: "queryChanged", query: "게임" },
+      { type: "searchFailed", query: "게임", message: "검색에 실패했어요." },
+    );
+    expect(composerNeedsSearch(s)).toBe(true);
+  });
+
+  /* 지우고 **같은 검색어**를 되치는 길(type=search 의 X 버튼·Esc 가 실제로 만든다).
+     "마지막으로 성공한 검색어와 같으면 건너뛴다"로 막았다면 여기가 죽는다 — queryChanged 가
+     목록을 이미 비웠는데 요청이 안 나가 화면이 '찾는 중…' 에 굳는다. */
+  it("지우고 같은 검색어를 되치면 다시 내보낸다 — 목록은 이미 비워졌다", () => {
+    const s = run(
+      ...searched("게임", [zelda, mario]),
+      { type: "queryChanged", query: "" },
+      { type: "queryChanged", query: "게임" },
+    );
+    expect(s.results).toEqual([]);
+    expect(composerNeedsSearch(s)).toBe(true);
+  });
+
+  it("상세 단계에선 안 내보낸다 — 결과가 낄 자리가 없다", () => {
+    expect(composerNeedsSearch(run(...searched("게임", [zelda]), pick(zelda)))).toBe(false);
+  });
+
+  /* searchStarted 가 커서를 안 건드리는 근거이기도 하다: 발사되는 시점의 목록은 늘 비어 있다
+     (결과가 있으면 위에서 판정이 거짓이라 애초에 안 쏜다). */
+  it("내보내는 시점의 목록은 비어 있다 — 그래서 발사가 지울 커서가 없다", () => {
+    for (const s of [
+      run({ type: "queryChanged", query: "게임" }),
+      run(
+        { type: "queryChanged", query: "게임" },
+        { type: "searchFailed", query: "게임", message: "검색에 실패했어요." },
+      ),
+      run(...searched("게임", [zelda, mario]), { type: "queryChanged", query: "게임2" }),
+    ]) {
+      expect(composerNeedsSearch(s)).toBe(true);
+      expect(s.results).toEqual([]);
+      expect(s.activeIndex).toBe(-1);
+    }
   });
 });
 
@@ -260,8 +330,9 @@ describe("직접 입력 항목", () => {
 describe("결과 목록의 키보드 커서", () => {
   const move = (to: ComposerActiveMove): ComposerAction => ({ type: "activeMoved", to });
   const point = (index: number): ComposerAction => ({ type: "activeSet", index });
-  /* 검색어와 정확히 같은 이름이 없는 목록 — 직접 추가가 마지막 줄로 붙어 항목이 4개다.
-     커서 규칙은 그 줄까지 포함해야 하므로 기본 픽스처를 이쪽으로 잡는다. */
+  /* 검색어와 정확히 같은 이름이 없는 목록 — 직접 추가가 **맨 위로** 붙어 항목이 4개다.
+     커서 규칙은 그 줄까지 포함해야 하므로 기본 픽스처를 이쪽으로 잡는다(바로 아래 테스트가
+     그 줄이 인덱스 0 임을 못박는다 — 자리를 옮긴 게 과제 D 다). */
   const four = searched("게임", [zelda, mario, minecraft]);
   // 정확히 같은 이름이 있어 직접 추가가 감춰진 목록 — 항목은 결과 2개뿐이다.
   const two = searched("젤다", [zelda, mario]);
@@ -275,11 +346,12 @@ describe("결과 목록의 키보드 커서", () => {
     const s = run(...four);
     expect(composerOptionCount(s)).toBe(4);
     // 맨 위로 옮기며 인덱스도 0 이 됐다 — 시각 순서(맨 위)와 키보드 순서(첫 인덱스)가 맞아야
-    // 아무것도 안 가리키던 상태에서 ↓ 한 번이 화면 첫 줄을 그대로 잡는다.
-    expect(composerActiveOption(run(...four, move("first")))).toBe("direct");
+    // 아무것도 안 가리키던 상태에서 ↓ 한 번이 화면 첫 줄을 그대로 잡는다. point 로 그 인덱스
+    // 공간을 직접 찌른다 — 이 테스트의 관심은 방향키 순서가 아니라 자리 자체라서다.
+    expect(composerActiveOption(run(...four, point(0)))).toBe("direct");
     // 감춰지면 밀림 없이 결과 그대로다.
     expect(composerOptionCount(run(...two))).toBe(2);
-    expect(composerActiveOption(run(...two, move("last")))).toEqual(mario);
+    expect(composerActiveOption(run(...two, point(1)))).toEqual(mario);
   });
 
   it("결과 인덱스는 직접 추가가 보일 때만 한 칸씩 밀린다", () => {
@@ -300,19 +372,17 @@ describe("결과 목록의 키보드 커서", () => {
   });
 
   it("끝(마지막 결과)에서 ↓ 는 처음(직접 추가)으로 돈다", () => {
-    expect(run(...four, move("last"), move("next")).activeIndex).toBe(0);
-    expect(composerActiveOption(run(...four, move("last"), move("next")))).toBe("direct");
+    // move("prev") 는 아무것도 안 가리킨 채(-1) 부르면 곧장 마지막으로 간다 — 아래 테스트가
+    // 그 자체를 못박는다. 여기선 그걸 "끝에 서는" 수단으로 재사용한다.
+    expect(run(...four, move("prev"), move("next")).activeIndex).toBe(0);
+    expect(composerActiveOption(run(...four, move("prev"), move("next")))).toBe("direct");
   });
 
   it("아무것도 안 가리킬 때 ↑ 는 마지막 결과로 들어간다 — 직접 추가는 이미 첫 줄이라 ↓ 한 번으로 닿는다", () => {
     expect(run(...four, move("prev")).activeIndex).toBe(3);
     expect(composerActiveOption(run(...four, move("prev")))).toEqual(minecraft);
-    expect(run(...four, move("first"), move("prev")).activeIndex).toBe(3);
-  });
-
-  it("Home·End 는 처음·마지막", () => {
-    expect(run(...four, move("last"), move("first")).activeIndex).toBe(0);
-    expect(run(...four, move("first"), move("last")).activeIndex).toBe(3);
+    // 처음(0)에서 ↑ 도 같은 순환을 타 마지막으로 돈다 — 경계가 한쪽만 특별하지 않다.
+    expect(run(...four, point(0), move("prev")).activeIndex).toBe(3);
   });
 
   it("해제(Esc)는 커서만 접는다 — 목록·검색어는 그대로다", () => {
@@ -324,7 +394,7 @@ describe("결과 목록의 키보드 커서", () => {
 
   it("목록이 비어 있으면 어느 방향도 커서를 안 세운다", () => {
     const empty = run({ type: "queryChanged", query: "젤다" });
-    for (const to of ["next", "prev", "first", "last"] as const) {
+    for (const to of ["next", "prev"] as const) {
       expect(composerReducer(empty, move(to)).activeIndex).toBe(-1);
     }
   });
@@ -345,7 +415,7 @@ describe("결과 목록의 키보드 커서", () => {
   /* 3번째를 가리킨 채 결과가 짧아지면 커서가 없는 항목을 가리키고, 그 순간
      aria-activedescendant 는 DOM 에 없는 id 를 든다 — 낭독이 조용해지는 것 말고는 신호가 없다. */
   it("결과가 갱신되면 커서가 접힌다", () => {
-    const s = run(...four, move("last"), {
+    const s = run(...four, point(3), {
       type: "searchSucceeded",
       query: "게임",
       results: [zelda],
@@ -382,6 +452,6 @@ describe("결과 목록의 키보드 커서", () => {
   });
 
   it("직접 추가로 넘어가도 접힌다", () => {
-    expect(run(...four, move("last"), { type: "manualPicked" }).activeIndex).toBe(-1);
+    expect(run(...four, point(3), { type: "manualPicked" }).activeIndex).toBe(-1);
   });
 });

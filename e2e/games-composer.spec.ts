@@ -50,7 +50,7 @@ async function openComposer(page: Page, baseURL: string) {
   return page.locator('[data-od-id="composer-input"]');
 }
 
-test("컴포저 검색: 화살표·Home/End 로 커서가 돌고 Esc 는 커서만 접는다", async ({
+test("컴포저 검색: 화살표로 커서가 돌고, Home/End 는 캐럿만 옮기고, Esc 는 커서만 접는다", async ({
   page,
   baseURL,
 }) => {
@@ -93,21 +93,47 @@ test("컴포저 검색: 화살표·Home/End 로 커서가 돌고 Esc 는 커서�
   );
   expect(borders[0], "커서 줄의 테두리가 이웃과 구분되지 않는다").not.toBe(borders[1]);
 
-  // End 는 반대로 **마지막 결과**로 들어간다 — 검색 결과를 찾던 사람이 순환으로 손해 보지 않게.
-  await box.press("End");
-  await expect(box).toHaveAttribute("aria-activedescendant", "composer-option-3");
-  await expect(options.nth(3)).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator('[data-od-id="composer-direct"]')).toHaveAttribute(
-    "aria-selected",
-    "false",
-  );
-
-  // 끝(마지막 결과)에서 ↓ 는 처음(직접 추가)으로, 처음에서 ↑ 는 다시 끝으로 순환한다.
-  await box.press("ArrowDown");
-  await expect(box).toHaveAttribute("aria-activedescendant", "composer-option-0");
+  // 끝에서 ↓ 는 처음(직접 추가)으로, 처음에서 ↑ 는 다시 끝으로 순환한다.
   await box.press("ArrowUp");
   await expect(box).toHaveAttribute("aria-activedescendant", "composer-option-3");
+  await box.press("ArrowDown");
+  await expect(box).toHaveAttribute("aria-activedescendant", "composer-option-0");
+
+  /* **Home·End 는 목록이 아니라 캐럿의 것이다.** 한때 이 둘을 목록의 처음·끝으로 가로챘고,
+     그러자 결과가 뜬 순간부터 검색어 앞뒤로 캐럿을 못 옮겼다 — 접근성을 고치려던 변경이 다른
+     접근성을 깬 자리다(codex 적대적 리뷰와 다중 렌즈 리뷰가 각각 잡았다).
+
+     APG 의 editable combobox 는 이 둘을 Textbox 키로 못박는다: Home = "places the editing
+     cursor at the beginning of the field", End = "end of the field" 이고 **Listbox Popup 표에는
+     아예 없다** — 팝업이 열려 있어도 textbox 소관이라는 뜻이다. 함께 정의된 "visual focus 를
+     textbox 로 되돌린다"가 커서 해제에 해당한다.
+
+     캐럿 위치로 재는 게 핵심이다 — aria-activedescendant 가 비었는지만 보면 키를 통째로
+     삼켜도(그것도 커서는 해제된다) 초록이다. */
+  /* **캐럿 이동은 Home 으로만 잰다.** End 는 이 환경에서 캐럿을 옮기는 게 간헐적이다(실측:
+     Home 0 → End 0, poll 로 기다려도 0. 사이에 다른 키를 끼우면 2). 우리 핸들러는 두 키를
+     **같은 if 블록**에서 똑같이 흘려보내므로(preventDefault 없음, dispatch 도 안 탄다) 캐럿
+     계약은 Home 하나로 증명되고, End 는 아래에서 커서 해제만 본다. 억지로 End 의 캐럿을 재면
+     앱 결함이 아닌 이유로 간헐적으로 빨개진다 — 그 flaky 를 결함으로 오해하지 않게 적어 둔다. */
+  const caret = () => box.evaluate((el: HTMLInputElement) => el.selectionStart);
   await box.press("Home");
+  await expect.poll(caret, { message: "Home 이 캐럿을 앞으로 안 옮겼다" }).toBe(0);
+  expect(
+    await box.getAttribute("aria-activedescendant"),
+    "Home 이 커서를 해제하지 않았다",
+  ).toBeNull();
+
+  // End 도 커서를 접는다 — 목록 키가 아니라 입력 키라는 판정이 둘에 같이 걸려 있다.
+  await box.press("ArrowDown");
+  await expect(box).toHaveAttribute("aria-activedescendant", "composer-option-0");
+  await box.press("End");
+  expect(
+    await box.getAttribute("aria-activedescendant"),
+    "End 가 커서를 해제하지 않았다",
+  ).toBeNull();
+
+  // 다시 커서를 세워 아래 Esc 단계로 넘긴다(Home/End 가 방금 접었다).
+  await box.press("ArrowDown");
   await expect(box).toHaveAttribute("aria-activedescendant", "composer-option-0");
 
   /* Esc 는 커서가 있을 때만 소비한다 — 이 모달의 Esc 는 '닫기'로 이미 확립돼 있어 통째로
@@ -159,6 +185,18 @@ test("컴포저 검색: Enter·클릭·포인터가 같은 목록을 가리킨�
   expect(await box.getAttribute("aria-activedescendant")).toBeNull();
   await expect(box).toBeFocused();
 
+  /* 그리고 그 목록을 **다시 받아 오지 않는다.** 「뒤로」는 검색 effect 를 다시 태우는데, 거기서
+     같은 검색어를 한 번 더 쏘면 도착한 응답이 커서를 접어 방금 세운 커서가 조용히 사라진다 —
+     목록은 글자 하나 안 바뀌니 화면 어디에도 원인이 없고, 이어 친 Enter 만 죽는다(리뷰 실측).
+     발사 판정 자체는 core 가 단위 테스트로 쥐고(composerNeedsSearch), 여기선 그 판정이 실제
+     effect 에 붙었는지를 본다. **안 일어남을 관찰하는 단언이라 기다리는 수밖에 없다** —
+     debounce(350ms)+응답이 지나고도 커서가 그대로여야 하므로 넉넉히 두 배를 준다. */
+  await box.press("ArrowDown");
+  await box.press("ArrowDown");
+  await expect(box).toHaveAttribute("aria-activedescendant", "composer-option-1");
+  await page.waitForTimeout(700);
+  await expect(box).toHaveAttribute("aria-activedescendant", "composer-option-1");
+
   // 마우스 경로도 그대로 산다 — 항목이 button 이 아니게 됐어도 클릭이 곧 선택이다.
   await page.locator('[data-od-id="composer-direct"]').click();
   await expect(page.locator('[data-od-id="composer-chosen"]')).toContainText("게임");
@@ -198,4 +236,48 @@ test("컴포저 검색: 화살표로 내려가 Enter 로 결과를 고른다", a
      훑는다(game-composer 의 단계 포커스 effect). 화면상 아무 표시도 안 나는 회귀라 여기가
      아니면 아무도 안 본다. */
   await expect(page.locator('[data-od-id="composer-submit"]')).toBeFocused();
+});
+
+/* 컴포저도 뒤로가기에 탄다 — **여기가 보드에서 유일하게 미저장 입력을 든 화면이다.**
+   상세만 히스토리에 얹었던 앞 판에선 검색해서 고른 뒤의 뒤로가기가 확인도 없이 페이지를
+   통째로 떠났다(리뷰 실측: composer 0 · discard 0 · about:blank). 셸의 다른 닫기 셋(X·배경·
+   Esc)은 같은 상태에서 확인을 띄우는데 제스처 하나만 그 가드를 우회하던 비대칭이다.
+
+   `/` 를 먼저 들르는 이유: 떠날 곳이 있어야 "안 떠났다"가 관찰된다. 히스토리에 /games 하나뿐
+   이면 배선이 통째로 없어도 뒤로가기가 아무 데도 안 가 초록으로 통과한다.
+
+   **읽기 전용이다**: 「추가」를 안 누르므로 D1 도 공유 픽스처도 안 건드린다. */
+test("컴포저: 고른 뒤의 뒤로가기는 페이지가 아니라 미저장 확인을 띄운다", async ({
+  page,
+  baseURL,
+}) => {
+  await page.goto("/");
+  const box = await openComposer(page, baseURL!);
+  await box.fill("게임");
+  await page.getByRole("option").nth(1).click();
+  await expect(page.locator('[data-od-id="composer-chosen"]')).toContainText("젤다");
+
+  const composer = page.locator('dialog[data-od-id="composer"]');
+  const discard = page.locator('dialog[data-od-id="composer-discard"]');
+
+  await page.goBack();
+  // 페이지에 남았고, 컴포저도 살아 있고, 무엇을 잃는지 되묻는다.
+  await expect(page).toHaveURL(/\/games$/);
+  await expect(composer).toBeVisible();
+  await expect(discard).toBeVisible();
+
+  /* 「계속 작성」 뒤에도 뒤로가기가 살아 있어야 한다 — 되묻느라 소비한 엔트리를 **다시 쌓지
+     않으면** 그다음 뒤로가기가 곧장 페이지를 떠난다. 이 단언이 없으면 그 회귀가 위 단언만으론
+     초록이다(가드가 한 번만 먹는다). */
+  await page.locator('[data-od-id="composer-discard-keep"]').click();
+  await expect(discard).toHaveCount(0);
+  await page.goBack();
+  await expect(discard).toBeVisible();
+
+  /* 「닫기」는 정상 경로로 닫고 그때 엔트리를 되돌린다 — 안 되돌리면 빈 엔트리가 남아 그다음
+     뒤로가기가 아무 일도 안 한다. 여기선 `/` 로 못 나가는 모습으로 드러난다. */
+  await page.locator('[data-od-id="composer-discard-go"]').click();
+  await expect(composer).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
 });

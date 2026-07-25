@@ -24,7 +24,10 @@ export type ComposerState = {
   query: string;
   results: ChzzkCategory[];
   /* 검색을 한 번이라도 돌렸는가. results.length === 0 만으로는 "아직 안 찾음"과 "찾았는데
-     없음"이 구분되지 않아, 열자마자 직접 입력 항목이 뜬다. */
+     없음"이 구분되지 않아, 열자마자 직접 입력 항목이 뜬다.
+     읽는 방법이 하나 더 있다 — **지금 검색어의 결론이 났는가.** 이 값을 세우는 건
+     searchSucceeded 하나뿐이고 queryChanged·searchFailed 가 즉시 되접으므로, 참이면 화면의
+     목록이 곧 지금 검색어의 결과다. 아래 composerNeedsSearch 가 그 불변식 위에 선다. */
   searched: boolean;
   selected: ComposerSelection | null;
   /* 검색 단계의 에러 문구. 리듀서 밖 useState 로 두면 단계 전이와 어긋난다 — 검색 응답을
@@ -63,8 +66,13 @@ export const initialComposerState: ComposerState = {
 };
 
 /* 키보드가 커서를 옮기는 방향. 인덱스가 아니라 **뜻**을 싣는다 — 끝에서 순환할지, 아무것도
-   안 가리킬 때 ↑ 가 어디로 갈지 같은 규칙이 컴포넌트로 새면 그 규칙엔 테스트가 안 붙는다. */
-export type ComposerActiveMove = "next" | "prev" | "first" | "last" | "none";
+   안 가리킬 때 ↑ 가 어디로 갈지 같은 규칙이 컴포넌트로 새면 그 규칙엔 테스트가 안 붙는다.
+
+   **"first"·"last" 는 없다.** Home·End 가 한때 이 값을 보내 목록의 처음·끝으로 커서를
+   가로챘지만, W3C APG 상 그 둘은 Listbox 가 아니라 Textbox 의 키다(games-composer.tsx 의
+   ARROW_MOVES 주석). 그 호출자가 사라지며 이 두 뜻도 같이 걷어냈다 — 리듀서에 죽은 분기를
+   남기면 "여기서도 Home 이 커서를 옮기나"를 다시 물어야 한다. */
+export type ComposerActiveMove = "next" | "prev" | "none";
 
 export type ComposerAction =
   /* 검색 응답 액션은 **무엇을 검색한 요청인가**(query)를 함께 싣는다. 안 실으면 늦게 온
@@ -82,7 +90,7 @@ export type ComposerAction =
   | { type: "picked"; selection: ComposerSelection }
   | { type: "manualPicked" }
   | { type: "back" }
-  // 키보드(↓↑·Home·End·Esc)가 커서를 옮긴다.
+  // 키보드(↓↑·Esc, 그리고 커서가 있을 때의 Home·End)가 커서를 옮긴다.
   | { type: "activeMoved"; to: ComposerActiveMove }
   /* 포인터가 얹힌 행이 곧 커서다 — 절대 인덱스로 온다. hover 를 별도 스타일로 두지 않고
      커서 자체를 옮기는 이유는 games.css 의 .composer__pick--active 주석에 있다. */
@@ -118,15 +126,23 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
       };
 
     case "searchStarted":
-      /* 커서는 안 건드린다 — 이 시점의 목록은 queryChanged 가 이미 비웠거나(새 검색어),
-         같은 검색어의 재시도라 결과가 없다. 어느 쪽이든 커서는 이미 -1 이다. */
+      /* 커서는 안 건드린다. 이 액션이 오는 시점의 목록은 **비어 있다** — 결과가 화면에 있으면
+         searched 가 참이고, 그때는 composerNeedsSearch 가 요청 자체를 안 내보낸다. 접을 커서가
+         애초에 없으니, 여기서 -1 을 굳이 다시 쓰면 "요청 하나가 사용자가 세운 커서를 지운다"는
+         경로만 새로 연다(searchSucceeded 에서 실제로 터졌던 그 경로다). */
       return { ...state, searchError: "" };
 
     case "searchSucceeded":
       if (isStaleSearch(state, action.query)) return state;
       /* 새 결과는 **새 목록**이다. 앞 목록의 3번째를 가리킨 채 두면 이름이 전혀 다른 행이
-         활성이 되고, 결과가 그보다 짧게 오면 없는 항목을 가리킨다. 늦게 온 응답이
-         위에서 통째로 버려지는 덕에, 커서를 접는 건 **지금 화면을 실제로 갈아치울 때**뿐이다. */
+         활성이 되고, 결과가 그보다 짧게 오면 없는 항목을 가리킨다.
+
+         이 -1 이 **사용자의 커서를 뺏지 않는** 근거는 두 겹이다: 늦게 온 옛 응답은 위에서
+         통째로 버려지고, 살아남은 응답은 늘 **빈 목록** 위에 도착한다(결과가 이미 있으면
+         composerNeedsSearch 가 안 쏜다). 그 두 번째 겹이 없던 판에선 「뒤로」가 같은 검색어를
+         한 번 더 쏴서, **글자 하나 안 바뀐 목록**이 방금 세운 커서만 지웠다(실측: 요청 1→2,
+         aria-activedescendant 가 composer-option-1 에서 사라지고 이어 친 Enter 가 죽는다).
+         화면이 그대로라 원인이 화면 어디에도 안 보인다. */
       return {
         ...state,
         results: action.results,
@@ -208,10 +224,6 @@ function movedActive(state: ComposerState, to: ComposerActiveMove): number {
   if (to === "none" || count === 0) return -1;
   const cur = state.activeIndex;
   switch (to) {
-    case "first":
-      return 0;
-    case "last":
-      return count - 1;
     case "next":
       return cur < 0 ? 0 : (cur + 1) % count;
     case "prev":
@@ -254,6 +266,26 @@ export function composerActiveOption(state: ComposerState): ChzzkCategory | "dir
 // 지금 어느 단계인가. 선택이 곧 단계다 — 별도 step 필드를 두면 둘이 어긋날 수 있다.
 export function composerStep(state: ComposerState): "search" | "detail" {
   return state.selected ? "detail" : "search";
+}
+
+/* 지금 이 검색어로 요청을 **내보내야 하는가.** 화면의 debounce effect 가 발사 직전에 묻는다.
+   판정이 여기 있는 이유는 낭비 한 번을 아끼려는 게 아니다 — "언제 쏘는가"도 결국 이월 규칙이고,
+   그게 화면에만 살면 리듀서가 세운 상태와 조용히 어긋난다. 실제로 「뒤로」가 그렇게 어긋났다
+   (searchSucceeded 주석의 실측).
+
+   판정의 축은 searched 하나다. 참이면 지금 검색어의 결론이 이미 났고 그 목록이 화면에 있으니
+   다시 물을 게 없다. 나머지 둘은 보낼 것·받을 자리가 없는 경우다 — 검색어가 공백뿐이거나,
+   상세 단계라 결과가 낄 자리가 없다(그 응답은 isStaleSearch 가 어차피 버린다).
+
+   **"마지막으로 성공한 검색어를 기억해 같으면 건너뛴다"로는 안 된다.** 지우고 되치는 길이
+   막힌다: '게임' 성공 → 검색어를 지움 → 다시 '게임' 이면 queryChanged 가 목록을 이미 비웠는데
+   기억한 검색어는 같아서 요청이 안 나가고, 화면이 '찾는 중…' 에 굳는다(실측: 그 판은 되친 뒤
+   요청 1회 · 결과 0줄 · '찾는 중…' 이 그대로. 이 판은 요청 2회 · 결과 4줄 · '찾는 중…' 0).
+   지우기는 드문 길이 아니다 — type=search 의 X 버튼과 Esc 가 그걸 한 번에 만든다.
+   검색 **실패**는 searched 를 안 세우니 같은 검색어 재시도 길도 여기선 안 막힌다 —
+   실패는 완료가 아니다. */
+export function composerNeedsSearch(state: ComposerState): boolean {
+  return state.selected === null && !state.searched && state.query.trim() !== "";
 }
 
 /* 직접 입력을 **연다** — 정확히 같은 이름의 결과가 없을 때. 화면 어디에 그리는지는 이 함수의

@@ -317,3 +317,110 @@ test("관리자: 고치던 폼은 배경을 클릭해도 확인 없이 닫히지
   await openCard(page, "스타듀 밸리");
   await expect(page.locator('dialog[data-od-id="game-detail"]')).toContainText("아직이에요");
 });
+
+/* 상세를 닫자마자 다른 카드를 누르는 연타. **엔트리를 되돌리는 history.back() 은 비동기
+   브라우저 왕복이라** 호출과 popstate 도착 사이에 창이 하나 열린다 — 그 사이에 열린 상세를
+   뒤늦게 온 popstate 가 자기 것으로 알고 닫아 버렸다(리뷰 실측: 20배 스로틀에서 0~90ms,
+   카드가 열렸다 스스로 닫히고 히스토리는 연타 6라운드에 3 → 10 으로 자랐다).
+
+   **CPU 를 20배 조인다.** 이 배선이 존재하는 이유 자체가 저사양 안드로이드의 하드웨어
+   뒤로가기라 그 조건이 곧 이 스펙의 무대다. 조이지 않으면 popstate 가 같은 프레임에 도착해
+   경합 자체가 안 생기고, 배선이 통째로 틀려도 초록이다(실측 — 조이기 전엔 옛 코드도 통과했다).
+   두 번째 클릭은 Playwright 가 아니라 **페이지 안에서** 닫힘 직후 프레임에 쏜다: 바깥에서
+   보내면 액션 가능성 검사와 왕복이 스로틀에 늘어져 그 사이 popstate 가 먼저 도착한다.
+
+   **읽기 전용이다**: 상세를 열고 닫기만 한다 — 공유 픽스처를 안 흔든다. */
+test("게임: 상세를 닫자마자 다른 카드를 눌러도 그 카드가 열린 채 남는다", async ({ page }) => {
+  const cdp = await page.context().newCDPSession(page);
+  await page.goto("/games");
+  const detail = page.locator('dialog[data-od-id="game-detail"]');
+
+  const opened: number[] = [];
+  const lengths: number[] = [];
+  for (let round = 0; round < 3; round++) {
+    await openCard(page, "엘든 링");
+    await expect(detail).toBeVisible();
+
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 20 });
+    await page.evaluate(() => {
+      const open = document.querySelector('dialog[data-od-id="game-detail"]')!;
+      open.addEventListener(
+        "close",
+        () => {
+          // React 가 언마운트해 보드가 다시 눌리는 첫 프레임 — 사람이 낼 수 있는 최단 간격이다.
+          const tick = () => {
+            if (document.querySelector('dialog[data-od-id="game-detail"]')) {
+              requestAnimationFrame(tick);
+              return;
+            }
+            document.querySelector<HTMLButtonElement>('[data-od-id="game-open-2"]')!.click();
+          };
+          requestAnimationFrame(tick);
+        },
+        { once: true },
+      );
+    });
+    await page.keyboard.press("Escape");
+    // 조인 채로 기다려야 back 이 늦게 도착하는 그 창이 열린다.
+    await page.waitForTimeout(200);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    // 늦게 온 popstate 가 마인크래프트 상세를 닫아 버렸다면 여기서 0 이 잡힌다.
+    await page.waitForTimeout(800);
+
+    opened.push(await detail.count());
+    lengths.push(await page.evaluate(() => history.length));
+    if (await detail.isVisible()) {
+      await page.keyboard.press("Escape");
+      await expect(detail).toHaveCount(0);
+      // 다음 라운드가 깨끗한 상태에서 시작하도록 이번 되돌리기가 도착할 시간을 준다.
+      await page.waitForTimeout(200);
+    }
+  }
+
+  expect(opened, "연타로 연 상세가 스스로 닫혔다").toEqual([1, 1, 1]);
+  /* 엔트리가 새면 히스토리가 라운드마다 한 칸씩 자란다 — 화면엔 아무 표시도 안 나고,
+     사용자에겐 "뒤로가기를 몇 번 눌러야 이 페이지를 떠나는지 모르겠다"로만 드러난다. */
+  expect(new Set(lengths).size, "히스토리 엔트리가 샜다: " + lengths.join(",")).toBe(1);
+});
+
+/* **버려진 히스토리 엔트리를 다음 모달이 물려받지 않는다.**
+
+   모달을 연 채 그 안의 링크로 페이지를 떠나면 우리가 쌓은 엔트리는 되돌려지지 않고 남는다
+   (그렇게 하기로 한 결정이다 — 언마운트에서 back 을 부르면 이탈 자체를 무른다). 그 엔트리가
+   **현재보다 뒤에** 놓이는 게 문제의 씨앗이다: 돌아와서 모달을 다시 열 때 컨트롤러가 "이미
+   엔트리가 있다"며 새로 쌓지 않으면, 뒤로가기가 페이지를 떠나는데 컨트롤러는 그걸 자기
+   엔트리로 알고 모달을 닫는다 — 이 배선의 약속("뒤로가기는 모달만 닫는다")이 정확히 거기서
+   깨진다(적대적 리뷰가 코드로 지목했다).
+
+   **클라이언트 네비게이션이어야 재현된다.** page.goto 는 문서를 새로 로드해 컨트롤러 상태까지
+   초기화하므로 이 경로를 못 만든다. 모달이 열린 동안 nav 는 inert 라 사람은 누를 수 없지만,
+   inert 가 막는 건 히트테스트·포커스이고 **프로그램적 click() 은 그대로 디스패치된다** — 그
+   틈으로 실제 링크 이탈과 같은 상태를 만든다(사람이 실제로 밟는 문은 수정 폼 안의 /schedule
+   링크지만 그건 여러 날 편성 게임에서만 렌더돼 D1 쓰기가 필요하다 — 컨트롤러가 보는 건
+   "모달이 닫히지 않은 채 클라이언트 네비게이션이 일어났다" 하나뿐이라 어느 링크든 같다).
+
+   읽기 전용이다 — 서버로 나가는 쓰기가 없다. */
+test("게임: 모달을 연 채 떠났다 돌아와 다시 열면 뒤로가기가 모달만 닫는다", async ({ page }) => {
+  await page.goto("/games");
+  const detail = page.locator('dialog[data-od-id="game-detail"]');
+
+  await page.locator('[data-od-id="game-open-1"]').click();
+  await expect(detail).toBeVisible();
+
+  // 모달이 열린 채 클라이언트 네비게이션으로 이탈 — 엔트리가 주인 없이 남는다.
+  await page.evaluate(() => {
+    const link = document.querySelector('.nav__links a[href="/landing"]') as HTMLAnchorElement;
+    link.click();
+  });
+  await expect(page).toHaveURL(/\/landing$/);
+
+  // 돌아와서 다시 연다. 여기서 새 엔트리를 안 쌓으면 아래 뒤로가기가 페이지를 떠난다.
+  await page.locator('.nav__links a[href="/games"]').click();
+  await expect(page).toHaveURL(/\/games$/);
+  await page.locator('[data-od-id="game-open-1"]').click();
+  await expect(detail).toBeVisible();
+
+  await page.goBack();
+  await expect(detail).toHaveCount(0);
+  await expect(page, "뒤로가기가 모달만 닫는 대신 페이지를 떠났다").toHaveURL(/\/games$/);
+});

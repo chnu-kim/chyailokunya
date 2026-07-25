@@ -74,18 +74,15 @@ export function GameBoard({
      상세로 돌아오고, 포커스 복원을 브라우저의 dialog 스택이 그대로 맡는다. 행 전체를 들고
      있는 이유는 아래 editing 과 같다. */
   const [detail, setDetail] = useState<GameCard | null>(null);
-  /* 상세에 보내는 "이제 닫아라" 신호. 뒤로가기로 닫을 땐 이 신호를 세워 **브라우저의 dialog
-     닫기 알고리즘을 태운다** — setDetail(null) 로 곧장 언마운트하면 dialog 가 열린 채 DOM 에서
-     빠져 포커스가 body 로 떨어진다(GameDialog 의 closing 주석). 실제 언마운트는 그 뒤 오는
-     close 이벤트가 한다. */
+  /* 상세에 보내는 "이제 닫아라" 신호. 쓰는 길은 **삭제 성공** 하나다(onRemoved) — 나머지 닫는
+     길은 셸이 스스로 처리하고, 뒤로가기도 이제 셸이 받는다(GameDialog 의 history). 이 신호를
+     거치는 이유는 곧장 언마운트하면 dialog 가 열린 채 DOM 에서 빠져 close 이벤트가 아예 안
+     오기 때문이다 — 그러면 셸이 히스토리 엔트리를 되돌릴 자리를 잃는다. */
   const [detailClosing, setDetailClosing] = useState(false);
-  /* 상세를 대신해 히스토리에 쌓아 둔 엔트리가 **아직 살아 있는가.** 닫는 길이 여럿이라
-     (배경 클릭·Esc·모서리 X·삭제 성공·뒤로가기) 그 자체로는 "누가 닫았나"를 구분할 수 없는데,
-     되돌리기(history.back)를 불러야 하는 쪽과 부르면 안 되는 쪽이 갈린다 — 뒤로가기로 닫힌
-     길에서 back 을 또 부르면 한 칸 더 뒤로 가 페이지를 떠난다. 그래서 "엔트리가 남았나"
-     하나만 들고, 되돌린 쪽이 즉시 내린다. state 가 아니라 ref 인 이유: 이 값이 바뀐다고
-     다시 그릴 것이 없고, 같은 tick 안에서 읽고 쓰는 자리라 리렌더를 기다리면 늦는다. */
-  const detailEntryRef = useRef(false);
+  /* 이번 닫힘이 **삭제 때문인가.** 포커스를 어디로 넘길지가 여기서 갈린다(onDetailClosed).
+     state 가 아니라 ref 인 이유: 이 값이 바뀐다고 다시 그릴 것이 없고, 닫기 신호를 세우는
+     같은 tick 에 쓰고 close 이벤트에서 읽는 자리라 리렌더를 기다리면 늦는다. */
+  const detailRemovedRef = useRef(false);
   // 고치는 중인 행(플레이 날짜·클리어). 행 전체를 들고 있는 이유: 모달이 제목·포스터로
   // "무엇을 고치는지"를 다시 보여줘야 하고, id 만 들면 목록에서 매번 되찾아야 한다.
   const [editing, setEditing] = useState<GameCard | null>(null);
@@ -141,77 +138,23 @@ export function GameBoard({
     return () => clearTimeout(timer);
   }, [justAdded]);
 
-  /* ── 상세를 브라우저 히스토리에 얹는다 ────────────────────────────────────────────
-     안 얹으면 안드로이드 하드웨어 뒤로가기·iOS 스와이프가 모달이 아니라 **페이지를 떠난다**
-     (이슈 #65). 모달을 여는 것이 사용자에겐 "한 걸음 들어간 것"이라 뒤로가기가 그 한 걸음만
-     무르는 게 맞다.
-
-     **URL 은 안 바꾼다.** pushState 의 url 인자를 생략하면 주소가 유지된 채 엔트리만 쌓인다.
-     딥링크는 열지 않기로 한 결정이라(/games/[id] 라우트를 안 만든다 — routes.ts 가 nav 와
-     로그인 복귀 허용목록의 공동 정본이라 라우트를 늘리면 거기까지 딸려온다) 주소를 바꾸면
-     오히려 거짓말이 된다: 그 주소를 새로고침해도 상세가 없다.
-
-     엔트리 state 는 **지금 것을 복사해 넣는다.** App Router 는 자기 라우팅 트리를
-     history.state 에 들고 다니고, 그게 없는 엔트리로 이동하면(back 뒤의 forward) 라우터가
-     "옛 pages 라우터가 만든 엔트리"로 보고 location.reload() 를 때린다. Next 가 pushState 를
-     패치해 내부 state 를 복사해 주긴 하지만, 먼저 복사해 두면 그 패치에 기대지 않는다.
-
-     **알고 수용한 한계 둘.** (1) 상세를 연 채 nav 로 다른 페이지에 가면 이 엔트리가 그대로
-     남아, 돌아올 때 뒤로가기 한 번이 아무 일도 안 한 것처럼 보인다. 언마운트 정리에서
-     back 을 부르면 그 이탈 자체를 되돌려 버리므로 여기선 안 고친다. (2) 닫은 뒤 앞으로가기가
-     상세를 다시 열지는 않는다 — 어느 게임이었는지를 엔트리에 실어야 하는데, 그 값을 실으면
-     "주소는 그대로인데 히스토리엔 게임 id 가 있다"는 반쪽 딥링크가 생긴다. */
-  function openDetail(game: GameCard) {
-    setDetail(game);
-    window.history.pushState({ ...window.history.state }, "");
-    detailEntryRef.current = true;
-  }
-
-  /* 우리가 쌓은 엔트리를 되돌린다. 사용자가 **직접 닫은** 길에서만 부른다 — 안 부르면
-     히스토리에 빈 엔트리가 남아 뒤로가기 한 번이 아무 일도 안 하는 것처럼 보인다. */
-  function popDetailEntry() {
-    if (!detailEntryRef.current) return;
-    detailEntryRef.current = false;
-    window.history.back();
-  }
-
-  /* 상세가 실제로 닫힌 뒤(브라우저의 close 이벤트). 닫은 주체가 누구든 여기로 모인다. */
+  /* 상세가 실제로 닫힌 뒤(브라우저의 close 이벤트). 닫은 주체가 누구든 여기로 모인다.
+     히스토리 엔트리 되돌리기는 여기 없다 — 셸이 같은 이벤트에서 이미 한다(GameDialog). */
   function onDetailClosed() {
     setDetail(null);
     setDetailClosing(false);
-    popDetailEntry();
+    if (!detailRemovedRef.current) return;
+    detailRemovedRef.current = false;
+    /* 삭제로 닫힌 길만 포커스를 옮긴다. 브라우저는 포커스를 트리거로 되돌리는데 그 트리거는
+       방금 지운 카드라 함께 사라졌다 — 그대로 두면 body 로 떨어져 키보드 사용자가 탭 순서 맨
+       앞으로 튕긴다. 붙이기 슬롯은 카드가 아니라 그리드의 고정 첫 칸이라 지워지지 않으므로
+       여기로 넘긴다(삭제 권한이 있으면 쓰기 권한도 있다 — core/authorities). */
+    addSlotRef.current?.focus();
   }
 
-  // 상세 **위에** 겹친 모달이 떠 있는가. 뒤로가기가 왔을 때 무엇을 할지가 여기서 갈린다.
-  const stackedOpen = editing !== null || deleting !== null;
-
-  useEffect(() => {
-    function onPopState() {
-      // 우리가 쌓은 엔트리가 아니다 — 남의 뒤로가기를 가로채면 페이지를 못 떠난다.
-      if (!detailEntryRef.current) return;
-      /* 겹친 모달이 떠 있으면 **아무것도 안 닫고 엔트리만 다시 쌓는다.**
-
-         상세만 닫을 수는 없다: 위 모달이 닫힐 때 포커스가 돌아갈 자리가 상세 안에 있어
-         함께 사라진다. 그렇다고 위까지 닫으면 뒤로가기 한 번이 셸의 잠금 둘을 통째로
-         우회한다 — 미저장 입력을 묻지도 않고 버리고(GameDialog 의 dirty), 서버로 날아가는
-         중인 쓰기를 인계 없이 끊는다(busy: 그 자리에서 행이 부모에게 영영 안 넘어간다).
-         둘 다 사용자가 실제로 겪어 세운 가드라 제스처 하나로 무를 수 있으면 안 된다.
-
-         그래서 이 순간의 뒤로가기는 Esc 와 같은 대접을 받는다 — 위 모달이 열려 있는 동안은
-         Esc 도 페이지를 못 떠난다. 위를 닫고 나면 다음 뒤로가기가 정상으로 돈다.
-         (수정·삭제를 각자 엔트리로 얹지 않은 건 결정이다: 뒤로가기 한 번에 몇 겹이 닫힐지
-         화면만 봐선 알 수 없어진다.) */
-      if (stackedOpen) {
-        window.history.pushState({ ...window.history.state }, "");
-        return;
-      }
-      // 되돌리기는 브라우저가 이미 했다 — 여기서 back 을 부르면 한 칸 더 간다.
-      detailEntryRef.current = false;
-      setDetailClosing(true);
-    }
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [stackedOpen]);
+  /* 상세 **위에** 겹친 모달이 떠 있는가. 뒤로가기가 왔을 때 셸이 무엇을 할지가 여기서 갈린다
+     (GameDialog 의 covered) — 셸은 자기 위에 뭐가 얹혔는지 못 보므로 보드가 알려 준다. */
+  const detailCovered = editing !== null || deleting !== null;
 
   /* 날짜를 고치면 lastPlayed 가 바뀌어 **자리도 달라져야 한다** — 제자리 교체만 하면 새로고침
      전까지 보드가 날짜순이 아닌 채로 남는다. 정렬 규칙은 core 가 쥔다(서버 SQL 의 짝). */
@@ -228,19 +171,14 @@ export function GameBoard({
   function onRemoved(row: GameCard) {
     setGames((prev) => prev.filter((g) => g.id !== row.id));
     setDeleting(null);
-    /* 상세는 방금 사라진 게임을 보여주고 있었다 — 같이 닫는다. 사용자가 고른 결정으로 닫는
-       길이라 히스토리 엔트리도 함께 되돌린다: 안 되돌리면 삭제하고 나온 사람의 뒤로가기 한
-       번이 아무 일도 안 한다. 여기선 닫기 신호(detailClosing)를 안 거치고 곧장 언마운트하는데,
-       그 대가인 "포커스가 body 로 떨어짐"은 아래 addSlot 포커스가 이미 갚고 있다 — 신호를
-       거쳐 close 이벤트를 태워 봐야 포커스가 돌아갈 트리거(카드)가 같은 커밋에서 사라진다. */
-    setDetail(null);
-    popDetailEntry();
     setAnnouncement(row.categoryValue + " 삭제됨");
-    /* 모달을 닫으면 브라우저가 포커스를 트리거로 되돌리는데, 그 트리거는 방금 지운 카드의
-       상세 안에 있어 같은 커밋에서 사라진다 — 그대로 두면 포커스가 body 로 떨어져 키보드
-       사용자가 탭 순서 맨 앞으로 튕긴다. 붙이기 슬롯은 카드가 아니라 그리드의 고정 첫 칸이라
-       지워지지 않으므로 여기로 넘긴다(삭제 권한이 있으면 쓰기 권한도 있다 — core/authorities). */
-    addSlotRef.current?.focus();
+    /* 상세는 방금 사라진 게임을 보여주고 있었다 — 같이 닫는다. **곧장 언마운트하지 않고 닫기
+       신호를 세운다**: 그래야 브라우저의 close 이벤트가 오고, 셸이 거기서 히스토리 엔트리를
+       되돌린다(안 되돌리면 삭제하고 나온 사람의 뒤로가기 한 번이 아무 일도 안 한다).
+       그 대가인 "포커스가 body 로 떨어짐"은 onDetailClosed 가 추가 슬롯으로 갚는다 —
+       포커스가 돌아갈 트리거(카드)는 어차피 같은 커밋에서 사라진다. */
+    detailRemovedRef.current = true;
+    setDetailClosing(true);
   }
 
   return (
@@ -268,6 +206,7 @@ export function GameBoard({
           canWrite={canWrite}
           canDelete={canDelete}
           closing={detailClosing}
+          covered={detailCovered}
           onEdit={() => setEditing(detail)}
           onDelete={() => setDeleting(detail)}
           onClose={onDetailClosed}
@@ -377,10 +316,8 @@ export function GameBoard({
                         data-od-id={"game-open-" + g.id}
                         // 방금 붙인 카드에만 걸린다 — 정렬 뒤 그 카드를 찾아 주는 손잡이다.
                         ref={g.id === justAdded ? justAddedRef : undefined}
-                        /* 히스토리 엔트리는 **이 클릭에서** 쌓는다(effect 가 아니라). dev 의
-                           StrictMode 는 effect 를 두 번 돌려 엔트리가 둘 쌓이고, 그러면
-                           뒤로가기 한 번이 모달을 안 닫는다 — 이벤트 핸들러는 두 번 안 돈다. */
-                        onClick={() => openDetail(g)}
+                        // 히스토리 엔트리는 여는 쪽이 아니라 셸이 쌓는다(GameDialog 의 history).
+                        onClick={() => setDetail(g)}
                       >
                         {/* 두 줄 말줄임은 이 span 이 진다 — 버튼에 직접 걸면 함께 필요한
                             overflow:hidden 이 카드를 덮는 ::after 까지 잘라 히트 영역이
@@ -433,6 +370,7 @@ function GameDetail({
   canWrite,
   canDelete,
   closing,
+  covered,
   onEdit,
   onDelete,
   onClose,
@@ -440,10 +378,12 @@ function GameDetail({
   game: GameCard;
   canWrite: boolean;
   canDelete: boolean;
-  /* 부모가 세우는 닫기 신호. 이 화면에 그럴 일이 하나 있다 — **브라우저 뒤로가기**. 그때
-     dialog.close() 를 태워야 포커스가 트리거(카드)로 돌아간다(GameDialog 의 closing 주석).
-     나머지 닫는 길은 셸이 스스로 처리하므로 여기 안 온다. */
+  /* 부모가 세우는 닫기 신호. 이 화면에 그럴 일이 하나 있다 — **삭제 성공**. 곧장 언마운트하는
+     대신 신호를 세워야 close 이벤트가 오고, 셸이 거기서 히스토리 엔트리를 되돌린다.
+     뒤로가기를 포함한 나머지 닫는 길은 셸이 스스로 처리하므로 여기 안 온다. */
   closing: boolean;
+  // 수정·삭제가 이 위에 겹쳐 떴는가 — 그동안 뒤로가기가 이 화면을 닫으면 안 된다.
+  covered: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -454,6 +394,10 @@ function GameDetail({
       odId="game-detail"
       className="composer--detail"
       closing={closing}
+      /* 뒤로가기가 페이지가 아니라 이 모달을 닫는다(이슈 #65). 겹친 모달이 떠 있는 동안은
+         유예된다 — 그 판정을 셸이 하도록 covered 로 넘긴다(GameDialog 의 history·covered). */
+      history
+      covered={covered}
       onClose={onClose}
     >
       <div className="detail__head">

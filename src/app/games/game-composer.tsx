@@ -3,6 +3,7 @@
 import { useEffect, useReducer, useRef, useState, useTransition } from "react";
 import {
   composerActiveOption,
+  composerNeedsSearch,
   composerOptionCount,
   composerReducer,
   composerResultIndex,
@@ -61,12 +62,16 @@ const optionId = (index: number) => "composer-option-" + index;
 
 /* 커서를 옮기는 키. 표로 두는 이유는 분기 하나를 아끼려는 게 아니라, **여기 없는 키는 전부
    입력의 것**이라는 규칙을 한눈에 두려는 것이다 — 콤보박스가 키를 하나 더 가져갈 때마다
-   텍스트 편집이 그만큼 불편해진다. 끝에서 순환할지 같은 규칙 자체는 core 가 쥔다. */
+   텍스트 편집이 그만큼 불편해진다. 끝에서 순환할지 같은 규칙 자체는 core 가 쥔다.
+
+   **Home/End 는 일부러 없다.** W3C APG 의 editable combobox 는 이 둘을 Textbox 키로 못박는다
+   ("beginning/end of the field") — Listbox Popup 표에는 아예 없다. 여기 넣었던 옛 판은 결과가
+   뜬 동안 Home/End 를 목록의 처음·끝으로 가로채(first/last) 캐럿 이동 자체를 막았다(실측:
+   결과가 없을 땐 정상, 뜨면 Home 을 눌러도 캐럿이 그대로). 아래 onSearchKeyDown 이 그 둘을
+   따로 받아 **커서만 접고 preventDefault 는 안 한다** — 캐럿은 브라우저 기본 동작에 맡긴다. */
 const ARROW_MOVES: Partial<Record<string, ComposerActiveMove>> = {
   ArrowDown: "next",
   ArrowUp: "prev",
-  Home: "first",
-  End: "last",
 };
 
 /* 커서가 얹힌 줄에만 붙는 클래스. 결과 줄과 직접 추가 줄이 **같은 표시**를 써야 하므로
@@ -77,7 +82,13 @@ const optionClass = (active: boolean) =>
 /* 포커스는 콤보박스 규약상 입력에 머문다. li 는 포커서블이 아니지만, mousedown 의 기본 동작을
    막지 않으면 누르는 순간 입력이 포커스를 잃고(포커스가 dialog 로 떨어진다) 이어 치던 검색어를
    계속 못 친다. click 은 그대로 도니 선택은 막히지 않고, 카드 밖 클릭으로 닫는 셸의 판정도
-   그대로다(전파는 안 막는다). */
+   그대로다(전파는 안 막는다).
+
+   **ul(.composer__results) 에 건다 — li 마다 따로 안 붙인다.** mousedown 은 버블링하니
+   위임으로 항목도 그대로 덮이는데, li 에만 달면 항목 **사이**(.composer__results 의 6px gap,
+   실측 14px 로 벌어지는 직접 추가 줄 아래)를 누른 mousedown 은 어느 li 도 안 거쳐 그대로
+   기본 동작을 타 입력이 포커스를 잃는다 — 커서 표시(activeIndex)는 그대로 칠해진 채 이후
+   타이핑·Enter·↓ 가 전부 죽는 자리다(실측: PROBE-C). */
 const keepFocusInInput = (e: React.MouseEvent) => e.preventDefault();
 
 export function GameComposer({
@@ -152,17 +163,22 @@ export function GameComposer({
      걸리고 앞 타이머는 cleanup 이 지운다 — 그게 debounce 다.
 
      effect 안에서 **동기로** 상태를 건드리지 않는다(setTimeout 콜백 안이라 Next 16 의
-     set-state-in-effect 에 안 걸린다). 상세 단계(selected)에선 안 돈다: 그 화면엔 결과 목록이
-     낄 자리가 없고, 리듀서도 그 응답을 통째로 버린다. */
+     set-state-in-effect 에 안 걸린다).
+
+     **쏠지 말지는 이 파일이 안 정한다**(core.composerNeedsSearch). 상세로 갔다 「뒤로」로
+     돌아오면 selected 가 바뀌어 이 effect 가 다시 도는데, 여기서 조건을 따로 적으면 그 경로가
+     같은 검색어를 한 번 더 쏴서 목록은 그대로인 채 사용자가 방금 세운 커서만 지운다 —
+     실제로 그렇게 새어 있었다(그 실측은 core 의 searchSucceeded 주석). searched 를 그 판정에
+     넣었으니 **의존성 배열에도 함께 싣는다** — 안 실으면 결론이 난 뒤에도 옛 판정이 남는다. */
   useEffect(() => {
-    if (!query || selected) return;
+    if (!composerNeedsSearch(state)) return;
     const timer = setTimeout(() => void runSearch(state.query), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-    /* query 는 state.query 의 파생값이라 배열에 안 싣는다. runSearch 도 안 싣는다 — 매 렌더
-       새로 만들어지지만 읽는 건 인자로 들어오는 검색어뿐이고, 실으면 타이머가 매 렌더 새로
-       걸려 debounce 가 통째로 죽는다. */
+    /* state 전체가 아니라 판정이 읽는 세 값만 싣는다. runSearch 는 안 싣는다 — 매 렌더 새로
+       만들어지지만 읽는 건 인자로 들어오는 검색어뿐이고, 실으면 타이머가 매 렌더 새로 걸려
+       debounce 가 통째로 죽는다. */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.query, selected]);
+  }, [state.query, state.searched, selected]);
 
   /* 활성 항목이 스크롤 밖이면 끌어온다. 목록은 카드 본문(.composer__body)이 스크롤하는데
      scroll-behavior:smooth 는 html 에만 걸려 있어 여기선 즉시 이동이다 — 새 애니메이션이
@@ -221,6 +237,17 @@ export function GameComposer({
       if (!activeOption) return;
       e.preventDefault();
       choose(activeOption);
+      return;
+    }
+
+    if (e.key === "Home" || e.key === "End") {
+      /* modifier 조합(Shift+Home 의 텍스트 선택 등)은 우리 몫이 아니다 — 그대로 흘려보낸다.
+         가리는 게 있으면 그 조합의 뜻 자체가 달라진다(Shift+Home 은 "선택 시작점까지 지운다"가
+         아니라 "커서까지 선택한다"). 여기서 손대면 관여 안 하기로 한 원칙이 modifier 앞에서
+         깨진다. */
+      if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      // 캐럿은 UA 기본 동작에 맡긴다(preventDefault 안 한다) — 활성 옵션이 있으면 그것만 접는다.
+      if (state.activeIndex >= 0) dispatch({ type: "activeMoved", to: "none" });
       return;
     }
 
@@ -289,6 +316,10 @@ export function GameComposer({
       odId="composer"
       closing={closing}
       busy={adding}
+      /* 뒤로가기도 이 셋을 태운다. **여기가 보드에서 유일하게 미저장 입력을 든 화면이라**
+         빠지면 안 되는 자리다 — 상세만 히스토리에 얹었던 앞 판에선 검색해서 고른 뒤의
+         뒤로가기가 확인도 없이 페이지를 통째로 떠났다(리뷰 실측). */
+      history
       /* 상세 단계에 들어온 것 자체를 "잃을 작업"으로 본다 — 검색해서 고르기까지가 이미 한 벌의
          조작이고, 배경을 잘못 스쳐 그게 날아가면 처음부터 다시다. 검색 단계는 안 묻는다:
          거기서 잃는 건 검색어 한 줄이고, 매번 되묻으면 그냥 닫으려는 사람에게 문이 하나 더 는다. */
@@ -437,15 +468,23 @@ export function GameComposer({
             role="listbox"
             aria-label="게임 검색 결과"
             data-od-id="composer-results"
+            /* 비면 접근성 트리에서도 접는다 — 입력은 aria-expanded="false" 라고 말하는데 빈
+               listbox 가 트리에 남으면 그 둘이 서로 다른 말을 한다. 요소를 지우지 않는 이유는
+               입력의 aria-controls 가 이 id 를 가리키기 때문이다(games.css 의 [hidden] 규칙). */
+            hidden={optionCount === 0}
+            onMouseDown={keepFocusInInput}
           >
             {/* 직접 입력은 이제 **목록 맨 위**다(과제 D) — 검색이 12건을 주면 그 끝까지
                 스크롤해야 만나던 자리를, 찾는 게임이 없어서 손으로 넣으려는 사람이 정확히
                 그 상황에 있다는 이유로 앞으로 옮겼다. 노출 규칙(정확히 같은 이름이 결과에
                 있으면 감춘다)의 정본은 그대로 core.showsDirectEntry — 바뀐 건 자리뿐이다.
 
-                자리가 위계를 못 지므로 이제 문구와 형태가 진다: 라벨이 "찾는 게임이 없다면"
-                으로 시작해 이 줄이 정답이 아니라 결과에 없을 때의 길임을 먼저 말하고,
-                .composer__pick--direct 의 구분선(games.css)이 실제 결과와 시각으로 가른다.
+                자리가 위계를 못 지므로 이제 **문구가 진다**: 라벨이 "찾는 게임이 없다면"
+                으로 시작해 이 줄이 정답이 아니라 결과에 없을 때의 길임을 먼저 말한다.
+                형태(.composer__pick--direct 의 구분선 + 넓힌 간격 + 점선 마크)는 거들 뿐이다 —
+                구분선은 --border 라 라이트 1.13:1 · 다크 1.30:1 이라 사실상 안 보이고, 그건
+                저장소 표준 헤어라인이라 여기만 진하게 하면 오히려 어긋난다(적대적 리뷰가
+                "위계의 절반을 구분선이 진다"는 앞 판 서술을 실측으로 반박했다).
                 그래도 같은 .composer__pick 을 입혀 결과와 같은 종류의 조작(고르면 상세로
                 간다)으로 읽히게 한다 — 통째로 다른 부품으로 세우면 "검색이 실패했다"는
                 신호가 되어 결과가 멀쩡히 있는데도 사용자를 멈춰 세운다.
@@ -470,7 +509,6 @@ export function GameComposer({
                 aria-selected={state.activeIndex === DIRECT_ENTRY_INDEX}
                 data-od-id="composer-direct"
                 onMouseMove={() => dispatch({ type: "activeSet", index: DIRECT_ENTRY_INDEX })}
-                onMouseDown={keepFocusInInput}
                 onClick={() => choose("direct")}
               >
                 <span className="composer__directmark" aria-hidden="true">
@@ -492,7 +530,6 @@ export function GameComposer({
                   role="option"
                   aria-selected={state.activeIndex === idx}
                   onMouseMove={() => dispatch({ type: "activeSet", index: idx })}
-                  onMouseDown={keepFocusInInput}
                   onClick={() => choose(c)}
                 >
                   {c.posterImageUrl ? (
