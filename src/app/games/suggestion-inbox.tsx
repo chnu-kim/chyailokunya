@@ -102,7 +102,7 @@ export function SuggestionInbox({
           try {
             setItems(await fetchPending());
           } catch {
-            setError("다음 제안을 못 불러왔어요 — 닫았다 열면 이어서 보여요.");
+            setError("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다.");
           }
         }
       } catch (e) {
@@ -125,11 +125,11 @@ export function SuggestionInbox({
       closeButton={false}
       onClose={onClose}
     >
-      {items === null && !error && <p className="composer__hint">불러오는 중이에요…</p>}
+      {items === null && !error && <p className="composer__hint">불러오는 중입니다…</p>}
 
       {items !== null && items.length === 0 && (
         <p className="composer__hint" data-od-id="inbox-empty">
-          아직 온 제안이 없어요.
+          아직 온 제안이 없습니다.
         </p>
       )}
 
@@ -157,7 +157,8 @@ export function SuggestionInbox({
           service.INBOX_LIMIT 주석). 개수는 목록과 전체 수의 차이로 구한다. */}
       {items !== null && pending > items.length && (
         <p className="composer__hint" data-od-id="inbox-more">
-          아직 {pending - items.length}건이 더 있어요 — 여기 있는 걸 처리하면 다음 것이 올라와요.
+          아직 {pending - items.length}건이 더 있습니다 — 여기 있는 것을 처리하면 다음 것이
+          올라옵니다.
         </p>
       )}
 
@@ -225,7 +226,7 @@ function InboxItem({
         </p>
       )}
 
-      {missing && <p className="inbox__kind">이 게임은 보드에서 사라졌어요.</p>}
+      {missing && <p className="inbox__kind">이 게임은 보드에서 사라졌습니다.</p>}
 
       {/* 바뀌는 것만 그린다 — 안 바뀌는 줄까지 세우면 무엇을 봐야 하는지가 화면에서 사라진다
           (core.diffSuggestion). 추가 요청은 견줄 현재 값이 없어 제안 값을 그대로 나열한다. */}
@@ -262,7 +263,7 @@ function InboxItem({
       {/* 값이 하나도 안 바뀌는 수정 제안이 정상이다 — 한마디만 있는 제보가 그렇다. 그때 이 줄이
           유일한 내용이므로 "바뀔 값이 없다"를 따로 말해 줘야 관리자가 빈 줄로 오해하지 않는다. */}
       {item.kind === "edit" && !missing && changes.length === 0 && (
-        <p className="inbox__kind">바꿀 값은 없고 한마디만 왔어요.</p>
+        <p className="inbox__kind">바꿀 값은 없고 한마디만 왔습니다.</p>
       )}
 
       {item.note && <p className="inbox__note">{item.note}</p>}

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
 /* 팬 수정 제안(ADR-0025). 이 기능의 계약은 **권한이 빈 사람이 무언가를 할 수 있다**는 것이라,
@@ -19,6 +19,19 @@ import { E2E_FAN, expectSignedIn, signIn } from "./session";
 // 카드를 눌러 상세를 연다 — 카드 안의 유일한 버튼이 곧 카드 전체의 히트 영역이다(games.spec 과 같은 손잡이).
 function openCard(page: Page, name: string) {
   return page.locator(".game").filter({ hasText: name }).getByRole("button").click();
+}
+
+/* 관리자를 **별도 컨텍스트**로 연다. 같은 페이지에서 쿠키만 바꿔 goto 하면 ERR_ABORTED 가 난다 —
+   제안을 보내면 상세까지 닫히면서 히스토리 엔트리를 되돌리는데(history.back 은 비동기 왕복이다)
+   그 사이 네비게이션이 겹치기 때문이다(AGENTS.md 지뢰). 컨텍스트를 나누면 그 히스토리와 아예
+   무관해지고, 실제로도 관리자는 다른 사람의 브라우저다. */
+async function openAsAdmin(browser: Browser, baseURL: string): Promise<Page> {
+  const context = await browser.newContext();
+  await signIn(context, baseURL);
+  const page = await context.newPage();
+  await page.goto("/games");
+  await expectSignedIn(page);
+  return page;
 }
 
 /* 팬으로 그 게임에 제안 하나를 보낸다. 값을 반드시 하나 바꾼다 — 값도 그대로고 한마디도 없으면
@@ -74,7 +87,10 @@ test("제안: 팬이 보낸 제안이 접수된다", async ({ page, baseURL }) =
 
   // 닫으면 모달이 사라지고 라이브 영역이 결과를 말한다. 보드 값은 그대로다 — 제안은 게임을 안 바꾼다.
   await expect(page.locator("[data-od-id='game-suggest']")).toHaveCount(0);
-  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈어요");
+  /* **아래 상세도 함께 닫힌다.** 보내고 나면 그 카드에서 할 일이 끝났는데, 안 닫으면 성공 화면
+     뒤로 상세가 남아 카드 두 장이 겹쳐 보인다(사용자가 라이브에서 지적했다). */
+  await expect(page.locator("[data-od-id='game-detail']")).toHaveCount(0);
+  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈습니다");
   await expect(
     page.locator(".game").filter({ hasText: "마인크래프트" }).getByText("클리어"),
   ).toHaveCount(0);
@@ -89,11 +105,13 @@ test("제안: 같은 게임에 두 번째 제안은 막힌다(처리될 때까�
      바뀌고 한마디만 실린다. 그것도 유효한 제안이라는 걸 이 자리가 겸해서 덮는다
      (값으로 표현 못 하는 제보의 길 — core.isEmptyEditSuggestion). */
   await sendSuggestion(page, "셀레스테", "첫 번째 제안");
-  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈어요");
+  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈습니다");
 
-  /* 두 번째. 첫 제안을 닫아도 **상세는 열린 채 남으므로**(제안 폼은 그 위에 겹쳐 떴다) 카드를
-     다시 열지 않는다. 폼은 그대로 열리고 **서버가** 거절한다 — 화면이 먼저 막지 않는 건 그
+  /* 두 번째. **제안을 보내면 아래 상세도 함께 닫히므로** 카드를 다시 연다 — 보내고 나면 그
+     카드에서 할 일이 끝났고, 안 닫으면 성공 화면 뒤로 상세가 남아 카드 두 장이 겹쳐 보인다
+     (사용자 지적). 폼은 그대로 열리고 **서버가** 거절한다 — 화면이 먼저 막지 않는 건 그
      판정에 필요한 사실(내가 이미 보냈나)이 클라이언트에 없기 때문이다. */
+  await openCard(page, "셀레스테");
   await page.locator("[data-od-id^='game-suggest-']").click();
   await page.locator("[data-od-id='suggest-note']").fill("두 번째 제안");
   await page.locator("[data-od-id='suggest-submit']").click();
@@ -101,7 +119,7 @@ test("제안: 같은 게임에 두 번째 제안은 막힌다(처리될 때까�
   /* getByRole("alert") 로 잡으면 Next 의 라우트 announcer(빈 div, 같은 role)가 먼저 걸린다 —
      우리 문구 자리로 좁힌다. */
   await expect(page.locator("[data-od-id='game-suggest'] .err")).toContainText(
-    "이미 보낸 제안이 있어요",
+    "이미 보낸 제안이 있습니다",
   );
   // 실패했으니 폼은 열린 채여야 한다 — 닫히면 사용자가 쓴 글이 사라진다.
   await expect(page.locator("[data-od-id='game-suggest']")).toBeVisible();
@@ -109,23 +127,18 @@ test("제안: 같은 게임에 두 번째 제안은 막힌다(처리될 때까�
 
 test("제안: 관리자 제안함이 현재→제안 차이를 보여주고, 반영이 그 값으로 폼을 연다", async ({
   page,
+  browser,
   baseURL,
 }) => {
-  const context = page.context();
-  await signIn(context, baseURL!, E2E_FAN);
+  await signIn(page.context(), baseURL!, E2E_FAN);
   await page.goto("/games");
   await expectSignedIn(page);
   await sendSuggestion(page, "스타듀 밸리", "여기 한마디");
-  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈어요");
+  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈습니다");
 
-  // 같은 브라우저로 신원만 바꾼다 — 쿠키를 비우고 관리자(user 1)로 다시 심는다.
-  await context.clearCookies();
-  await signIn(context, baseURL!);
-  await page.goto("/games");
-  await expectSignedIn(page);
-
-  await page.locator("[data-od-id='inbox-open']").click();
-  const row = page.locator(".inbox__item").filter({ hasText: "스타듀 밸리" });
+  const admin = await openAsAdmin(browser, baseURL!);
+  await admin.locator("[data-od-id='inbox-open']").click();
+  const row = admin.locator(".inbox__item").filter({ hasText: "스타듀 밸리" });
   await expect(row).toBeVisible();
   await expect(row).toContainText("쿠냐팬");
   await expect(row).toContainText("여기 한마디");
@@ -138,26 +151,21 @@ test("제안: 관리자 제안함이 현재→제안 차이를 보여주고, 반
   /* 반영 = 제안 값이 **채워진 채로** 기존 수정 폼이 열리는 것. 저장은 여기서 안 한다(위 주석) —
      이 단언이 이 기능의 핵심 계약이다: 관리자가 값을 손으로 옮겨 적지 않아도 된다. */
   await row.locator("[data-od-id^='suggestion-apply-']").click();
-  await expect(page.locator("[data-od-id='game-editor']")).toBeVisible();
-  await expect(page.locator("[data-od-id='editor-clear-cleared']")).toBeChecked();
-  await expect(page.locator("[data-od-id='game-editor-game']")).toContainText("스타듀 밸리");
+  await expect(admin.locator("[data-od-id='game-editor']")).toBeVisible();
+  await expect(admin.locator("[data-od-id='editor-clear-cleared']")).toBeChecked();
+  await expect(admin.locator("[data-od-id='game-editor-game']")).toContainText("스타듀 밸리");
 });
 
-test("제안: 거절하면 제안함에서 사라진다", async ({ page, baseURL }) => {
-  const context = page.context();
-  await signIn(context, baseURL!, E2E_FAN);
+test("제안: 거절하면 제안함에서 사라진다", async ({ page, browser, baseURL }) => {
+  await signIn(page.context(), baseURL!, E2E_FAN);
   await page.goto("/games");
   await expectSignedIn(page);
   await sendSuggestion(page, "할로우 나이트", "거절될 제안");
-  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈어요");
+  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈습니다");
 
-  await context.clearCookies();
-  await signIn(context, baseURL!);
-  await page.goto("/games");
-  await expectSignedIn(page);
-
-  await page.locator("[data-od-id='inbox-open']").click();
-  const row = page.locator(".inbox__item").filter({ hasText: "할로우 나이트" });
+  const admin = await openAsAdmin(browser, baseURL!);
+  await admin.locator("[data-od-id='inbox-open']").click();
+  const row = admin.locator(".inbox__item").filter({ hasText: "할로우 나이트" });
   await expect(row).toBeVisible();
   await row.locator("[data-od-id^='suggestion-reject-']").click();
 
@@ -200,9 +208,12 @@ test("제안: 추가 요청 폼은 뒤로가기에 페이지를 안 떠난다", 
 
    **저장은 안 한다.** 게임이 하나 늘면 공유 픽스처가 오염돼 games.spec 의 카드 수 단언이 깨진다
    (이 파일 맨 위 주석과 같은 이유). 값이 상세 단계까지 살아 오는지가 이 결함의 전부다. */
-test("제안: 추가 요청을 반영해도 팬이 보낸 날짜·클리어가 살아남는다", async ({ page, baseURL }) => {
-  const context = page.context();
-  await signIn(context, baseURL!, E2E_FAN);
+test("제안: 추가 요청을 반영해도 팬이 보낸 날짜·클리어가 살아남는다", async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!, E2E_FAN);
   await page.goto("/games");
   await expectSignedIn(page);
 
@@ -218,14 +229,11 @@ test("제안: 추가 요청을 반영해도 팬이 보낸 날짜·클리어가 �
      goto 하면 네비게이션이 중단돼 ERR_ABORTED 로 죽는다(실측). */
   await expect(page.locator("[data-od-id='game-suggest']")).toHaveCount(0);
 
-  await context.clearCookies();
-  await signIn(context, baseURL!);
-  await page.goto("/games");
-  await expectSignedIn(page);
+  const admin = await openAsAdmin(browser, baseURL!);
 
   /* 자격증명 없이도 상세 단계까지 가도록 검색 응답만 가로챈다(httpLink 라 배치가 아니다).
    **네비게이션 뒤에 건다** — goto 전에 걸면 그 goto 자체가 ERR_ABORTED 로 죽는다(실측). */
-  await page.route("**/api/trpc/chzzk.categorySearch*", (route) =>
+  await admin.route("**/api/trpc/chzzk.categorySearch*", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -244,17 +252,17 @@ test("제안: 추가 요청을 반영해도 팬이 보낸 날짜·클리어가 �
     }),
   );
 
-  await page.locator("[data-od-id='inbox-open']").click();
-  const row = page.locator(".inbox__item").filter({ hasText: "모킹된 게임" });
+  await admin.locator("[data-od-id='inbox-open']").click();
+  const row = admin.locator(".inbox__item").filter({ hasText: "모킹된 게임" });
   await expect(row).toBeVisible();
   await row.locator("[data-od-id^='suggestion-apply-']").click();
 
   // 검색어가 채워진 채 열리고, debounce 뒤 자동 검색이 나간다(별도 배선 없이 평소 경로 그대로).
-  await expect(page.locator("[data-od-id='composer-input']")).toHaveValue("모킹된 게임");
-  await page.locator("#composer-results [role='option']").first().click();
+  await expect(admin.locator("[data-od-id='composer-input']")).toHaveValue("모킹된 게임");
+  await admin.locator("#composer-results [role='option']").first().click();
 
   /* 상세 단계. **여기가 결함이 살던 자리다** — 고르는 순간 값이 비워지면 아래 셋이 전부 빈다. */
-  await expect(page.locator("[data-od-id='composer-played']")).toHaveValue("2026-06-15");
-  await expect(page.locator("[data-od-id='composer-clear-cleared']")).toBeChecked();
-  await expect(page.locator("[data-od-id='composer-clear-date']")).toHaveValue("2026-06-16");
+  await expect(admin.locator("[data-od-id='composer-played']")).toHaveValue("2026-06-15");
+  await expect(admin.locator("[data-od-id='composer-clear-cleared']")).toBeChecked();
+  await expect(admin.locator("[data-od-id='composer-clear-date']")).toHaveValue("2026-06-16");
 });

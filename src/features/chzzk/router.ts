@@ -21,7 +21,7 @@ export const chzzkRouter = router({
       if (!ctx.chzzk) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "치지직 자격 증명이 설정되지 않았어요(관리자 설정 필요).",
+          message: "치지직 자격 증명이 설정되지 않았습니다(관리자 설정 필요).",
         });
       }
       return searchCategories(ctx.chzzk, input.query, input.size);

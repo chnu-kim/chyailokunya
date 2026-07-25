@@ -90,7 +90,7 @@ export function ScheduleReadView({
         ) : (
           <div className="sched__empty" data-od-id="schedule-empty">
             <span className="t-hand">아직이야…</span>
-            <span>이번 주 일정은 아직 준비 중이에요.</span>
+            <span>이번 주 일정은 아직 준비 중입니다.</span>
           </div>
         )}
       </div>

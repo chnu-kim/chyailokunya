@@ -43,7 +43,7 @@ export async function exchangeCodeForTokens(
 
   const c = asRecord(content);
   const accessToken = str(c.accessToken);
-  if (!accessToken) throw new Error("치지직 토큰 응답에 accessToken 이 없어요");
+  if (!accessToken) throw new Error("치지직 토큰 응답에 accessToken 이 없습니다");
 
   const expiresInRaw = c.expiresIn;
   const expiresIn =
@@ -76,6 +76,6 @@ export async function fetchChzzkUser(
 
   const c = asRecord(content);
   const channelId = str(c.channelId).trim();
-  if (!channelId) throw new Error("치지직 사용자 응답에 channelId 가 없어요");
+  if (!channelId) throw new Error("치지직 사용자 응답에 channelId 가 없습니다");
   return { channelId, channelName: str(c.channelName) };
 }

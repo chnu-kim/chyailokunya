@@ -26,7 +26,7 @@ async function applyRoleChange(
 ) {
   // authorizedProcedure("role:manage")가 이미 통과해 actor 존재가 보장되지만, 타입·방어로 확인.
   if (!ctx.actor) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: "로그인이 필요해요" });
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "로그인이 필요합니다" });
   }
   const decision = authorizeRoleChange({
     actorAuthorities: await ctx.authoritiesOf(),
@@ -42,7 +42,7 @@ async function applyRoleChange(
   const targetUserId = await resolveUserIdByChannel(ctx.db, input.channelId);
   if (targetUserId === null) {
     // 로그인 이력이 있어야 users 행이 있다 — 없는 사람에겐 역할을 부여할 대상이 없다.
-    throw new TRPCError({ code: "NOT_FOUND", message: "로그인 이력이 없는 사용자예요" });
+    throw new TRPCError({ code: "NOT_FOUND", message: "로그인 이력이 없는 사용자입니다" });
   }
 
   // 역할 변경과 감사를 원자적으로(batch) — 감사 없이 역할만 바뀌는 상태를 막는다(ADR-0018).

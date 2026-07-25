@@ -27,13 +27,13 @@ export const scheduleRouter = router({
         if (e instanceof WeekRevisionConflict) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "다른 곳에서 이 주를 먼저 저장했어요.",
+            message: "다른 곳에서 이 주를 먼저 저장했습니다.",
           });
         }
         // prevalidate(ReferencedGameMissing)가 먼저 잡지만, FK 제약은 최종 방어선이라 남겨 둔다 —
         // 둘 다 같은 문구로 맵한다(사용자에겐 원인이 같다).
         if (e instanceof ReferencedGameMissing || isForeignKeyViolation(e)) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "보드에 없는 게임을 가리켰어요." });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "보드에 없는 게임을 가리켰습니다." });
         }
         throw e;
       }

@@ -60,21 +60,21 @@ const REJECTED_BEFORE_WRITE = new Set([
 /** 코드가 있든 없든 공통으로 말이 되는 것들. 없으면 null 을 돌려 호출자별 분기로 넘긴다. */
 function sharedMessage(code: string | null): string | null {
   if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
-    return "로그인이 만료됐거나 권한이 없어요. 다시 로그인해 주세요.";
+    return "로그인이 만료됐거나 권한이 없습니다. 다시 로그인해 주십시오.";
   return null;
 }
 
 /* 읽기(검색) 실패. 읽기는 "저장됐을까" 하는 애매함이 없어서 실패를 단정해도 된다 — 다만
    원인은 여전히 아는 만큼만 말한다. */
 export function readErrorMessage(e: unknown): string {
-  if (isAborted(e)) return "검색이 너무 오래 걸려서 멈췄어요. 다시 시도해 주세요.";
+  if (isAborted(e)) return "검색이 너무 오래 걸려서 멈췄습니다. 다시 시도해 주십시오.";
   const code = codeOf(e);
   const shared = sharedMessage(code);
   if (shared) return shared;
   // 치지직 자격증명이 없을 때 서버가 내는 코드. 사용자가 재시도해도 안 풀리니 그렇게 말한다.
   if (code === "PRECONDITION_FAILED")
-    return "지금은 게임 검색을 쓸 수 없어요. 잠시 뒤에 다시 열어볼게요.";
-  return "검색에 실패했어요. 잠시 후 다시 시도해 주세요.";
+    return "지금은 게임 검색을 쓸 수 없습니다. 잠시 뒤에 다시 시도해 주십시오.";
+  return "검색에 실패했습니다. 잠시 후 다시 시도해 주십시오.";
 }
 
 /* 쓰기(추가·수정) 실패. 핵심은 **"저장됐는지 우리가 아느냐"** 를 문구가 정확히 반영하는 것이다.
@@ -83,29 +83,29 @@ export function writeErrorMessage(e: unknown): string {
   /* 응답을 못 들었다. 멈춘 건 기다림이지 요청이 아니라서, 서버에 닿았는지도 저장됐는지도
      모른다 — 그건 말하되 네트워크 탓이라고 단정하지는 않는다(우리가 아는 건 "오래 걸렸다"뿐). */
   if (isAborted(e))
-    return "응답이 너무 오래 걸려서 기다리기를 멈췄어요. 저장됐을 수도 있으니 새로고침해 확인해 주세요.";
+    return "응답이 너무 오래 걸려서 기다리기를 멈췄습니다. 저장됐을 수도 있으니 새로고침해 확인해 주십시오.";
 
   const code = codeOf(e);
   const shared = sharedMessage(code);
   if (shared) return shared;
 
-  if (code === "CONFLICT") return "이미 보드에 있는 게임이에요.";
-  if (code === "NOT_FOUND") return "보드에 없는 게임이에요. 새로고침해 주세요.";
+  if (code === "CONFLICT") return "이미 보드에 있는 게임입니다.";
+  if (code === "NOT_FOUND") return "보드에 없는 게임입니다. 새로고침해 주십시오.";
   /* 우리 입력 경계에 걸렸다 = 우리 쪽 결함이다. 사용자가 고칠 수 있는 게 없고 재시도로도
      안 풀리니, 재시도를 권하는 대신 그 사실을 알린다. */
   if (code === "BAD_REQUEST")
-    return "이 게임은 지금 보드에 넣을 수 없어요. 저장되지 않았어요 — 알려 주시면 고칠게요.";
+    return "이 게임은 지금 보드에 넣을 수 없습니다. 저장되지 않았습니다 — 알려 주시면 고치겠습니다.";
 
   /* 서버가 코드를 줬으니 요청은 닿았다. 여기까지 온 코드는 우리가 안 다루는 종류인데,
      REJECTED_BEFORE_WRITE 에 있으면 쓰기 전에 거절됐음이 확실하므로 단정할 수 있다. */
   if (code && REJECTED_BEFORE_WRITE.has(code))
-    return "저장하지 못했어요. 잠시 후 다시 시도해 주세요.";
+    return "저장하지 못했습니다. 잠시 후 다시 시도해 주십시오.";
 
   /* 남은 둘: (a) 서버가 코드를 줬지만 어느 단계에서 죽었는지 모르는 경우(INTERNAL_SERVER_ERROR
      등), (b) 코드도 없고 abort 도 아닌 경우(연결 실패, isAborted 가 못 알아본 중단). 둘 다
      저장 여부를 모른다 — **원인을 말하지 않고** 확인 방법만 준다. 정직함이 isAborted 나
      코드 목록의 완전성에 매달리지 않도록, 모를 때의 기본값은 항상 이쪽이다. */
-  return "저장됐는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
+  return "저장됐는지 확인하지 못했습니다. 새로고침해서 확인해 주십시오.";
 }
 
 /* 수정 실패. writeErrorMessage 와 **CONFLICT 의 뜻이 다르다** — 그 하나 때문에 갈랐다.
@@ -113,14 +113,14 @@ export function writeErrorMessage(e: unknown): string {
    add 의 CONFLICT 는 category_id UNIQUE, 즉 "이미 보드에 있는 게임"이다. update 는 그 제약을
    건드리지 않으므로 그 코드가 올 길이 없고, 대신 **폼이 읽은 플레이 날짜가 낡았을 때** 서버가
    CONFLICT 로 거절한다(features/games/service 의 PlayDateChangedElsewhere). 둘을 한 문구로
-   뭉치면 남의 일정 변경을 덮지 않으려고 막은 저장에 "이미 보드에 있는 게임이에요"가 뜬다 —
+   뭉치면 남의 일정 변경을 덮지 않으려고 막은 저장에 "이미 보드에 있는 게임입니다"가 뜬다 —
    사용자는 원인도 못 알아보고 할 일(새로고침)도 못 듣는다(적대적 리뷰 7라운드가 잡은 자리).
 
    나머지 분기는 저장 어휘가 그대로 맞으므로 writeErrorMessage 에 위임한다 — deleteErrorMessage
    와 달리 조작 명사가 같아서(둘 다 저장한다) 문구를 다시 쓸 이유가 없다. */
 export function updateErrorMessage(e: unknown): string {
   if (codeOf(e) === "CONFLICT")
-    return "다른 곳에서 이 게임의 플레이 날짜를 먼저 바꿨어요. 저장하지 않았어요 — 새로고침해서 다시 편집해 주세요.";
+    return "다른 곳에서 이 게임의 플레이 날짜를 먼저 바꿨습니다. 저장하지 않았습니다 — 새로고침해서 다시 편집해 주십시오.";
   return writeErrorMessage(e);
 }
 
@@ -133,13 +133,13 @@ export function updateErrorMessage(e: unknown): string {
    조작 명사만 바꾼 게 아니라 **도달 가능한 코드 집합이 다르다** — 그래서 verb 파라미터가
    아니라 별도 함수다. remove 는 CONFLICT 를 낼 수 없고, 없는 id 는 오류가 아니라
    `deleted:false` 성공이라 NOT_FOUND 도 안 온다(service.removeGame 의 멱등성 주석).
-   그 둘의 문구("이미 보드에 있는 게임이에요"·"보드에 없는 게임이에요")를 삭제판에 두면
+   그 둘의 문구("이미 보드에 있는 게임입니다"·"보드에 없는 게임입니다")를 삭제판에 두면
    도달하지도 않을 거짓말을 유지보수하게 된다. 분기 구조와 판단 근거는 위와 같다 —
    isAborted / sharedMessage / REJECTED_BEFORE_WRITE 를 그대로 공유한다. */
 export function deleteErrorMessage(e: unknown): string {
   // 멈춘 건 기다림이지 요청이 아니다 — 서버에 닿았는지도, 지워졌는지도 모른다.
   if (isAborted(e))
-    return "응답이 너무 오래 걸려서 기다리기를 멈췄어요. 삭제됐을 수도 있으니 새로고침해 확인해 주세요.";
+    return "응답이 너무 오래 걸려서 기다리기를 멈췄습니다. 삭제됐을 수도 있으니 새로고침해 확인해 주십시오.";
 
   const code = codeOf(e);
   const shared = sharedMessage(code);
@@ -147,10 +147,10 @@ export function deleteErrorMessage(e: unknown): string {
 
   // 쓰기 전에 거절된 게 확실한 코드 — 삭제에선 인가 실패(위 shared)와 입력 검증뿐이다.
   if (code && REJECTED_BEFORE_WRITE.has(code))
-    return "삭제하지 못했어요. 잠시 후 다시 시도해 주세요.";
+    return "삭제하지 못했습니다. 잠시 후 다시 시도해 주십시오.";
 
   // 모를 때의 기본값(INTERNAL_SERVER_ERROR·연결 실패). 원인을 말하지 않고 확인 방법만 준다.
-  return "삭제됐는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
+  return "삭제됐는지 확인하지 못했습니다. 새로고침해서 확인해 주십시오.";
 }
 
 /* 제안 보내기 실패. 조작 명사가 "저장"이 아니라 **"보내기"** 라 writeErrorMessage 를 못 쓴다 —
@@ -165,25 +165,25 @@ export function deleteErrorMessage(e: unknown): string {
 export function suggestErrorMessage(e: unknown): string {
   // 멈춘 건 기다림이지 요청이 아니다 — 갔는지 안 갔는지 모른다(위 원칙).
   if (isAborted(e))
-    return "응답이 너무 오래 걸려서 기다리기를 멈췄어요. 보내졌을 수도 있으니 새로고침해 확인해 주세요.";
+    return "응답이 너무 오래 걸려서 기다리기를 멈췄습니다. 보내졌을 수도 있으니 새로고침해 확인해 주십시오.";
 
   const code = codeOf(e);
   // 제안은 로그인만 요구하므로 이 자리의 실패는 사실상 세션 만료다.
   if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
-    return "로그인이 만료됐어요. 다시 로그인하면 보낼 수 있어요.";
+    return "로그인이 만료됐습니다. 다시 로그인하면 보낼 수 있습니다.";
   if (code === "CONFLICT")
-    return "이 게임엔 이미 보낸 제안이 있어요. 그 제안이 처리되면 다시 보낼 수 있어요.";
+    return "이 게임엔 이미 보낸 제안이 있습니다. 그 제안이 처리되면 다시 보낼 수 있습니다.";
   if (code === "BAD_REQUEST")
-    return "지금 값과 똑같아요 — 고칠 값을 바꾸거나 한마디를 남겨 주세요.";
-  if (code === "NOT_FOUND") return "보드에서 사라진 게임이에요. 새로고침해 주세요.";
+    return "지금 값과 똑같습니다 — 고칠 값을 바꾸거나 한마디를 남겨 주십시오.";
+  if (code === "NOT_FOUND") return "보드에서 사라진 게임입니다. 새로고침해 주십시오.";
   if (code === "TOO_MANY_REQUESTS")
-    return "아직 처리 안 된 제안이 너무 많아요. 처리되면 더 보낼 수 있어요.";
+    return "아직 처리 안 된 제안이 너무 많습니다. 처리되면 더 보낼 수 있습니다.";
 
   if (code && REJECTED_BEFORE_WRITE.has(code))
-    return "제안을 보내지 못했어요. 잠시 후 다시 시도해 주세요.";
+    return "제안을 보내지 못했습니다. 잠시 후 다시 시도해 주십시오.";
 
   // 모를 때의 기본값 — 원인을 말하지 않고 확인 방법만 준다.
-  return "제안이 보내졌는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
+  return "제안이 보내졌는지 확인하지 못했습니다. 새로고침해서 확인해 주십시오.";
 }
 
 /* 제안 처리(반영함·거절) 표시 실패. 관리자용이고, 여기서 실패해도 **게임은 이미 반영된 뒤일 수
@@ -192,11 +192,11 @@ export function suggestErrorMessage(e: unknown): string {
    "제안함에 그 줄이 남았다"뿐이다. */
 export function resolveErrorMessage(e: unknown): string {
   if (isAborted(e))
-    return "응답이 너무 오래 걸려서 기다리기를 멈췄어요. 제안함을 새로고침해 확인해 주세요.";
+    return "응답이 너무 오래 걸려서 기다리기를 멈췄습니다. 제안함을 새로고침해 확인해 주십시오.";
   const code = codeOf(e);
   const shared = sharedMessage(code);
   if (shared) return shared;
   if (code && REJECTED_BEFORE_WRITE.has(code))
-    return "제안 상태를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.";
-  return "제안 상태가 바뀌었는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
+    return "제안 상태를 바꾸지 못했습니다. 잠시 후 다시 시도해 주십시오.";
+  return "제안 상태가 바뀌었는지 확인하지 못했습니다. 새로고침해서 확인해 주십시오.";
 }

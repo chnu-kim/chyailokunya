@@ -15,7 +15,11 @@ import { isClearedStateValid } from "@/core/games";
    폼의 빈 <input type="date"> 가 "" 를 보내는데 "날짜 없음"의 표현이 둘이 되면 분기가 갈린다. */
 const dateInput = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-  z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 해요").nullable().default(null),
+  z
+    .string()
+    .refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 합니다")
+    .nullable()
+    .default(null),
 );
 
 /* 한마디(선택). **상한 500 이 이 경계의 핵심이다** — 관리자 제안함이 이 글을 그대로 그리고,
@@ -53,7 +57,7 @@ export const createSuggestionInput = z
      games 폼과 **같은 core 함수**를 나눠 쓴다. 갈리면 제안으로는 저장되는데 반영하려는 순간
      게임 쪽 경계가 거절하는 조합이 생겨, 관리자가 손쓸 수 없는 제안이 제안함에 남는다. */
   .refine((v) => isClearedStateValid(v.cleared, v.clearedDate), {
-    message: "클리어 표시를 해야 클리어한 날짜를 넣을 수 있어요",
+    message: "클리어 표시를 해야 클리어한 날짜를 넣을 수 있습니다",
     path: ["clearedDate"],
   });
 export type CreateSuggestionInput = z.infer<typeof createSuggestionInput>;

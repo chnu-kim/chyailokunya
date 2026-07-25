@@ -36,7 +36,7 @@ export const gamesRouter = router({
       } catch (e) {
         // category_id UNIQUE: 한 카테고리 = 보드 1회. 사용자에게 친절한 충돌로 바꿔 준다.
         if (isUniqueViolation(e)) {
-          throw new TRPCError({ code: "CONFLICT", message: "이미 보드에 있는 게임이에요." });
+          throw new TRPCError({ code: "CONFLICT", message: "이미 보드에 있는 게임입니다." });
         }
         throw e;
       }
@@ -56,7 +56,7 @@ export const gamesRouter = router({
         if (e instanceof MultiDayScheduleLocked) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "여러 날 편성된 게임이라 여기선 날짜를 못 고쳐요 — 일정에서 고쳐 주세요.",
+            message: "여러 날 편성된 게임이라 여기선 날짜를 못 고칩니다 — 일정에서 고쳐 주십시오.",
           });
         }
         /* 폼이 열린 뒤 일정이 딴 데서 바뀌었다. **저장되지 않았다고 단정할 수 있다** — 서버가
@@ -66,13 +66,13 @@ export const gamesRouter = router({
           throw new TRPCError({
             code: "CONFLICT",
             message:
-              "다른 곳에서 이 게임의 플레이 날짜를 먼저 바꿨어요. 저장하지 않았어요 — 새로고침해서 다시 시도해 주세요.",
+              "다른 곳에서 이 게임의 플레이 날짜를 먼저 바꿨습니다. 저장하지 않았습니다 — 새로고침해서 다시 시도해 주십시오.",
           });
         }
         throw e;
       }
       if (!row) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "보드에 없는 게임이에요." });
+        throw new TRPCError({ code: "NOT_FOUND", message: "보드에 없는 게임입니다." });
       }
       return row;
     }),

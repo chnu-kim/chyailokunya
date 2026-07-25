@@ -12,7 +12,7 @@ import { z } from "zod";
 import { isIsoDate, toIsoDate, weekStartOf } from "@/core/calendar";
 
 // 'YYYY-MM-DD' 이면서 실재하는 날짜(core/calendar 가 정본 — Temporal 판정이라 확장 표기를 거절).
-const isoDate = z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 해요");
+const isoDate = z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 합니다");
 
 /* 하루 중 시각 'HH:MM'(KST 라벨, 24시간). 빈 문자열은 null 로 접는다 — "시각 미정"의 표현이
    ""와 null 둘이 되면 정렬·표시 분기가 갈린다(games 날짜 입력과 같은 패턴). 시각은 선택이다
@@ -21,7 +21,7 @@ const startTime = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? null : v),
   z
     .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM (24시간) 형식이어야 해요")
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM (24시간) 형식이어야 합니다")
     .nullable()
     .default(null),
 );
@@ -62,7 +62,7 @@ export const saveWeekInput = z
       ctx.addIssue({
         code: "custom",
         path: ["weekStartDate"],
-        message: "주의 시작(월요일)이어야 해요",
+        message: "주의 시작(월요일)이어야 합니다",
       });
     }
     // 각 항목이 그 주에 속하는가 — 안 그러면 캘린더·주간표의 "이 주" 뷰와 저장이 어긋난다.
@@ -74,7 +74,7 @@ export const saveWeekInput = z
         ctx.addIssue({
           code: "custom",
           path: ["entries", i, "scheduledDate"],
-          message: "그 주에 속한 날짜여야 해요",
+          message: "그 주에 속한 날짜여야 합니다",
         });
       }
     });
@@ -88,7 +88,7 @@ export const getWeekInput = z
     (v) =>
       !isIsoDate(v.weekStartDate) || weekStartOf(toIsoDate(v.weekStartDate)) === v.weekStartDate,
     {
-      message: "주의 시작(월요일)이어야 해요",
+      message: "주의 시작(월요일)이어야 합니다",
       path: ["weekStartDate"],
     },
   );

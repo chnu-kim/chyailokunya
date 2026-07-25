@@ -39,6 +39,14 @@ jobs:
         run: npm run lint
       - name: typecheck
         run: npm run typecheck
+      # next-env.d.ts 는 생성물이지만 커밋한다(AGENTS.md) — 그래야 typecheck 가 build 를
+      # 선행하지 않고도 선다. 그런데 **dev 서버가 그 파일을 `.next/dev/types/...` 로 다시
+      # 쓴다**: 로컬에서 e2e 를 돌린 뒤 무심코 커밋하면 dev 전용 경로가 저장소에 들어가고,
+      # dev 를 안 돌리는 환경에선 typegen 이 그걸 도로 덮어 검증만 해도 트리가 더러워진다.
+      # 위 typecheck(=next typegen + tsc)가 방금 정본 경로를 썼으므로, 여기서 diff 가 나면
+      # 커밋된 값이 틀렸다는 뜻이다. 2026-07-26 에 같은 실수를 두 번 해서 기계로 옮겼다.
+      - name: 생성 타입 선언이 dev 산출물을 가리키지 않는다
+        run: git diff --exit-code -- next-env.d.ts
       - name: boundaries (dependency-cruiser)
         run: npm run boundaries
       - name: unit (Vitest · Workers pool)

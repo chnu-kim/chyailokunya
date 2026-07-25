@@ -33,22 +33,22 @@ export const suggestionsRouter = router({
       if (isUniqueViolation(e)) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "이 게임엔 이미 보낸 제안이 있어요. 그 제안이 처리되면 다시 보낼 수 있어요.",
+          message: "이 게임엔 이미 보낸 제안이 있습니다. 그 제안이 처리되면 다시 보낼 수 있습니다.",
         });
       }
       if (e instanceof SuggestionGameNotFound) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "보드에 없는 게임이에요." });
+        throw new TRPCError({ code: "NOT_FOUND", message: "보드에 없는 게임입니다." });
       }
       if (e instanceof EmptySuggestion) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "지금 값과 똑같아요 — 고칠 값을 바꾸거나 한마디를 남겨 주세요.",
+          message: "지금 값과 똑같습니다 — 고칠 값을 바꾸거나 한마디를 남겨 주십시오.",
         });
       }
       if (e instanceof TooManyOpenSuggestions) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
-          message: `아직 처리 안 된 제안이 ${OPEN_SUGGESTION_LIMIT}개예요. 처리되면 더 보낼 수 있어요.`,
+          message: `아직 처리 안 된 제안이 ${OPEN_SUGGESTION_LIMIT}개입니다. 처리되면 더 보낼 수 있습니다.`,
         });
       }
       throw e;
@@ -75,7 +75,7 @@ export const suggestionsRouter = router({
       // authorizedProcedure 통과 = 인가된 요청이지만 actor 타입은 nullable 이다(공개 읽기와 같은
       // 컨텍스트라서). 처리자를 기록해야 하므로 여기서 좁힌다.
       if (!ctx.actor) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "로그인이 필요해요" });
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "로그인이 필요합니다" });
       }
       return resolveSuggestion(ctx.db, { ...input, resolvedByUserId: ctx.actor.userId });
     }),

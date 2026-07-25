@@ -210,7 +210,7 @@ export function GameBoard({
     if (!game) {
       // 제안함을 열어 둔 사이 그 게임이 지워졌다 — 열 폼이 없으므로 정직하게 말하고 멈춘다.
       setApplying(null);
-      setAnnouncement("그 게임이 보드에 없어요 — 새로고침해 주세요");
+      setAnnouncement("그 게임이 보드에 없습니다 — 새로고침해 주십시오");
       return;
     }
     setEditing(game);
@@ -244,7 +244,7 @@ export function GameBoard({
        반영할 수 있고, 왜 남았는지는 라이브 영역이 말한다. */
     if (!dateApplied) {
       setAnnouncement(
-        "클리어만 반영했어요 — 여러 날 편성이라 날짜는 일정에서 고쳐 주세요. 제안은 그대로 뒀어요",
+        "클리어만 반영했습니다 — 여러 날 편성이라 날짜는 일정에서 고쳐 주십시오. 제안은 그대로 뒀습니다",
       );
       return;
     }
@@ -262,9 +262,9 @@ export function GameBoard({
         { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
       );
       if (resolved) setPending((n) => Math.max(0, n - 1));
-      else setAnnouncement("저장했어요 — 그 제안은 다른 관리자가 이미 처리해 뒀더라고요");
+      else setAnnouncement("저장했습니다 — 그 제안은 다른 관리자가 이미 처리했습니다");
     } catch {
-      setAnnouncement("반영은 됐지만 제안함 표시를 못 바꿨어요 — 제안함에서 확인해 주세요");
+      setAnnouncement("반영은 됐지만 제안함 표시를 못 바꿨습니다 — 제안함에서 확인해 주십시오");
     }
   }
 
@@ -373,6 +373,16 @@ export function GameBoard({
           onSent={(message) => {
             setSuggesting(null);
             setAnnouncement(message);
+            /* **아래 상세도 함께 닫는다.** 제안을 보내고 나면 그 카드에서 할 일이 끝났는데,
+               안 닫으면 성공 화면 뒤로 상세가 남아 카드 두 장이 겹쳐 보인다(사용자 지적).
+               취소하고 돌아갈 자리가 필요한 수정·삭제와 다른 지점이다 — 저쪽은 되돌아갈 값이
+               있지만 여기선 이미 보냈다.
+
+               곧장 언마운트하지 않고 닫기 신호를 세우는 건 셸이 히스토리 엔트리를 되돌릴
+               자리를 잃지 않게 하려는 것이다(onRemoved 와 같은 규약). 추가 요청은 보드 상단에서
+               열려 상세가 없으므로 그때 신호를 세우면 **다음에 여는 상세가 즉시 닫힌다** —
+               열려 있을 때만 세운다. */
+            if (detail) setDetailClosing(true);
           }}
           onClose={() => setSuggesting(null)}
         />
@@ -532,7 +542,7 @@ export function GameBoard({
           {games.length === 0 && (
             <div className="grid-empty" data-od-id="game-grid-empty">
               <span className="t-hand">텅 비었네냥…</span>
-              <span>아직 등록된 게임이 없어요.</span>
+              <span>아직 등록된 게임이 없습니다.</span>
             </div>
           )}
 
@@ -642,7 +652,7 @@ function GameDetail({
           </div>
         ) : (
           <p className="composer__hint" data-od-id="detail-signin-hint">
-            치지직으로 로그인하면 고칠 값을 제안할 수 있어요.
+            치지직으로 로그인하면 고칠 값을 제안할 수 있습니다.
           </p>
         ))}
 
@@ -967,7 +977,7 @@ function GameEditor({
       <form className="composer__detail" onSubmit={onSave}>
         {/* 첫 필드가 플레이 날짜라 안내도 그 순서로 말한다 — 클리어만 언급하면 바로 아래
             날짜 입력이 무엇인지 설명 없이 서 있다. */}
-        <p className="composer__hint">플레이한 날과 클리어 여부를 고칠 수 있어요.</p>
+        <p className="composer__hint">플레이한 날과 클리어 여부를 고칠 수 있습니다.</p>
 
         <div className="composer__chosen" data-od-id="game-editor-game">
           {game.posterImageUrl ? (
@@ -1003,7 +1013,7 @@ function GameEditor({
 
         {loadFailed && (
           <p className="err" role="alert">
-            일정을 못 불러와서 저장할 수 없어요. 닫았다 다시 열어 주세요.
+            일정을 못 불러와서 저장할 수 없습니다. 닫았다 다시 열어 주십시오.
           </p>
         )}
 

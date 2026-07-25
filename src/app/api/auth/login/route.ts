@@ -11,7 +11,7 @@ import { KNOWN_PAGE_PATHS } from "@/features/routes";
 export async function GET(req: Request) {
   const { env } = getCloudflareContext();
   if (!env.CHZZK_CLIENT_ID || !env.AUTH_URL) {
-    return new NextResponse("로그인이 아직 설정되지 않았어요", { status: 503 });
+    return new NextResponse("로그인이 아직 설정되지 않았습니다", { status: 503 });
   }
   const state = crypto.randomUUID();
   const authUrl = new URL("https://chzzk.naver.com/account-interlock");

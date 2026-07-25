@@ -12,7 +12,11 @@ import { isClearedStateValid } from "@/core/games";
    미래 날짜는 허용한다 — 발매 예정작을 미리 올릴 수 있다. */
 const dateInput = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-  z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 해요").nullable().default(null),
+  z
+    .string()
+    .refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 합니다")
+    .nullable()
+    .default(null),
 );
 
 /* 같은 날짜 입력이되 **기본값이 없다.** 세 상태를 값이 아니라 키의 유무로 가른다:
@@ -32,7 +36,7 @@ const dateInput = z.preprocess(
 const playDateInput = z
   .preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-    z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 해요").nullable(),
+    z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 합니다").nullable(),
   )
   .optional();
 
@@ -81,7 +85,7 @@ export const addGameInput = z
         .trim()
         .min(1)
         .max(2048)
-        .regex(/^https:\/\//, "https URL 이어야 해요")
+        .regex(/^https:\/\//, "https URL 이어야 합니다")
         .nullable()
         .default(null),
     ),
@@ -101,7 +105,7 @@ export const addGameInput = z
   /* 안 깬 게임에 클리어 날짜가 붙는 모순을 입력 경계에서 막는다 — DB CHECK 와 이중이고
      판정은 updateGameInput 과 같은 core 함수를 나눠 쓴다(둘이 갈리면 폼마다 다른 걸 허용한다). */
   .refine((v) => isClearedStateValid(v.cleared, v.clearedDate), {
-    message: "클리어 표시를 해야 클리어한 날짜를 넣을 수 있어요",
+    message: "클리어 표시를 해야 클리어한 날짜를 넣을 수 있습니다",
     path: ["clearedDate"],
   });
 export type AddGameInput = z.infer<typeof addGameInput>;
@@ -141,14 +145,14 @@ export const updateGameInput = z
   })
   .refine((v) => isClearedStateValid(v.cleared, v.clearedDate), {
     // path 를 clearedDate 에 준다 — 폼이 어느 입력 아래에 오류를 띄울지 알아야 한다.
-    message: "클리어 표시를 해야 클리어한 날짜를 넣을 수 있어요",
+    message: "클리어 표시를 해야 클리어한 날짜를 넣을 수 있습니다",
     path: ["clearedDate"],
   })
   /* 날짜를 바꾸겠다면 "무엇에서 바꾸는지"를 반드시 함께 말해야 한다 — precondition 없이
      playedDate 만 오면 서버가 stale 여부를 판단할 수 없다. 키가 하나만 실린 요청은 규약을
      모르는 호출자이므로 입력 경계에서 막는다. */
   .refine((v) => (v.playedDate === undefined) === (v.playedDateWas === undefined), {
-    message: "플레이 날짜를 바꿀 땐 열었을 때의 날짜도 함께 보내야 해요",
+    message: "플레이 날짜를 바꿀 땐 열었을 때의 날짜도 함께 보내야 합니다",
     path: ["playedDateWas"],
   });
 export type UpdateGameInput = z.infer<typeof updateGameInput>;

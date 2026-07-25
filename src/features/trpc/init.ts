@@ -34,7 +34,7 @@ export function authorizedProcedure(authority: Authority) {
   return t.procedure.use(async ({ ctx, next }) => {
     const authorities = await ctx.authoritiesOf();
     if (!authorities.has(authority)) {
-      throw new TRPCError({ code: "FORBIDDEN", message: `권한이 필요해요: ${authority}` });
+      throw new TRPCError({ code: "FORBIDDEN", message: `권한이 필요합니다: ${authority}` });
     }
     return next();
   });
@@ -56,7 +56,7 @@ export function authorizedProcedure(authority: Authority) {
    보장된다"가 타입으로 읽힌다(role/router.ts 가 방어로 한 번 더 검사하던 자리를 없앤다). */
 export const authenticatedProcedure = t.procedure.use(({ ctx, next }) => {
   if (!ctx.actor) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: "로그인이 필요해요" });
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "로그인이 필요합니다" });
   }
   return next({ ctx: { ...ctx, actor: ctx.actor } });
 });

@@ -285,8 +285,8 @@ export function GameComposer({
     selected || !state.searched
       ? ""
       : state.results.length > 0
-        ? `‘${query}’ 검색 결과 ${state.results.length}건이에요.`
-        : `‘${query}’ 검색 결과가 없어요. 목록 맨 위에서 직접 추가할 수 있어요.`;
+        ? `‘${query}’ 검색 결과 ${state.results.length}건입니다.`
+        : `‘${query}’ 검색 결과가 없습니다. 목록 맨 위에서 직접 추가할 수 있습니다.`;
 
   function onAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -351,7 +351,7 @@ export function GameComposer({
       {selected ? (
         <form className="composer__detail" onSubmit={onAdd}>
           <p className="composer__hint">
-            날짜와 클리어는 몰라도 괜찮아요 — 비워 두고 나중에 카드에서 채울 수 있어요.
+            날짜와 클리어는 몰라도 됩니다 — 비워 두고 나중에 카드에서 채울 수 있습니다.
           </p>
 
           <div className="composer__chosen" data-od-id="composer-chosen">
@@ -455,7 +455,8 @@ export function GameComposer({
                 그게 소음이고, describedby 는 입력에 포커스가 갈 때 한 번 읽힌다. 눈으로 보는
                 사람에겐 커서 표시가 같은 말을 하므로 화면엔 안 낸다. */}
             <p className="sr-only" id={INPUT_HINT_ID}>
-              이름을 치면 자동으로 찾아요. 결과가 뜨면 위아래 화살표 키로 고르고 엔터 키로 선택해요.
+              이름을 치면 자동으로 찾습니다. 결과가 뜨면 위아래 화살표 키로 고르고 엔터 키로
+              선택합니다.
             </p>
           </form>
 
@@ -470,7 +471,7 @@ export function GameComposer({
               미리 말해 둔다. */}
           {query === "" && (
             <p className="composer__hint" data-od-id="composer-empty">
-              치지직 카테고리에서 찾아 붙여요. 목록에 없는 게임도 직접 넣을 수 있어요.
+              치지직 카테고리에서 찾아 붙입니다. 목록에 없는 게임도 직접 넣을 수 있습니다.
             </p>
           )}
 
@@ -579,7 +580,7 @@ export function GameComposer({
       {/* 단계 전환은 화면이 통째로 바뀌는 사건이라 포커스 이동만으로는 맥락이 안 실린다 —
           보드의 announcement 규약과 같이 한 줄로 알린다. */}
       <p className="sr-only" role="status">
-        {selected ? selected.categoryValue + " 선택됨. 추가하려면 확인하세요." : ""}
+        {selected ? selected.categoryValue + " 선택됨. 추가하려면 확인하십시오." : ""}
       </p>
 
       {/* 검색 결론을 알리는 자리. 자동 검색이라 "검색 버튼을 눌렀다"는 사건이 아예 없어서,
