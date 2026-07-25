@@ -5,12 +5,14 @@ import { roleRouter } from "./auth/router";
 import { chzzkRouter } from "./chzzk/router";
 import { gamesRouter } from "./games/router";
 import { scheduleRouter } from "./schedule/router";
+import { suggestionsRouter } from "./suggestions/router";
 
 export const appRouter = router({
   games: gamesRouter,
   chzzk: chzzkRouter,
   role: roleRouter,
   schedule: scheduleRouter,
+  suggestions: suggestionsRouter,
 });
 
 export type AppRouter = typeof appRouter;

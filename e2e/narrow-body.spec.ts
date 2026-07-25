@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { expectSignedIn, signIn } from "./session";
+import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
 /* 좁은 폭 **본문** 회귀 방지(이슈 #45). nav-touch-target.spec.ts 가 크롬을 맡고 여기가 그
    아래를 맡는다 — 전에는 좁은 폭을 보는 스펙이 둘 다 nav 만 재서, 페이지 본문은 어느 폭에서도
@@ -552,4 +552,40 @@ test("560/561 경계: 바텀시트가 켜지고, 한 픽셀 넓으면 가운데 
     Math.abs(box.x - (561 - box.x - box.width)),
     `561px: 좌우 여백이 다르다(왼 ${box.x} / 오른 ${561 - box.x - box.width})`,
   ).toBeLessThanOrEqual(0.5);
+});
+
+/* 팬 제안 진입점의 44 하한(ADR-0025). 위 블록과 **신원이 갈린다** — 「들어온 제안」은 관리자에게만,
+   「게임 추가 요청」·「수정 제안」은 권한이 빈 팬에게만 뜨므로 한 세션으로는 셋을 다 못 잰다.
+
+   여기서 재야 하는 이유: `.btn` 계열엔 min-height 가 없어 패딩만으로 서면 좁은 폭에서 44 가
+   조용히 깨진다(.head__act 가 하한을 직접 박는 이유). 그리고 이 셋은 위 목록에 없어 기존
+   스펙이 안 본다 — 셀렉터를 손으로 열거하는 구조라 새 조작은 여기 적어야 검사에 든다. */
+test.describe("본문 터치 타깃 — 팬 제안", () => {
+  for (const width of NARROW) {
+    test(`${width}px /games: 제안함·추가 요청·수정 제안이 44 하한을 지킨다`, async ({
+      page,
+      baseURL,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      // 관리자에게만 보이는 제안함부터 잰다.
+      await signIn(page.context(), baseURL!);
+      await page.goto("/games");
+      await expectSignedIn(page);
+      await page.evaluate(() => document.fonts.ready);
+      await expectTouchTarget(page.locator('[data-od-id="inbox-open"]'), "들어온 제안");
+
+      // 신원을 팬으로 바꾼다 — 나머지 둘은 권한이 **없어야** 뜬다.
+      await page.context().clearCookies();
+      await signIn(page.context(), baseURL!, E2E_FAN);
+      await page.goto("/games");
+      await expectSignedIn(page);
+      await page.evaluate(() => document.fonts.ready);
+      await expectTouchTarget(page.locator('[data-od-id="suggest-add-open"]'), "게임 추가 요청");
+
+      // 수정 제안은 카드를 연 다음에 만난다(수정·삭제와 같은 자리).
+      await page.locator('[data-od-id="game-open-1"]').click({ timeout: 3000 });
+      await expect(page.locator('dialog[data-od-id="game-detail"]')).toBeVisible();
+      await expectTouchTarget(page.locator('[data-od-id="game-suggest-1"]'), "수정 제안");
+    });
+  }
 });

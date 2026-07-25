@@ -28,6 +28,30 @@
   font-size: var(--text-xl);
   color: var(--fg);
 }
+/* 보드 전체에 걸리는 조작(제안함·추가 요청). .head__row 의 **다음 줄**에 선다 — 같은 행에
+   넣으면 총계와 버튼이 한 flex 를 다투다 좁은 폭에서 총계가 버튼 아래로 밀려, "총 8개"가
+   제목이 아니라 버튼의 부제처럼 읽힌다. */
+.head__acts {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+}
+/* .btn 계열엔 min-height 가 없다. 지금 패딩·글자로는 46.39px 라 하한이 실제로 걸리진 않지만
+   **여유가 2.4px 뿐이라** 글자 크기나 상하 패딩을 한 단계만 줄이면 곧장 미달한다(실측
+   2026-07-26, 320·390px). .composer__btn 이 같은 이유로 하한을 직접 박는다.
+   배지를 품으므로 inline-flex 로 세운다. */
+.head__act {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* 미처리 제안 수. 새 부품을 만들지 않고 .chip--ink 를 그대로 입는다 — 잉크 면 + 뒤집힌 글자로
+   대비가 이미 검증된 조각이다. 숫자 하나뿐이라 좌우 패딩만 좁힌다(기본 12px 는 라벨용). */
+.head__badge {
+  padding: 2px 8px;
+}
 .board {
   padding-bottom: var(--space-9);
 }
@@ -705,6 +729,159 @@ dialog.composer[open]::backdrop {
 .detail__del:hover {
   background: var(--danger);
   color: var(--bg);
+}
+
+/* ---- 팬 제안 폼(ADR-0025) ----------------------------------------------------
+   팬이 값을 바꿔 보내는 자리. 표면은 다른 모달과 같은 .paper 라 입력 테두리가 두 테마 모두
+   살아 있다(사진지 섬이었다면 --border-strong 이 크림 위 1.01:1 로 사라진다). */
+
+/* 제안이 무엇을 바꾸자는 건지 판단하려면 출발점이 보여야 한다. 값 목록 자체는 상세와 같은
+   부품을 그대로 입고(GameFacts → .detail__facts), 여기선 그걸 담는 상자만 만든다 — 면을 한
+   겹 낮춰 "읽는 값"과 아래 "고치는 입력"이 눈으로 갈린다. --fg 는 --surface-2 위 라이트
+   16.06:1 / 다크 15.41:1, 라벨의 --fg-muted 는 5.78:1 / 7.23:1 로 11px 4.5:1 게이트를 넘는다. */
+.suggest__current {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+/* 폼 안의 구획 제목. 라벨(11px mono)보다 한 단계 위 무게가 필요하다 — 이 줄은 필드 **이름**이
+   아니라 "여기부터 다른 이야기"를 말한다. --fg 는 .paper 위 라이트 14.3:1 / 다크 14.0:1. */
+.suggest__subhead {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--fg);
+  margin: var(--space-5) 0 0;
+}
+/* 상자 안의 첫 줄이라 위 마진을 지운다 — 상자 패딩이 이미 띄운다. */
+.suggest__current .suggest__subhead {
+  margin: 0 0 var(--space-3);
+}
+/* 보낸 뒤의 한 줄. 폼 안내(.composer__hint)보다 위 무게가 필요하다 — 이 화면에서 사용자가
+   찾는 답은 "갔나?" 하나이고, 그 답이 설명문과 같은 크기면 눈이 먼저 닿지 않는다.
+   --fg 는 .paper 위 라이트 14.3:1 / 다크 14.0:1. */
+.suggest__sent {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: 1.2;
+  color: var(--fg);
+  margin: var(--space-4) 0 0;
+}
+/* 여러 줄 입력. .field 를 그대로 입되 **세로로만** 늘어나게 한다 — 가로 resize 를 열어 두면
+   사용자가 부모 폭을 넘겨 모달에 가로 스크롤이 생긴다(어느 폭에서도 가로 스크롤 없음). */
+.suggest__note {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+}
+
+/* ---- 관리자 제안함(ADR-0025) --------------------------------------------------
+   들어온 제안을 모아 보고 반영·거절로 넘기는 목록. 폭은 상세와 같은 .composer--detail 을 쓴다. */
+.inbox {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+/* 줄을 **선**으로 가른다. 면(--surface-2)으로 채우면 모달 표면 위에 두 겹이 되고, 목록이
+   길어질수록 그 면이 화면을 덮어 정작 읽어야 할 팬의 글(.inbox__note, 저건 면이다)과
+   위계가 뒤집힌다. */
+.inbox__item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+}
+.inbox__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.inbox__target {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+/* 누가·언제. 11px 라 4.5:1 게이트 — --fg-muted 는 .paper 위 라이트 6.39:1 / 다크 6.69:1. */
+.inbox__meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--fg-muted);
+}
+/* 종류·상태 한 줄(추가 요청 · 사라진 게임 · 한마디만 온 제안). 12px 라 4.5:1 게이트를 같은
+   --fg-muted 가 넘긴다. */
+.inbox__kind {
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  margin: var(--space-2) 0 0;
+}
+/* 현재 → 제안. .detail__facts 와 같은 2열 정의 목록이지만 dt/dd 쌍이 **행마다 div 로 묶여**
+   있어(한 행이 한 변경이다) grid 를 그 행에 건다. */
+.inbox__diff {
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.inbox__change {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4);
+  align-items: center;
+}
+.inbox__change dt {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+.inbox__change dd {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-base);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+/* 바뀌기 전 값은 한 단계 낮춘다 — 관리자가 판단할 것은 "무엇이 될 것인가"다. **취소선은 안
+   쓴다**: 이 값은 지워지는 게 아니라 대체되는 것이고, 취소선은 삭제의 어휘라 거짓말이 된다. */
+.inbox__from {
+  color: var(--fg-muted);
+}
+.inbox__arrow {
+  color: var(--fg-muted);
+  margin: 0 var(--space-2);
+}
+.inbox__to {
+  font-weight: 700;
+}
+/* 팬이 쓴 글. 우리가 쓴 문구와 갈리게 면을 한 겹 낮춘다 — --fg 는 --surface-2 위 라이트
+   16.06:1 / 다크 15.41:1. 줄바꿈을 보존하는 건 그게 쓴 사람의 문단 구분이기 때문이고,
+   anywhere 가 함께 있어야 긴 단어 하나가 상자를 넘지 않는다. */
+.inbox__note {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* 반영이 왼쪽(주 행동), 거절이 오른쪽. 둘 다 늘려 한 줄을 유지하는 건 .composer__actions 와
+   같은 판단이다 — 결정이 둘뿐이라 폭을 나눠도 라벨이 안 잘린다. */
+.inbox__acts {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.inbox__acts .composer__btn {
+  flex: 1 1 0;
+  justify-content: center;
 }
 
 /* **flex 단축을 쓰지 않는다.** 한때 `flex: 1 1 200px` 이었는데, 이 필드가 세로 flex 안에

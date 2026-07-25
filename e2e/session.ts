@@ -53,6 +53,17 @@ export const E2E_USER: AccessClaims = {
   channelName: "챠이로 쿠냐",
 };
 
+/* 역할 행이 없는 신원 = member(빈 권한). 팬 제안(ADR-0025)의 계약이 "권한이 빈 사람도 할 수
+   있다"라, admin 인 E2E_USER 로 재면 정확히 그 축을 못 본다. channelId 는 픽스처의
+   provider_user_id 와 글자 그대로 같아야 인가 조회(channelId → user_id)가 이어진다
+   (e2e/fixtures/games.sql 의 팬 블록). 두 스펙이 나눠 쓰므로 여기 둔다 — 스펙마다 적으면
+   픽스처를 고칠 때 한쪽만 낡는다. */
+export const E2E_FAN: AccessClaims = {
+  userId: 2,
+  channelId: "e2e-channel-fan0",
+  channelName: "쿠냐팬",
+};
+
 /* 로그인 상태로 만든다. goto 전에 부른다 — 쿠키는 첫 요청부터 실려야 SSR 이 로그인 nav 를
    그린다(클라이언트가 나중에 고칠 수 없다).
 

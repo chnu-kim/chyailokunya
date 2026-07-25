@@ -11,10 +11,20 @@ import {
   sortGameCards,
 } from "@/core/games";
 import type { GameCard } from "@/features/games/service";
+import { initialPlayDateFor, isPlayDateApplied } from "@/core/suggestions";
+import type { SuggestionListItem } from "@/features/suggestions/service";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
 import { deleteErrorMessage, REQUEST_TIMEOUT_MS, updateErrorMessage } from "./error-message";
-import { ClearedFields, GameDialog, PlayedDateField, useClearedDraft } from "./game-dialog";
+import {
+  ClearedFields,
+  GameDialog,
+  GameFacts,
+  PlayedDateField,
+  useClearedDraft,
+} from "./game-dialog";
+import { SuggestDialog } from "./suggest-dialog";
+import { SuggestionInbox } from "./suggestion-inbox";
 
 /* 게임 보드. 목록의 정본은 D1 이다 — 서버 컴포넌트(page.tsx)가 읽어 props 로 넘기고, 여기선
    쓰기(추가·날짜 수정·삭제)를 한다. 쓰기는 tRPC 뮤테이션(서버 인가가 정본)을 부르고 로컬
@@ -58,18 +68,41 @@ function cssVars(vars: Record<string, string | number>): CSSProperties {
    그보다 오래 남으면 "이 카드가 특별하다"는 잘못된 인상을 준다. */
 const JUST_ADDED_MS = 2000;
 
+/* 컴포저를 여는 방식 두 가지. 빈 객체는 평소의 「게임 추가」이고, initial 이 붙으면 팬의
+   추가 요청을 반영하려고 그 이름·값으로 채워 여는 길이다(ADR-0025). */
+type ComposerOpen = { initial?: React.ComponentProps<typeof GameComposer>["initial"] };
+
 export function GameBoard({
   initialGames,
   canWrite,
   canDelete,
+  signedIn,
+  initialPending,
 }: {
   initialGames: GameCard[];
   canWrite: boolean;
   canDelete: boolean;
+  /* 로그인했는가 — **제안 진입점이 이 값으로 갈린다**(ADR-0025). 한때 보드는 신원을 아예 안
+     받았고 근거는 "member 역할이 없어 로그인해도 얻는 게 없다"였는데(이슈 #22), 제안이 그
+     전제를 뒤집었다: 이제 로그인한 사람만 할 수 있는 일이 실재한다. */
+  signedIn: boolean;
+  // 미처리 제안 수(관리자만). 서버가 세어 넘겨야 배지가 첫 페인트에 뜬다.
+  initialPending: number;
 }) {
   const [games, setGames] = useState(initialGames);
   const [announcement, setAnnouncement] = useState("");
-  const [composing, setComposing] = useState(false);
+  /* 컴포저를 여는 신호이자 그 출발점. 불리언이 아닌 이유는 팬의 **추가 요청을 반영**할 때
+     제안 값을 채워 열기 때문이다 — 두 상태로 갈라 두면 "열렸는데 값이 안 채워진" 조합이
+     표현 가능해진다(연 주체와 값이 한 사실이라 한 상태로 둔다). */
+  const [composing, setComposing] = useState<ComposerOpen | null>(null);
+  /* 제안 폼을 연 대상. GameCard = 그 카드의 수정 제안, "add" = 보드에 없는 게임 추가 요청. */
+  const [suggesting, setSuggesting] = useState<GameCard | "add" | null>(null);
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [pending, setPending] = useState(initialPending);
+  /* 지금 **반영 중인** 제안. 폼이 저장에 성공하면 이 제안을 accepted 로 표시한다 — 두 요청이
+     원자가 아닌 건 알고 받는 한계다(결정 2): 표시가 실패해도 남는 상태는 "제안함에 줄이
+     남음"뿐이고, 게임은 이미 반영됐으며 관리자가 다시 보고 처리하면 끝난다. */
+  const [applying, setApplying] = useState<SuggestionListItem | null>(null);
   /* 열어 둔 카드. 수정·삭제는 **이 위에 겹쳐** 뜬다(닫고 여는 게 아니다) — 그래야 취소했을 때
      상세로 돌아오고, 포커스 복원을 브라우저의 dialog 스택이 그대로 맡는다. 행 전체를 들고
      있는 이유는 아래 editing 과 같다. */
@@ -106,8 +139,9 @@ export function GameBoard({
 
        onUpdated 가 같은 이유로 이미 정렬한다 — 두 쓰기 경로가 다른 규칙을 쓸 이유가 없다. */
     setGames((prev) => sortGameCards([row, ...prev]));
-    setComposing(false);
+    setComposing(null);
     setAnnouncement(row.categoryValue + " 추가됨");
+    void markApplied();
     /* 정렬이 카드를 화면 밖으로 보낼 수 있으므로(날짜를 안 넣으면 날짜 있는 게임들 뒤로
        간다) 그 카드로 포커스를 옮긴다. 스크롤이 아니라 포커스인 이유: 스크롤만 하면 키보드
        사용자는 뷰포트와 포커스가 갈린 채 남는다(모달이 닫히며 포커스는 추가 슬롯으로
@@ -154,17 +188,84 @@ export function GameBoard({
 
   /* 상세 **위에** 겹친 모달이 떠 있는가. 뒤로가기가 왔을 때 셸이 무엇을 할지가 여기서 갈린다
      (GameDialog 의 covered) — 셸은 자기 위에 뭐가 얹혔는지 못 보므로 보드가 알려 준다. */
-  const detailCovered = editing !== null || deleting !== null;
+  const detailCovered = editing !== null || deleting !== null || suggesting !== null;
+
+  /* 제안함의 「반영하기」 — 제안함을 닫고 **기존 폼**을 제안 값으로 채워 연다. 여기서 게임을
+     직접 쓰지 않는 게 이 설계의 핵심이다(결정 2): 저장은 평소의 add/update 경로가 하고, 이
+     함수는 그 폼의 출발점만 정한다. */
+  function onApplySuggestion(item: SuggestionListItem) {
+    setInboxOpen(false);
+    setApplying(item);
+    const values = {
+      playedDate: item.proposed.playedDate ?? "",
+      cleared: item.proposed.cleared,
+      clearedDate: item.proposed.clearedDate ?? "",
+    };
+    if (item.kind === "add") {
+      // 자유 이름을 검색어로 넣는다 — 정본 카테고리·표지는 관리자가 그 결과에서 고른다.
+      setComposing({ initial: { query: item.proposedTitle ?? "", ...values } });
+      return;
+    }
+    const game = games.find((g) => g.id === item.gameId);
+    if (!game) {
+      // 제안함을 열어 둔 사이 그 게임이 지워졌다 — 열 폼이 없으므로 정직하게 말하고 멈춘다.
+      setApplying(null);
+      setAnnouncement("그 게임이 보드에 없어요 — 새로고침해 주세요");
+      return;
+    }
+    setEditing(game);
+  }
 
   /* 날짜를 고치면 lastPlayed 가 바뀌어 **자리도 달라져야 한다** — 제자리 교체만 하면 새로고침
      전까지 보드가 날짜순이 아닌 채로 남는다. 정렬 규칙은 core 가 쥔다(서버 SQL 의 짝). */
-  function onUpdated(row: GameCard) {
+  function onUpdated(row: GameCard, meta: { dateApplied: boolean }) {
     setGames((prev) => sortGameCards(prev.map((g) => (g.id === row.id ? row : g))));
     setEditing(null);
     /* 상세가 아래 열려 있으면 그 화면도 새 값으로 갈아 끼운다 — 안 하면 방금 고친 날짜가
        돌아온 화면에 옛 값으로 떠 "저장이 안 됐다"로 읽힌다. */
     setDetail((prev) => (prev && prev.id === row.id ? row : prev));
     setAnnouncement(row.categoryValue + " 수정됨");
+    void markApplied(meta.dateApplied);
+  }
+
+  /* 반영이 끝났으니 그 제안을 accepted 로 표시한다. **게임 쓰기와 별개 요청이다** — 묶으면
+     제안 처리가 games 쓰기 계약 안으로 들어와 승인 전용 경로가 생긴다(결정 2가 막으려는 것).
+
+     실패해도 사용자에게 던지지 않는다: 반영 자체는 성공했고(보드가 이미 바뀌었다) 남은 문제는
+     제안함에 줄이 남는 것뿐이라, 여기서 오류를 띄우면 방금 성공한 저장이 실패로 읽힌다.
+     대신 라이브 영역으로 알려 관리자가 제안함에서 직접 정리할 수 있게 한다. */
+  async function markApplied(dateApplied = true) {
+    if (!applying) return;
+    const target = applying;
+    setApplying(null);
+    /* **날짜를 못 실었으면 처리로 표시하지 않는다.** 여러 날 편성이라 폼이 날짜를 잠근 경우가
+       그렇다 — 클리어만 저장됐는데 제안이 제안함에서 사라지면 팬의 날짜 제안이 조용히 증발한다
+       (리뷰가 잡았다). 제안을 미처리로 남겨 두면 관리자가 /schedule 에서 날짜를 고친 뒤 다시
+       반영할 수 있고, 왜 남았는지는 라이브 영역이 말한다. */
+    if (!dateApplied) {
+      setAnnouncement(
+        "클리어만 반영했어요 — 여러 날 편성이라 날짜는 일정에서 고쳐 주세요. 제안은 그대로 뒀어요",
+      );
+      return;
+    }
+    try {
+      /* **resolved 를 읽는다.** 서버는 미처리인 것만 고치므로(CAS), 제안함을 열어 둔 사이 다른
+         관리자가 같은 줄을 먼저 처리했으면 false 가 온다. 그때 배지를 또 줄이면 이미 남이 줄인
+         수에서 한 번 더 빠져 화면이 어긋나고, 더 나쁘게는 관리자가 **자기가 처리했다고 믿는다.**
+
+         저장 자체는 되돌리지 않는다 — 그건 이 관리자가 폼에서 값을 보고 확정한 쓰기이고, 제안이
+         거절됐든 아니든 그에겐 그럴 권한이 있다(카드를 그냥 열어 고쳐도 같은 결과다). 제안은 그
+         값의 출처일 뿐 쓰기 주체가 아니라는 게 결정 2 의 요지다. 그러니 되돌릴 게 아니라
+         **사실을 알린다.** */
+      const { resolved } = await trpc.suggestions.resolve.mutate(
+        { id: target.id, resolution: "accepted" },
+        { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
+      );
+      if (resolved) setPending((n) => Math.max(0, n - 1));
+      else setAnnouncement("저장했어요 — 그 제안은 다른 관리자가 이미 처리해 뒀더라고요");
+    } catch {
+      setAnnouncement("반영은 됐지만 제안함 표시를 못 바꿨어요 — 제안함에서 확인해 주세요");
+    }
   }
 
   /* 삭제가 서버까지 끝난 뒤. 모달이 닫힌 다음에 불린다(GameDeleteConfirm 의 인계 규약). */
@@ -196,20 +297,93 @@ export function GameBoard({
           </div>
           {/* 설명 한 줄이 여기 있었다. 제목("플레이한 게임")과 총계가 이미 같은 말을 하고
               있어서, 보드에 닿기 전 한 줄을 더 읽히는 값이 없었다. */}
+
+          {/* 보드 전체에 걸리는 조작 둘. 카드 하나에 매인 게 아니라 여기 산다 — 「게임 추가」가
+              그리드 첫 칸의 빈 폴라로이드인 것과 갈리는 지점이다(그건 "한 장 더 붙인다"는
+              은유라 격자 안이 제자리고, 이 둘은 격자 밖의 일이다).
+
+              비로그인에겐 아무것도 안 그린다. 취할 조치가 없는 안내는 화면 어디에 두든 읽는
+              사람의 시간만 쓴다는 판단 그대로다(추가 슬롯을 안 그리는 것과 같은 근거) — 다만
+              카드 상세에는 한 줄을 둔다. 거기선 "이거 틀렸네"를 방금 본 사람이라 로그인이
+              **취할 수 있는 조치**가 된다. */}
+          {(canWrite || signedIn) && (
+            <div className="head__acts">
+              {canWrite && (
+                <button
+                  className="btn btn--secondary head__act"
+                  type="button"
+                  data-od-id="inbox-open"
+                  onClick={() => setInboxOpen(true)}
+                >
+                  들어온 제안
+                  {/* 0 건이면 배지를 안 그린다 — 빈 수를 보여 주면 매번 확인하게 만든다.
+                      숫자는 장식이 아니라 조작 이름의 일부라 aria-hidden 을 안 건다. */}
+                  {pending > 0 && (
+                    <span className="head__badge" data-od-id="inbox-badge">
+                      {pending}
+                    </span>
+                  )}
+                </button>
+              )}
+              {/* 관리자는 직접 추가하면 되므로 자기에게 요청할 이유가 없다. */}
+              {signedIn && !canWrite && (
+                <button
+                  className="btn btn--secondary head__act"
+                  type="button"
+                  data-od-id="suggest-add-open"
+                  onClick={() => setSuggesting("add")}
+                >
+                  게임 추가 요청
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
-      {composing && <GameComposer onAdded={onAdded} onClose={() => setComposing(false)} />}
+      {composing && (
+        <GameComposer
+          initial={composing.initial}
+          onAdded={onAdded}
+          onClose={() => {
+            setComposing(null);
+            // 반영을 도중에 접었다 — 제안은 미처리로 남는다(관리자가 다시 열 수 있다).
+            setApplying(null);
+          }}
+        />
+      )}
       {detail && (
         <GameDetail
           game={detail}
           canWrite={canWrite}
           canDelete={canDelete}
+          signedIn={signedIn}
           closing={detailClosing}
           covered={detailCovered}
           onEdit={() => setEditing(detail)}
           onDelete={() => setDeleting(detail)}
+          onSuggest={() => setSuggesting(detail)}
           onClose={onDetailClosed}
+        />
+      )}
+      {suggesting && (
+        <SuggestDialog
+          game={suggesting === "add" ? null : suggesting}
+          stacked={detail !== null}
+          onSent={(message) => {
+            setSuggesting(null);
+            setAnnouncement(message);
+          }}
+          onClose={() => setSuggesting(null)}
+        />
+      )}
+      {inboxOpen && (
+        <SuggestionInbox
+          games={games}
+          pending={pending}
+          onApply={onApplySuggestion}
+          onResolved={() => setPending((n) => Math.max(0, n - 1))}
+          onClose={() => setInboxOpen(false)}
         />
       )}
       {/* 상세가 아래 열려 있으면 스크림을 한 겹 더 깔지 않는다(GameDialog 의 className). */}
@@ -217,8 +391,27 @@ export function GameBoard({
         <GameEditor
           game={editing}
           stacked={detail !== null}
+          /* 반영 중인 제안이 **이 게임의 것일 때만** 값을 채운다 — id 를 안 대조하면 추가 요청을
+             반영하려다 취소하고 다른 카드를 수정할 때 남의 제안 값이 폼에 실린다.
+
+             **채우는 건 입력값뿐이고 precondition 은 안 건드린다**(GameEditor 의 조회 주석).
+             그리고 그 보호는 플레이 날짜에만 붙는다 — 클리어는 precondition 없이 늘 실리므로
+             폼이 열린 뒤 딴 데서 바뀌면 저장이 덮는다. 기존 수정 폼의 성질을 그대로 물려받은
+             것이라 여기서 갈라 고치지 않는다(ADR-0025 결정 2 의 보호 범위 절). */
+          initial={
+            applying && applying.gameId === editing.id
+              ? {
+                  cleared: applying.proposed.cleared,
+                  clearedDate: applying.proposed.clearedDate ?? "",
+                  playedDate: applying.proposed.playedDate ?? "",
+                }
+              : undefined
+          }
           onUpdated={onUpdated}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setApplying(null);
+          }}
         />
       )}
       {deleting && (
@@ -248,7 +441,7 @@ export function GameBoard({
                 type="button"
                 ref={addSlotRef}
                 data-od-id="composer-open"
-                onClick={() => setComposing(true)}
+                onClick={() => setComposing({})}
               >
                 {/* 집게까지 받아야 게임 카드와 같은 종족으로 읽힌다 — 빈 종이 한 장을 꺼내
                     같은 줄에 집어 둔 것이지, 다른 부품을 첫 칸에 끼운 게 아니다. */}
@@ -369,15 +562,19 @@ function GameDetail({
   game,
   canWrite,
   canDelete,
+  signedIn,
   closing,
   covered,
   onEdit,
   onDelete,
+  onSuggest,
   onClose,
 }: {
   game: GameCard;
   canWrite: boolean;
   canDelete: boolean;
+  // 로그인했는가 — 제안 버튼과 로그인 안내가 이 값으로 갈린다(ADR-0025).
+  signedIn: boolean;
   /* 부모가 세우는 닫기 신호. 이 화면에 그럴 일이 하나 있다 — **삭제 성공**. 곧장 언마운트하는
      대신 신호를 세워야 close 이벤트가 오고, 셸이 거기서 히스토리 엔트리를 되돌린다.
      뒤로가기를 포함한 나머지 닫는 길은 셸이 스스로 처리하므로 여기 안 온다. */
@@ -386,6 +583,7 @@ function GameDetail({
   covered: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onSuggest: () => void;
   onClose: () => void;
 }) {
   return (
@@ -414,38 +612,39 @@ function GameDetail({
             {game.categoryValue.charAt(0)}
           </span>
         )}
-        {/* 사실 두 줄은 정의 목록이다 — "이름: 값" 쌍이라는 걸 마크업이 말해야 스크린리더가
-            둘을 이어 읽는다(문단 두 개로 두면 라벨과 값의 관계가 사라진다).
-
-            **값 칸은 표기형이다 — 대화체 서술을 넣지 않는다.** 한때 "했어요"·"아직이에요"였는데,
-            같은 목록의 다른 값이 '2026.03.01' 같은 표기라 이 칸만 어투가 튀어 화면이 가벼워졌다
-            (사용자 지적). 라벨이 묻고 값이 대답하는 문장이 아니라, 카드 앞면 칩("클리어")이 쓰는
-            어휘 그대로의 표기다. 안내문·힌트의 다정한 해요체는 그대로다 — 저긴 값 칸이 아니다. */}
-        <dl className="detail__facts">
-          <dt>플레이한 날</dt>
-          <dd data-od-id="detail-played">
-            {game.lastPlayed ? (
-              formatDate(game.lastPlayed)
-            ) : (
-              <span className="detail__none">기록 없음</span>
-            )}
-          </dd>
-          <dt>클리어</dt>
-          <dd data-od-id="detail-cleared">
-            {game.cleared ? (
-              game.clearedDate ? (
-                <>{formatDate(game.clearedDate)} 클리어</>
-              ) : (
-                // 날짜를 모르는 클리어도 유효한 상태다 — 빈칸으로 두면 안 깬 것처럼 읽힌다.
-                // 날짜가 붙은 값과 나란히 놓여야 "날짜만 모른다"가 저절로 드러난다.
-                "완료"
-              )
-            ) : (
-              <span className="detail__none">미완료</span>
-            )}
-          </dd>
-        </dl>
+        {/* 사실 두 줄(마크업·표기 규칙의 근거는 GameFacts 주석). 팬 제안 폼의 "지금 보드에
+            있는 값"이 같은 부품을 써서, 제안하는 화면과 보는 화면의 표기가 갈리지 않는다. */}
+        <GameFacts
+          lastPlayed={game.lastPlayed}
+          cleared={game.cleared}
+          clearedDate={game.clearedDate}
+          idPrefix="detail"
+        />
       </div>
+
+      {/* 팬의 자리. 쓰기 권한이 있으면 제안할 이유가 없다(직접 고치면 된다) — 두 버튼을 나란히
+          두면 관리자가 매번 "어느 쪽이 내 거지"를 고르게 된다.
+
+          비로그인에게 안내를 두는 건 **여기서만** 취할 조치가 생기기 때문이다: 카드를 열어
+          값을 본 사람이라 "이거 틀렸네"가 방금 생겼고, 로그인이 그 다음 걸음이 된다. 보드
+          상단엔 같은 말을 안 둔다(거긴 아직 아무것도 안 본 자리다). */}
+      {!canWrite &&
+        (signedIn ? (
+          <div className="detail__acts">
+            <button
+              className="btn btn--primary composer__btn"
+              type="button"
+              data-od-id={"game-suggest-" + game.id}
+              onClick={onSuggest}
+            >
+              수정 제안
+            </button>
+          </div>
+        ) : (
+          <p className="composer__hint" data-od-id="detail-signin-hint">
+            치지직으로 로그인하면 고칠 값을 제안할 수 있어요.
+          </p>
+        ))}
 
       {(canWrite || canDelete) && (
         <div className="detail__acts">
@@ -613,18 +812,25 @@ function GameDeleteConfirm({
 function GameEditor({
   game,
   stacked,
+  initial,
   onUpdated,
   onClose,
 }: {
   game: GameCard;
   // 카드 상세 위에 겹쳐 떴는가 — 그렇다면 스크림을 한 겹 더 깔지 않는다.
   stacked: boolean;
-  onUpdated: (row: GameCard) => void;
+  /* 팬 제안을 **반영**하려고 열었을 때의 출발점(ADR-0025). 값을 미리 채워 두면 관리자가
+     제안함에서 본 값을 손으로 옮겨 적지 않아도 되고, 저장은 평소의 update 경로를 그대로 탄다 —
+     승인 전용 쓰기를 안 만드는 게 이 설계의 핵심이라(결정 2) 여기서 갈라지면 안 된다. */
+  initial?: { cleared: boolean; clearedDate: string; playedDate: string };
+  /* dateApplied = 이번 저장이 **요청된 플레이 날짜까지** 담았나. 제안을 반영하는 부모가 이걸
+     알아야 "클리어만 반영됐는데 제안은 처리됨으로 사라지는" 자리를 막는다(core.isPlayDateApplied). */
+  onUpdated: (row: GameCard, meta: { dateApplied: boolean }) => void;
   onClose: () => void;
 }) {
   const { draft, setDraft } = useClearedDraft({
-    cleared: game.cleared,
-    clearedDate: game.clearedDate ?? "",
+    cleared: initial?.cleared ?? game.cleared,
+    clearedDate: initial?.clearedDate ?? game.clearedDate ?? "",
   });
   const [error, setError] = useState("");
   /* 이 게임의 일정 날짜. null = 아직 불러오는 중(그동안 날짜 입력은 잠긴다 — PlayedDateField
@@ -639,8 +845,17 @@ function GameEditor({
   // 닫기 신호와 인계할 행. 컴포저와 같은 이유로 성공 즉시 onUpdated 를 부르지 않는다 —
   // 부모가 같은 커밋에서 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
   const [closing, setClosing] = useState(false);
-  const [saved, setSaved] = useState<GameCard | null>(null);
+  const [saved, setSaved] = useState<{ row: GameCard; dateApplied: boolean } | null>(null);
   const [saving, startSave] = useTransition();
+
+  /* 제안이 채우는 날짜. 객체가 아니라 원시값을 뽑아 두는 건 아래 effect 의존성에 싣기 위해서다 —
+     initial 객체는 매 렌더 새로 만들어지므로 그대로 실으면 조회가 무한히 다시 돈다. */
+  const initialPlayedDate = initial?.playedDate;
+  /* **팬이 본 값**(보드의 lastPlayed). 두 자리가 이걸 기준으로 삼는다: 제안 값을 입력에 실을지
+     (initialPlayDateFor)와 반영이 날짜까지 담았는지(isPlayDateApplied). 폼의 loadedDate 를 쓰면
+     안 되는 이유가 각각 다르다 — 앞은 팬이 못 본 초안 항목을 지우게 되고, 뒤는 여러 날 편성일 때
+     loadedDate 가 빈 값이라 정상 반영까지 미완으로 떨어진다. */
+  const shownDate = game.lastPlayed ?? "";
 
   /* 열릴 때 한 번 조회한다. setState 가 await 뒤에서만 일어나므로 effect 안 **동기** setState 를
      막는 규칙(set-state-in-effect)에 걸리지 않는다. 모달은 editing 이 null 을 거쳐 매번 리마운트
@@ -657,8 +872,14 @@ function GameEditor({
         setDates(found);
         // 항목이 하나면 그 날짜가 곧 편집 대상이다. 여럿이면 잠기고 저장에 안 실린다(onSave).
         const loaded = found.length === 1 ? found[0]! : "";
-        setPlayedDate(loaded);
+        /* **precondition 은 언제나 서버가 준 값이다** — 제안 값으로 덮으면 낙관적 동시성이
+           통째로 무력화된다(서버는 "폼이 열릴 때 본 날짜"로 알고 대조하는데, 실제로는 팬이
+           며칠 전에 적어 낸 값이라 그 사이의 일정 변경을 조용히 되돌린다). 제안이 채우는 건
+           **입력값**뿐이고, 그래서 그 값이 지금 값과 다르면 정상적으로 dateEdited 가 선다. */
         setLoadedDate(loaded);
+        /* 팬이 **실제로 고친** 날짜만 싣는다 — 제안 스냅샷을 그대로 넣으면 초안 주의 항목처럼
+           팬이 못 본 날짜를 지우라는 지시가 된다(core.initialPlayDateFor). */
+        setPlayedDate(initialPlayDateFor(initialPlayedDate, shownDate, loaded));
       } catch {
         if (!alive) return;
         setLoadFailed(true);
@@ -668,7 +889,9 @@ function GameEditor({
     return () => {
       alive = false;
     };
-  }, [game.id]);
+    /* shownDate 도 싣는다 — 프리필 판정이 이걸 읽으므로 빠지면 낡은 값으로 채운다. game 이 바뀌면
+       game.id 와 함께 바뀌므로 실질적으로 재조회를 늘리지 않는다(모달은 매번 리마운트된다). */
+  }, [game.id, initialPlayedDate, shownDate]);
 
   /* 여러 날 편성이면 입력이 잠기고(core.isPlayDateEditable) 저장에 날짜를 안 싣는다.
      dateEdited 는 조회가 끝난 뒤에만 참이 될 수 있다 — dates 가 null 인 동안 playedDate 는
@@ -704,7 +927,15 @@ function GameEditor({
           // 상한이 없으면 saving 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
           { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
         );
-        setSaved(row);
+        /* 잠금 때문에 날짜를 못 실었는지 여기서 판정해 인계한다 — 부모는 폼의 잠금 상태를
+           못 보고, 저장 결과(row.lastPlayed)만으로는 초안 주 항목이 섞여 판단이 안 선다.
+
+           기준은 **보드가 그리는 날짜**(shownDate)다. loadedDate 로 재면 여러 날 편성일 때 그
+           값이 빈 문자열이라, 클리어만 고치는 정상 반영까지 "날짜를 못 실었다"로 떨어진다. */
+        setSaved({
+          row,
+          dateApplied: isPlayDateApplied(initial?.playedDate ?? shownDate, shownDate, locked),
+        });
         setClosing(true);
       } catch (e) {
         // 수정 전용 문구다 — 이 경로의 CONFLICT 는 중복 게임이 아니라 낡은 플레이 날짜다.
@@ -731,7 +962,7 @@ function GameEditor({
       dirty={dirty}
       // 삭제 확인과 같은 이유로 X 를 끈다 — 본문에 "취소"가 있다(GameDialog 의 closeButton).
       closeButton={false}
-      onClose={() => (saved ? onUpdated(saved) : onClose())}
+      onClose={() => (saved ? onUpdated(saved.row, { dateApplied: saved.dateApplied }) : onClose())}
     >
       <form className="composer__detail" onSubmit={onSave}>
         {/* 첫 필드가 플레이 날짜라 안내도 그 순서로 말한다 — 클리어만 언급하면 바로 아래

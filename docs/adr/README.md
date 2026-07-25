@@ -43,3 +43,4 @@ ADR 이 그 맥락을 붙박는다. 규칙(불변식·경계·플레이북)의 �
 | [0022](./0022-schedule-publish-boundary.md)                  | 일정 발행 경계 = 공개 읽기·보드 날짜 유도의 정본 (초안은 안 샌다)    | Accepted (보드 표시 규칙은 0024 가 대체)                   |
 | [0023](./0023-game-card-detail-dialog.md)                    | 게임 보드 = 훑는 격자 + 카드 상세 다이얼로그 (카드 액션 폐기)        | Accepted                                                   |
 | [0024](./0024-week-state-two-axes.md)                        | 주 상태 = draft × published 두 축 (부재를 상태로 안 쓴다)            | Accepted                                                   |
+| [0025](./0025-fan-suggestions.md)                            | 팬 제안 = 로그인의 첫 대가 (반영은 기존 쓰기 경로가 한다)            | Accepted                                                   |

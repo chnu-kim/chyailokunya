@@ -12,8 +12,10 @@ import {
   sqliteTable,
   text,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { ROLES } from "@/core/authorities";
+import { SUGGESTION_KINDS, SUGGESTION_STATUSES } from "@/core/suggestions";
 
 /* 모든 타임스탬프는 epoch ms(정수)로 저장한다 — SQLite 엔 offsetDateTime/timestamptz 가
    없다. KST 는 표시 경계에서 Asia/Seoul 포매터로 보장한다(한국은 DST 없어 고정 +9).
@@ -219,6 +221,84 @@ export const scheduleWeeks = sqliteTable(
   (t) => [check("schedule_weeks_draft", sql`${t.draft} = 0 OR ${t.publishedAt} IS NULL`)],
 );
 
+/* 팬 수정 제안(ADR-0025). 보드의 쓰기는 상승 역할 전용인데(ADR-0012), 방송을 실제로 본 팬이
+   "이거 깼어요"를 전할 길이 없었다 — 이 테이블이 로그인의 첫 대가다. 제안은 게임을 **안 바꾼다**:
+   관리자가 제안함에서 보고 기존 수정 폼(updateGame)으로 반영하므로 쓰기 경로는 그대로 하나다.
+
+   두 종류가 한 테이블에 산다(kind — core/suggestions.ts 가 정본):
+     edit — 보드에 있는 카드를 고쳐 달라. game_id 가 대상이고 proposed_* 가 목표 상태다.
+     add  — 없는 게임을 올려 달라. 대상이 아직 없으니 proposed_title 로 이름만 말한다.
+   치지직 검색은 비관리자에게 안 연다(client_credentials 노출 — features/chzzk/router.ts). 그래서
+   추가 요청은 자유 이름이고, 정본 카테고리는 관리자가 반영할 때 컴포저에서 정한다.
+
+   제안 값은 부분 patch 가 아니라 **목표 상태 스냅샷**이라 셋이 늘 함께 실린다 — 게임 폼의
+   playedDate 가 "키의 유무"로 세 상태를 가르느라 물었던 함정(games/schema.ts 의 playDateInput)을
+   되풀이하지 않는다. proposed_played_date 는 games 컬럼이 아니라 일정을 뜻한다(정본은
+   schedule_entries) — 반영이 곧 게임 폼의 날짜 입력이라 그쪽 규칙을 그대로 탄다.
+
+   note 는 값으로 표현 못 하는 제보의 유일한 길이다(제목 오타·포스터가 다른 게임 — 관리자도 폼으로
+   못 고치는 스냅샷 필드라 글로만 전할 수 있다). 그래서 값 변경 없이 note 만 있는 제안도 유효하다.
+
+   날짜 둘은 '달력의 하루'라 text 'YYYY-MM-DD', resolved_at 만 진짜 순간이라 epoch ms 다
+   (AGENTS.md 명명 규약 — games.cleared_date 와 같은 근거). */
+export const gameSuggestions = sqliteTable(
+  "game_suggestions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    kind: text("kind", { enum: SUGGESTION_KINDS }).notNull(),
+    /* ON DELETE CASCADE — 게임이 보드에서 사라지면 그 게임을 고쳐 달라던 제안은 반영할 대상이
+       없다. **SET NULL 이면 안 된다**: kind='edit' 인데 game_id 가 NULL 인 행은 아래 CHECK 를
+       깨서 게임 삭제 자체가 실패한다(그리고 그 규칙을 풀면 수정 제안이 추가 요청으로 둔갑한다). */
+    gameId: integer("game_id").references(() => games.id, { onDelete: "cascade" }),
+    authorUserId: integer("author_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    proposedTitle: text("proposed_title"),
+    // boolean 모드 — games.cleared 와 같은 컨벤션(0/1 저장, 타입은 boolean). 아래 CHECK 는 SQL 값을 본다.
+    proposedCleared: integer("proposed_cleared", { mode: "boolean" }).notNull().default(false),
+    proposedClearedDate: text("proposed_cleared_date"),
+    proposedPlayedDate: text("proposed_played_date"),
+    note: text("note"),
+    status: text("status", { enum: SUGGESTION_STATUSES }).notNull().default("pending"),
+    resolvedAt: integer("resolved_at"),
+    resolvedByUserId: integer("resolved_by_user_id").references(() => users.id),
+    createdAt: createdAt(),
+    lastUpdatedAt: lastUpdatedAt(),
+  },
+  (t) => [
+    // enum 옵션은 타입만 좁힌다 — DB 도 보증하도록 CHECK 를 겹친다(다른 테이블과 같은 규약).
+    check("game_suggestions_kind", sql`${t.kind} IN ('edit', 'add')`),
+    check("game_suggestions_status", sql`${t.status} IN ('pending', 'accepted', 'rejected')`),
+    /* 종류마다 채워지는 자리가 다르다. 섞인 행(대상도 있고 이름도 있는)이 저장 가능하면
+       제안함이 무엇을 그릴지 화면에서 갈린다. */
+    check(
+      "game_suggestions_shape",
+      sql`(${t.kind} = 'edit' AND ${t.gameId} IS NOT NULL AND ${t.proposedTitle} IS NULL)
+          OR (${t.kind} = 'add' AND ${t.gameId} IS NULL AND ${t.proposedTitle} IS NOT NULL)`,
+    ),
+    // games_cleared_date 와 같은 규칙 — 반영하는 순간 게임 쪽 CHECK 가 거절할 조합을 미리 막는다.
+    check(
+      "game_suggestions_cleared_date",
+      sql`${t.proposedCleared} = 1 OR ${t.proposedClearedDate} IS NULL`,
+    ),
+    /* "처리됐다"와 "처리 흔적이 있다"는 같은 뜻이어야 한다. 한쪽만 쓰는 경로가 생기면
+       제안함 목록(pending 필터)과 감사(누가 언제 처리했나)가 서로 다른 집합을 본다. */
+    check(
+      "game_suggestions_resolution",
+      sql`(${t.status} = 'pending' AND ${t.resolvedAt} IS NULL AND ${t.resolvedByUserId} IS NULL)
+          OR (${t.status} <> 'pending' AND ${t.resolvedAt} IS NOT NULL AND ${t.resolvedByUserId} IS NOT NULL)`,
+    ),
+    /* 한 사람이 한 게임에 **처리 안 된 제안 하나**. 없으면 같은 사람의 같은 제보가 제안함을
+       채워 관리자가 무엇을 읽어야 할지 잃는다. 부분 인덱스라 처리된 제안은 제약 밖으로 빠져
+       (같은 게임에 두 번째 제안을 낼 수 있다) 이력이 쌓이는 걸 막지 않는다.
+       추가 요청(game_id NULL)은 대상이 없어 이 제약이 성립하지 않으므로 조건에서 뺀다 —
+       SQLite 는 NULL 중복을 허용해 어차피 안 걸리지만, 명시해야 인덱스가 뜻을 말한다. */
+    uniqueIndex("game_suggestions_open_per_author")
+      .on(t.gameId, t.authorUserId)
+      .where(sql`${t.status} = 'pending' AND ${t.gameId} IS NOT NULL`),
+  ],
+);
+
 /* 자체 세션 refresh 토큰(ADR-0017). access 는 stateless(EdDSA JWT, DB 무관)라 여기 없다 —
    refresh 만 서버가 정본으로 들고 rotation·재사용 감지·revoke 를 한다. 원본은 저장하지 않고
    sha256 해시만(DB 유출 시 재사용 방지). family_id 는 로그인 1회(디바이스) 단위 rotation 체인,
@@ -279,3 +359,5 @@ export type ScheduleEntry = typeof scheduleEntries.$inferSelect;
 export type NewScheduleEntry = typeof scheduleEntries.$inferInsert;
 export type ScheduleWeek = typeof scheduleWeeks.$inferSelect;
 export type NewScheduleWeek = typeof scheduleWeeks.$inferInsert;
+export type GameSuggestionRow = typeof gameSuggestions.$inferSelect;
+export type NewGameSuggestionRow = typeof gameSuggestions.$inferInsert;

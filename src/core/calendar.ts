@@ -79,6 +79,18 @@ export function todayKST(): IsoDate {
   return branded(Temporal.Now.plainDateISO(KST));
 }
 
+/* 절대 순간(epoch ms) → KST 로 며칠인가. `_at` 컬럼(created_at 같은 진짜 시각)을 화면에 날짜로
+   적을 때 쓴다 — 실행 환경의 로컬 존을 쓰면 서버 렌더와 브라우저가 다른 날을 적고, 그 어긋남은
+   KST 자정 근처에서만 나타나 재현이 어렵다(todayKST 와 같은 근거).
+
+   시:분을 안 내주는 건 이 사이트의 시간 단위가 **방송 하루**라서다 — 제안이 몇 시에 왔는지는
+   관리자의 판단을 안 바꾸고, 분 단위를 적으면 화면의 다른 날짜 표기와 어휘가 갈린다. */
+export function dateOfInstantKST(epochMs: number): IsoDate {
+  return branded(
+    Temporal.Instant.fromEpochMilliseconds(epochMs).toZonedDateTimeISO(KST).toPlainDate(),
+  );
+}
+
 /* 그 날짜가 속한 주의 월요일. 주는 저장하지 않고 날짜에서 유도한다(결정 2) — 항목에 week_id 를
    두면 날짜와 어긋난 행이 저장 가능해지기 때문이고, 그 유도를 하는 곳이 여기다.
    ISO 8601 의 dayOfWeek 는 월=1‥일=7 이라 (dayOfWeek - 1)일을 빼면 월요일이 나온다. */

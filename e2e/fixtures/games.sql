@@ -85,6 +85,9 @@ VALUES
 -- onDelete: cascade 라 저절로 지워진다). append-only 감사 로그라 그렇게 설계된 것이고, 그래서
 -- 로컬에서 역할 관리를 한 번이라도 써 본 개발자는 여기서 FOREIGN KEY constraint failed 로
 -- **globalSetup 이 죽는다** — narrow-body 뿐 아니라 스모크·시각 전체가 시작조차 못 한다(실측).
+-- 팬 제안은 게임과 작성자를 모두 참조한다. FK 가 꺼진 채 실행돼도 안전하도록 **부모보다 먼저**
+-- 비운다 — 안 지우면 지난 실행의 제안이 남아 관리자 제안함 목록이 실행마다 달라진다.
+DELETE FROM game_suggestions;
 DELETE FROM role_audit_logs;
 DELETE FROM users_roles;
 DELETE FROM oauth_accounts;
@@ -93,3 +96,14 @@ INSERT INTO users (id, created_at, last_updated_at) VALUES (1, 1700000000000, 17
 INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, channel_name, created_at, last_updated_at)
 VALUES (1, 1, 'chzzk', 'e2e-channel-0000', '챠이로 쿠냐', 1700000000000, 1700000000000);
 INSERT INTO users_roles (user_id, role, created_at) VALUES (1, 'admin', 1700000000000);
+
+-- 역할 없는 팬(user 2). **users_roles 행이 없는 게 이 신원의 전부다** — 그게 곧 member 이고
+-- 권한은 빈 집합이다(core/authorities: 상승 역할만 저장한다).
+--
+-- 이 행이 필요한 이유는 팬 제안(ADR-0025)이 로그인만 요구하기 때문이다. admin 신원으로 재면
+-- "권한 없이도 제안이 되는가"를 못 본다 — 그건 이 기능의 핵심 계약이라 반드시 빈 권한으로
+-- 확인해야 한다. provider_user_id 는 e2e/suggestions.spec.ts 의 FAN.channelId 와 글자 그대로
+-- 같아야 인가 조회(channelId → user_id)가 이어진다(위 admin 블록과 같은 이유).
+INSERT INTO users (id, created_at, last_updated_at) VALUES (2, 1700000010000, 1700000010000);
+INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, channel_name, created_at, last_updated_at)
+VALUES (2, 2, 'chzzk', 'e2e-channel-fan0', '쿠냐팬', 1700000010000, 1700000010000);

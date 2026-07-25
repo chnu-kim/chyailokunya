@@ -1,0 +1,248 @@
+/* 팬 제안 데이터 유즈케이스(ADR-0025). tRPC 무관 순수 db 연산 — games/service.ts 와 같은 결이라
+   라우터·서버 컴포넌트가 함께 쓴다(제안 개수 배지는 RSC 가 직접 읽는다).
+
+   **이 모듈은 게임을 안 바꾼다.** 제안은 쌓이기만 하고, 반영은 관리자가 기존 수정 폼으로 한다
+   (features/games 의 updateGame). 그래서 여기엔 games 쓰기가 한 줄도 없다 — 승인 전용 쓰기 경로를
+   만들면 CAS·여러 날 잠금·주 청구를 쥔 그 계약이 둘로 갈린다(ADR-0025 결정 2). */
+
+import { and, desc, eq, sql } from "drizzle-orm";
+import {
+  isEmptyEditSuggestion,
+  type SuggestedValues,
+  type SuggestionKind,
+  type SuggestionResolution,
+  type SuggestionStatus,
+} from "@/core/suggestions";
+import { gameSuggestions, oauthAccounts, type Db, type GameSuggestionRow } from "@/db";
+import { findGameCard } from "../games/service";
+import type { CreateSuggestionInput } from "./schema";
+
+/* 한 사람이 동시에 열어 둘 수 있는 제안 수. 게임당 1건은 부분 UNIQUE 인덱스가 이미 막으므로
+   이 상한이 잡는 건 **여러 게임에 걸친 도배**다. 20 은 실제 팬이 한 번에 낼 제보보다 넉넉하고
+   (보드가 아직 수십 장이다) 제안함 한 화면을 혼자 채우기엔 모자란 값이다. */
+export const OPEN_SUGGESTION_LIMIT = 20;
+
+/* 대상 게임이 없다. 라우터가 NOT_FOUND 로 올린다 — 폼이 보드의 카드에서 열리므로 정상 경로에선
+   안 오고, 오는 길은 폼이 열린 사이 관리자가 그 게임을 지운 경우다. */
+export class SuggestionGameNotFound extends Error {
+  constructor() {
+    super("suggestion target game does not exist");
+    this.name = "SuggestionGameNotFound";
+  }
+}
+
+/* 값도 지금과 같고 한마디도 없다. 라우터가 BAD_REQUEST 로 올린다 — 그 줄은 관리자가 읽을 것도
+   반영할 것도 없는 순수한 소음이고, 게임당 사람당 하나뿐인 자리를 잡아먹는다. */
+export class EmptySuggestion extends Error {
+  constructor() {
+    super("suggestion changes nothing and says nothing");
+    this.name = "EmptySuggestion";
+  }
+}
+
+/* 열어 둔 제안이 상한을 넘었다. 라우터가 TOO_MANY_REQUESTS 로 올린다. */
+export class TooManyOpenSuggestions extends Error {
+  constructor() {
+    super("too many pending suggestions for this author");
+    this.name = "TooManyOpenSuggestions";
+  }
+}
+
+/* 제안 한 줄이 화면에 나갈 때의 모양. **대상 게임의 현재 값은 안 싣는다** — 제안함은 보드
+   위에서 열리고 보드는 이미 카드 목록을 들고 있으므로, gameId 로 그쪽에서 찾으면 조인 없이
+   같은 값을 얻는다(그리고 그 값이 화면에 보이는 것과 확실히 같아진다).
+
+   authorName 은 oauth_accounts 의 표시명 스냅샷이다 — users 엔 표시명이 없다(제공자가 준 값이라
+   그쪽이 제자리, db/schema 주석). nullable 인 이유는 그 컬럼 자체가 nullable 이라서다. */
+export type SuggestionListItem = {
+  id: number;
+  kind: SuggestionKind;
+  gameId: number | null;
+  proposedTitle: string | null;
+  proposed: SuggestedValues;
+  note: string | null;
+  authorName: string | null;
+  createdAt: number;
+};
+
+// 내가 낸 제안엔 처리 상태가 붙는다 — 없으면 같은 제보를 반복하게 된다.
+export type MySuggestionItem = SuggestionListItem & { status: SuggestionStatus };
+
+/* 목록 셀렉트의 공통 모양. 두 조회(제안함·내 제안)가 같은 열을 보게 묶는다 — 갈리면 한쪽에만
+   필드가 늘어난 걸 타입이 아니라 화면이 먼저 알려 준다. */
+const listColumns = {
+  id: gameSuggestions.id,
+  kind: gameSuggestions.kind,
+  gameId: gameSuggestions.gameId,
+  proposedTitle: gameSuggestions.proposedTitle,
+  proposed: {
+    cleared: gameSuggestions.proposedCleared,
+    clearedDate: gameSuggestions.proposedClearedDate,
+    playedDate: gameSuggestions.proposedPlayedDate,
+  },
+  note: gameSuggestions.note,
+  authorName: oauthAccounts.channelName,
+  createdAt: gameSuggestions.createdAt,
+};
+
+/* 작성자 표시명 조인. provider 를 조건에 박는 이유: users → oauth_accounts 가 1:N 이라 로그인
+   수단이 하나 더 붙는 날 한 제안이 여러 줄로 불어난다(그때 제안함이 같은 제보를 두 번 그린다). */
+const authorJoin = and(
+  eq(oauthAccounts.userId, gameSuggestions.authorUserId),
+  eq(oauthAccounts.provider, "chzzk"),
+);
+
+/* 한 번에 내주는 제안 줄 수. **페이지네이션이 아니라 상한이다** — 다음 장을 넘기는 UI 를 만드는
+   대신, 처리하면 다음 것이 올라온다(제안함은 처리하는 화면이라 그 흐름이 자연스럽다).
+
+   이 상한이 있는 이유는 사람이 아니라 최악이다: 계정을 여럿 만들면 사람당 20건 상한을 우회해
+   전체 큐를 부풀릴 수 있고(적대적 리뷰가 짚었다), 그때 관리자 화면이 통째로 느려지면 **정작
+   정리해야 할 순간에 못 쓴다.** 상한이 있으면 화면은 언제나 100줄에서 멈춘다.
+
+   페이지네이션과 인덱스는 **안 만든다**: 이 저장소는 성능 인덱스를 v1 에서 미루기로 이미 정했고
+   (ADR-0014 — <100행에선 측정 자체가 안 된다), 다계정 도배는 애초에 페이지네이션으로 안 막힌다.
+   목록이 짧아져도 도배는 그대로고 진짜 대응은 계정 차단인데, 그건 authority 를 여는 일이라
+   그 요구가 실제로 설 때 한다(ADR-0025 결정 1). */
+export const INBOX_LIMIT = 100;
+
+/* 관리자 제안함 — 미처리만, 최신순. 처리된 제안은 안 싣는다: 목록의 용도가 "지금 볼 것"이고,
+   이력 조회 화면은 v1 에 요구가 없다(필요해지면 status 필터를 여는 게 그때의 최소 변경이다).
+
+   상한에 걸렸는지는 **호출자가 개수로 판단한다** — 배지가 쓰는 countPendingSuggestions 가 전체
+   수를 주므로, 목록 길이와 그 수를 견주면 "더 있다"가 나온다(hasMore 를 따로 싣지 않는 이유). */
+export function listPendingSuggestions(db: Db): Promise<SuggestionListItem[]> {
+  return db
+    .select(listColumns)
+    .from(gameSuggestions)
+    .leftJoin(oauthAccounts, authorJoin)
+    .where(eq(gameSuggestions.status, "pending"))
+    .orderBy(desc(gameSuggestions.createdAt))
+    .limit(INBOX_LIMIT);
+}
+
+// 제안함 버튼의 배지. 목록을 통째로 읽지 않고 세기만 한다 — 서버 컴포넌트가 첫 페인트에 쓴다.
+export async function countPendingSuggestions(db: Db): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(gameSuggestions)
+    .where(eq(gameSuggestions.status, "pending"));
+  return row?.count ?? 0;
+}
+
+/* 내가 낸 제안. 처리된 것도 함께 준다 — "반영됐는지"를 볼 수 없으면 같은 제보를 다시 낸다.
+   남의 제안은 못 본다(작성자 필터가 곧 그 경계다): 제안은 공개물이 아니라 관리자에게 보내는
+   말이고, 공개하면 부적절한 글이 그대로 방문자에게 닿는다. */
+export function listMySuggestions(db: Db, authorUserId: number): Promise<MySuggestionItem[]> {
+  return db
+    .select({ ...listColumns, status: gameSuggestions.status })
+    .from(gameSuggestions)
+    .leftJoin(oauthAccounts, authorJoin)
+    .where(eq(gameSuggestions.authorUserId, authorUserId))
+    .orderBy(desc(gameSuggestions.createdAt));
+}
+
+/* 제안 접수. 검사 셋을 통과해야 저장된다: 도배 상한 · 대상 존재 · 빈 제안.
+
+   ── 알고 수용한 한계: 상한 검사와 insert 사이 gap ────────────────────────────────
+   ── 상한은 **두 겹**이고, 진짜 방어선은 DB 쪽이다 ───────────────────────────────
+   아래 count 는 세기와 쓰기가 별개 왕복이라(D1 엔 대화형 트랜잭션이 없다) **동시 요청 앞에서
+   통째로 뚫린다** — 각 요청이 같은 낮은 수를 읽고 전부 통과하므로 한 번에 100개를 쏘면 100개가
+   다 들어간다(적대적 리뷰가 잡았다. 한때 이 주석은 "한두 건"이라고 적었는데 틀렸다).
+
+   그래서 판정을 **INSERT 자체에** 붙였다: 마이그레이션 0010 의 BEFORE INSERT 트리거가 같은
+   상한을 SQLite 안에서 강제한다. 조건부 INSERT 를 못 만든다는 벽(saveWeek 이 만난 그것)은
+   그대로지만, 트리거는 그 벽을 우회하지 않고 **판정 자체를 쓰기 연산 안으로 옮긴다.**
+
+   그럼 여기 count 는 왜 남나: 문구 때문이다. 트리거는 SQLITE_CONSTRAINT 로만 말해서 그걸 그대로
+   올리면 사용자가 원인을 알 수 없다. 정상 경로에선 이 검사가 먼저 걸려 친절한 오류가 나가고,
+   경합으로 새어 나간 요청만 트리거에 막혀 같은 오류로 맵된다(아래 catch). */
+export async function createSuggestion(
+  db: Db,
+  authorUserId: number,
+  input: CreateSuggestionInput,
+): Promise<GameSuggestionRow> {
+  const [open] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(gameSuggestions)
+    .where(
+      and(eq(gameSuggestions.authorUserId, authorUserId), eq(gameSuggestions.status, "pending")),
+    );
+  if ((open?.count ?? 0) >= OPEN_SUGGESTION_LIMIT) throw new TooManyOpenSuggestions();
+
+  const proposed: SuggestedValues = {
+    cleared: input.cleared,
+    clearedDate: input.clearedDate,
+    playedDate: input.playedDate,
+  };
+
+  if (input.kind === "edit") {
+    /* 지금 보드에 있는 값을 games 쪽 유도로 읽는다(findGameCard) — 발행 경계를 그쪽과 공유해야
+       "제안함은 안 바뀐다는데 보드는 다른 날짜를 그리는" 상태가 안 생긴다. */
+    const card = await findGameCard(db, input.gameId);
+    if (!card) throw new SuggestionGameNotFound();
+    const current = {
+      cleared: card.cleared,
+      clearedDate: card.clearedDate,
+      lastPlayed: card.lastPlayed,
+    };
+    if (isEmptyEditSuggestion(current, proposed, input.note)) throw new EmptySuggestion();
+  }
+
+  let row: GameSuggestionRow | undefined;
+  try {
+    [row] = await db
+      .insert(gameSuggestions)
+      .values({
+        kind: input.kind,
+        // 종류마다 채워지는 자리가 갈린다(shape CHECK) — 반대쪽은 반드시 null 이어야 한다.
+        gameId: input.kind === "edit" ? input.gameId : null,
+        proposedTitle: input.kind === "add" ? input.title : null,
+        authorUserId,
+        proposedCleared: proposed.cleared,
+        proposedClearedDate: proposed.clearedDate,
+        proposedPlayedDate: proposed.playedDate,
+        note: input.note,
+      })
+      .returning();
+  } catch (e) {
+    /* 위 count 를 지나쳐 온 요청이 트리거에 막혔다 = 경합으로 상한을 넘겼다. 같은 도메인 오류로
+       맵해 호출자가 두 경로를 구분할 필요가 없게 한다(사용자에겐 같은 사건이다). UNIQUE 위반은
+       여기서 안 잡는다 — 그건 라우터가 CONFLICT 로 따로 맵하는 다른 사건이다. */
+    if (isQuotaViolation(e)) throw new TooManyOpenSuggestions();
+    throw e;
+  }
+  return row!;
+}
+
+/* 트리거가 RAISE(ABORT) 로 남긴 메시지를 찾는다. drizzle 은 D1 에러를 DrizzleQueryError 로 감싸
+   원인이 top message 가 아니라 .cause 에 있으므로 체인을 끝까지 훑는다(UNIQUE 를 찾을 때와 같은
+   함정·같은 처방). 문자열은 마이그레이션 0010 의 RAISE 인자와 **글자 그대로 같아야 한다.** */
+function isQuotaViolation(e: unknown): boolean {
+  for (let cur: unknown = e; cur instanceof Error; cur = cur.cause) {
+    if (/too many pending suggestions/i.test(cur.message)) return true;
+  }
+  return false;
+}
+
+/* 처리(반영함·거절함) 표시. **미처리인 것만 고친다** — 조건이 곧 CAS 다: 제안함을 열어 둔 사이
+   다른 관리자가 같은 줄을 먼저 처리했으면 0행이 돌아온다.
+
+   그때 오류를 던지지 않고 resolved:false 로 두는 건 removeGame 과 같은 멱등성 판단이다. 목표
+   상태(그 제안은 이제 목록에 없다)가 이미 달성됐고, 사용자가 손쓸 수 없는 오류를 띄울 자리가
+   아니다. 처리 시각·처리자를 status 와 **한 문**에 쓰는 이유는 resolution CHECK 다 — 나눠 쓰면
+   중간 상태가 CHECK 를 깬다. */
+export async function resolveSuggestion(
+  db: Db,
+  input: { id: number; resolution: SuggestionResolution; resolvedByUserId: number },
+): Promise<{ resolved: boolean }> {
+  const rows = await db
+    .update(gameSuggestions)
+    .set({
+      status: input.resolution,
+      resolvedAt: Date.now(),
+      resolvedByUserId: input.resolvedByUserId,
+    })
+    .where(and(eq(gameSuggestions.id, input.id), eq(gameSuggestions.status, "pending")))
+    .returning({ id: gameSuggestions.id });
+  return { resolved: rows.length > 0 };
+}
