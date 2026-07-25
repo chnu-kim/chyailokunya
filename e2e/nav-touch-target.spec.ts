@@ -45,28 +45,120 @@ test.describe("nav 브랜드 터치 타깃", () => {
    도는 e2e 는 통과했다.
 
    세션은 e2e/session.ts 가 서명한 access 쿠키로 만든다 — 한때 여기서 `.nav__auth` 에
-   마크업을 주입했지만, 그건 컴포넌트가 그 마크업을 낸다는 보장이 없었다(이슈 #23). */
+   마크업을 주입했지만, 그건 컴포넌트가 그 마크업을 낸다는 보장이 없었다(이슈 #23).
+
+   한때 `/` 하나만 돌았는데 그게 **셋 중 가장 헐렁한 페이지**였다: `aria-current="page"` 가
+   현재 링크에 font-weight:700 을 걸어 `/landing`·`/games` 의 .nav__links 가 98.47 → 99.13px
+   로 넓어지는데, `/` 에선 어느 링크도 current 가 아니라 둘 다 500 이다(실측 320px 로그인).
+   즉 가장 빡빡한 폭이 미검사였다 — 위 describe 와 같은 PAGES 를 돈다. */
 test.describe("nav 브랜드 — 로그인 상태", () => {
   for (const width of [320, 390]) {
-    test(`${width}px: 로그인해도 브랜드가 44×44 를 지킨다`, async ({ page, baseURL }) => {
-      await page.setViewportSize({ width, height: 800 });
+    for (const path of PAGES) {
+      test(`${width}px ${path}: 로그인해도 브랜드가 44×44 를 지킨다`, async ({ page, baseURL }) => {
+        await page.setViewportSize({ width, height: 800 });
+        await signIn(page.context(), baseURL!);
+        await page.goto(path);
+        await expectSignedIn(page);
+
+        const box = (await page.locator(".nav .brand").boundingBox())!;
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+
+        // 브랜드에 바닥을 깔면 그 폭이 형제를 밀 수 있다 — 넘침과 토글 덮임으로 확인한다.
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+
+        await expectToggleHittable(page);
+      });
+    }
+  }
+});
+
+/* 폭 **예산**. 위 단언들의 `overflow <= 0` 은 여유가 0.06px 로 쪼그라든 상태도 초록이라
+   "이미 넘쳤나"만 답하고 "얼마나 남았나"는 아무도 안 본다 — 그 사이가 이 저장소의 실제
+   위험 구간이다. 지금 320px 로그인 nav 가 통과하는 건 **"이동 링크가 2개"라는 조건 하나**에
+   매달려 있는데(실측 헤드룸 `/` 11.06px · `/landing`·`/games` 10.41px), 링크를 하나만 더하면
+   헤드룸이 −42.83px 로 뒤집혀 문서가 44px 넘친다(가장 빡빡한 `/landing`·`/games` 기준 —
+   `/` 는 −42.17px·43px 이라 여기 적으면 부족분을 0.66px 과소평가한다). `/schedule` 을 nav 에
+   안 건 근거가 정확히 그것이고(features/routes.ts), 그 결정이 조용히 뒤집히는 걸 막는 게
+   이 describe 다.
+
+   임계값 8 은 --space-2 다. 임의값이 아니라 **nav 가 실제로 쓰는 최소 간격 한 칸**이라는
+   뜻으로 고른다 — 오른쪽 여유가 한 칸보다 얇아졌다면 다음 한 걸음이 곧 넘침이다. 실측 최솟값
+   10.41px 과의 마진이 2.41px 뿐이라 이 단언은 헐겁지 않다(그 2.41px 을 다 쓰는 변경이 오면
+   여기가 먼저 빨개진다). 임계값을 올리려면 세 페이지 재측정부터.
+
+   절대 좌표(navEnd.right = 308.94/309.59)를 못박지 **않는다**: 링크 폭·라벨·웹폰트에 물려
+   있어 무관한 변경마다 재측정을 강요한다. 부등식 + 토큰 유래 임계값이 유지보수가 싸다.
+
+   fonts.ready 는 필수다 — 폴백 폰트가 오히려 **좁아서**(실측 헤드룸 23.08 vs 웹폰트 11.06)
+   폰트 확정 전에 재면 12px 헐렁한 상태를 재게 되고, 진짜 넘치는 회귀도 초록으로 통과한다.
+
+   이빨(음성 대조 3종 실행함, 실측값):
+   1) 증분 검출력 — .nav__link 의 ≤560px 패딩을 `6px 9px` → `6px 11px` 로(링크 2개 × 좌우
+      2px = 8px 소비): **이 단언만 빨강**(10.41 → 2.41px), 위 describe 의 `overflow <= 0` 은
+      그대로 초록. 즉 기존 단언의 중복이 아니다.
+   2) 실제 위협 — routes.ts 의 `/schedule` 을 primary:true 로(3번째 링크): 세 페이지 전부
+      빨강이지만 헤드룸은 페이지마다 갈린다(실측: `/` −42.17px·문서 넘침 43px,
+      `/landing`·`/games` −42.83px·넘침 44px — 기존 단언도 세 페이지 전부 함께 빨강).
+   3) fixture 유효성 — expectSignedIn 을 빼고 세션 없이 돌리면 **초록으로 통과한다**
+      (비로그인 헤드룸은 세 페이지 모두 24.00px). 세션을 실제로 세우지 못하면 이 테스트가
+      통째로 무의미해진다는 뜻이라 expectSignedIn 은 장식이 아니다. */
+test.describe("nav 폭 예산 — 로그인 상태", () => {
+  for (const path of PAGES) {
+    test(`320px ${path}: nav 오른쪽에 --space-2 만큼 여유가 남는다`, async ({ page, baseURL }) => {
+      await page.setViewportSize({ width: 320, height: 800 });
       await signIn(page.context(), baseURL!);
-      await page.goto("/");
+      await page.goto(path);
       await expectSignedIn(page);
+      await page.evaluate(() => document.fonts.ready);
 
-      const box = (await page.locator(".nav .brand").boundingBox())!;
-      expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
-
-      // 브랜드에 바닥을 깔면 그 폭이 형제를 밀 수 있다 — 넘침과 토글 덮임으로 확인한다.
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      expect(overflow).toBeLessThanOrEqual(0);
-
-      await expectToggleHittable(page);
+      /* .nav__end 가 nav 의 마지막 자식이라 그 오른쪽 끝이 콘텐츠가 실제로 닿은 지점이다
+         (.nav__inner 의 오른쪽 패딩 24px 을 얼마나 먹었는지가 곧 이 값). scrollWidth 로는
+         이 여유를 못 본다 — 패딩을 먹는 동안엔 문서가 아직 안 넘치기 때문이다. */
+      const headroom = await page.evaluate(() => {
+        const end = document.querySelector(".nav__end")!.getBoundingClientRect();
+        return document.documentElement.clientWidth - end.right;
+      });
+      expect(
+        headroom,
+        `nav 오른쪽 여유가 ${headroom.toFixed(2)}px 로 --space-2(8px) 아래로 떨어졌다 — 320px 로그인 nav 의 폭 예산이 소진됐다. 무엇을 양보할지 먼저 정한다(features/routes.ts 주석).`,
+      ).toBeGreaterThanOrEqual(8);
     });
   }
+});
+
+/* 밑줄 계약의 유일한 기계 가드. chrome.css 의 .nav__signin 주석이 "밑줄 없음은 이 파일이 끈 게
+   아니라 Tailwind preflight 의 `a { text-decoration: inherit }` 에 얹혀 있다 — preflight 를 끄거나
+   이 앵커를 button 등 비앵커로 바꾸면 '밑줄은 로그아웃에만' 계약이 조용히 깨진다"를 정확히
+   진단해 놓고도, 그 회귀를 잡는 테스트가 이 저장소에 하나도 없었다(깨져도 게이트 8종이 전부
+   초록). 여기서 두 값만 못박는다.
+
+   음성 대조(실행함, 확인 후 원복): (1) `.nav__signout` 의 `text-decoration: underline` 선언을
+   지우면 로그인 단언만 `"underline"` → `"none"` 로 빨강. (2) `.nav__signin` 에
+   `text-decoration: underline`(preflight 가 죽었을 때 UA 기본값이 뚫고 나오는 상황을 흉내)을
+   얹으면 비로그인 단언만 `"none"` → `"underline"` 로 빨강. 서로 다른 단언이 서로 다른 회귀를
+   잡는다 — 하나가 다른 하나의 중복이 아니다. */
+test.describe("nav 세션 컨트롤 밑줄", () => {
+  test("비로그인: .nav__signin 은 밑줄이 없다", async ({ page }) => {
+    await page.goto("/");
+    const decoration = await page
+      .locator(".nav__signin")
+      .evaluate((el) => getComputedStyle(el).textDecorationLine);
+    expect(decoration).toBe("none");
+  });
+
+  test("로그인: .nav__signout 은 밑줄이 있다", async ({ page, baseURL }) => {
+    await signIn(page.context(), baseURL!);
+    await page.goto("/");
+    await expectSignedIn(page);
+    const decoration = await page
+      .locator(".nav__signout")
+      .evaluate((el) => getComputedStyle(el).textDecorationLine);
+    expect(decoration).toBe("underline");
+  });
 });
 
 /* 토글이 정말 눌리는지 — 인증 슬롯 넘침이 토글을 덮었던 회귀가 이 자리다.

@@ -24,10 +24,25 @@
 export const SITE_LINKS = [
   { href: "/landing", label: "소개", primary: true },
   { href: "/games", label: "게임", primary: true },
-  /* 일정은 **아직 상단 nav 에 안 건다**(primary:false). 상단 nav 는 320px 에서 "링크 2개 +
-     로그인"에 맞춰 여유 0 으로 튜닝돼 있어(chrome.css 의 .nav .brand·.nav__link 주석) 3번째
-     링크가 안 들어간다. 발견성은 푸터 사이트맵(FOOTER_LINKS)이 지금 맡고, 상단 nav 승격은
-     /calendar 가 서며 nav 를 3~4 링크로 재편할 때 함께 한다(이슈 #56 결정 10 "nav 4개").
+  /* 일정은 **아직 상단 nav 에 안 건다**(primary:false). 320px 로그인 상태의 폭 예산이
+     "링크 2개 + 로그인"으로 이미 차 있어 3번째 링크가 안 들어간다.
+
+     여유 0 인 건 **브랜드의 흡수 여유**다(min-width:44 바닥에 닿아 있다 — chrome.css 의
+     .nav .brand·.nav__link 주석). 문서 헤드룸은 0 이 아니라 10.41~11.06px 남아 있는데
+     (실측 320px 로그인: `/` 11.06 · `/landing`·`/games` 10.41 — 뒤 둘은 aria-current 의
+     700 가중치가 링크 묶음을 넓힌다), 3번째 링크는 53.23px 를 요구한다. 그래서 지금 올리면
+     문서가 넘쳐 WCAG 1.4.10 이 깨진다 — 넘침·부족분 둘 다 페이지마다 갈린다(실측: `/` 헤드룸
+     −42.17px·문서 넘침 43px, `/landing`·`/games` 헤드룸 −42.83px·넘침 44px — 위에서 헤드룸이
+     더 얕던 두 페이지가 그대로 더 깊이 넘친다). **기준은 가장 빡빡한 `/landing`·`/games` 다**
+     — 부족분이 42.83px 이라 "몇 px 만 짜내면 되는" 상황이 아니다 — 승격은 무엇을 양보할지
+     (로그아웃 아이콘화 22.47px · 링크 패딩 · 브랜드 워드마크) 정하는 일이 먼저다.
+
+     이 결정이 조용히 뒤집히지 않게 e2e 가 예산 자체를 못박는다:
+     `e2e/nav-touch-target.spec.ts` 의 "nav 폭 예산 — 로그인 상태"(320px × 3페이지에서
+     오른쪽 여유 >= --space-2). 여기 primary:true 로 바꾸면 그 세 테스트가 먼저 빨개진다.
+
+     발견성은 푸터 사이트맵(FOOTER_LINKS)이 지금 맡고, 상단 nav 승격은 /calendar 가 서며
+     nav 를 3~4 링크로 재편할 때 함께 한다(이슈 #56 결정 10 "nav 4개").
      그때까지도 복귀 허용목록(KNOWN_PAGE_PATHS)엔 들어 있어야 로그인 후 /schedule 로 정상
      복귀한다(이슈 #25 증상 방지 — 이 페이지에서 로그인한 사람만 조용히 `/` 로 안 떨어지게). */
   { href: "/schedule", label: "일정", primary: false },
