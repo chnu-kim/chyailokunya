@@ -53,6 +53,8 @@ const REJECTED_BEFORE_WRITE = new Set([
   "UNAUTHORIZED",
   "FORBIDDEN",
   "PRECONDITION_FAILED",
+  // 제안 도배 상한 — 세어 보고 거절하는 코드라 쓰기가 시작되기 전이다(suggestions/service).
+  "TOO_MANY_REQUESTS",
 ]);
 
 /** 코드가 있든 없든 공통으로 말이 되는 것들. 없으면 null 을 돌려 호출자별 분기로 넘긴다. */
@@ -149,4 +151,52 @@ export function deleteErrorMessage(e: unknown): string {
 
   // 모를 때의 기본값(INTERNAL_SERVER_ERROR·연결 실패). 원인을 말하지 않고 확인 방법만 준다.
   return "삭제됐는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
+}
+
+/* 제안 보내기 실패. 조작 명사가 "저장"이 아니라 **"보내기"** 라 writeErrorMessage 를 못 쓴다 —
+   팬은 자기가 무언가를 저장했다고 생각하지 않고(보드는 그대로다), "제안이 갔나"만 궁금하다.
+   도달 가능한 코드 집합도 다르다: CONFLICT 가 중복 게임이 아니라 **이미 보낸 제안**이고,
+   BAD_REQUEST 는 우리 쪽 결함이 아니라 사용자가 고칠 수 있는 상태(값이 그대로다)이며,
+   TOO_MANY_REQUESTS 는 이 경로에만 온다.
+
+   BAD_REQUEST 의 뜻이 뒤집히는 게 특히 중요하다 — writeErrorMessage 는 그것을 "우리 쪽 결함"
+   으로 읽어 "알려 주시면 고칠게요"라고 하는데, 여기선 사용자가 값을 바꾸거나 한마디를 쓰면
+   그대로 풀린다. 그 문구를 물려받으면 할 수 있는 일을 못 하게 만든다. */
+export function suggestErrorMessage(e: unknown): string {
+  // 멈춘 건 기다림이지 요청이 아니다 — 갔는지 안 갔는지 모른다(위 원칙).
+  if (isAborted(e))
+    return "응답이 너무 오래 걸려서 기다리기를 멈췄어요. 보내졌을 수도 있으니 새로고침해 확인해 주세요.";
+
+  const code = codeOf(e);
+  // 제안은 로그인만 요구하므로 이 자리의 실패는 사실상 세션 만료다.
+  if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
+    return "로그인이 만료됐어요. 다시 로그인하면 보낼 수 있어요.";
+  if (code === "CONFLICT")
+    return "이 게임엔 이미 보낸 제안이 있어요. 그 제안이 처리되면 다시 보낼 수 있어요.";
+  if (code === "BAD_REQUEST")
+    return "지금 값과 똑같아요 — 고칠 값을 바꾸거나 한마디를 남겨 주세요.";
+  if (code === "NOT_FOUND") return "보드에서 사라진 게임이에요. 새로고침해 주세요.";
+  if (code === "TOO_MANY_REQUESTS")
+    return "아직 처리 안 된 제안이 너무 많아요. 처리되면 더 보낼 수 있어요.";
+
+  if (code && REJECTED_BEFORE_WRITE.has(code))
+    return "제안을 보내지 못했어요. 잠시 후 다시 시도해 주세요.";
+
+  // 모를 때의 기본값 — 원인을 말하지 않고 확인 방법만 준다.
+  return "제안이 보내졌는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
+}
+
+/* 제안 처리(반영함·거절) 표시 실패. 관리자용이고, 여기서 실패해도 **게임은 이미 반영된 뒤일 수
+   있다** — 그 둘은 별개 요청이라서다(ADR-0025 결정 2 의 수용된 한계). 그래서 문구가 반영 자체를
+   실패로 말하면 안 된다: 관리자는 보드를 보고 반영 여부를 이미 알고, 여기서 남는 문제는
+   "제안함에 그 줄이 남았다"뿐이다. */
+export function resolveErrorMessage(e: unknown): string {
+  if (isAborted(e))
+    return "응답이 너무 오래 걸려서 기다리기를 멈췄어요. 제안함을 새로고침해 확인해 주세요.";
+  const code = codeOf(e);
+  const shared = sharedMessage(code);
+  if (shared) return shared;
+  if (code && REJECTED_BEFORE_WRITE.has(code))
+    return "제안 상태를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.";
+  return "제안 상태가 바뀌었는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
 }

@@ -39,3 +39,24 @@ export function authorizedProcedure(authority: Authority) {
     return next();
   });
 }
+
+/* 로그인만 요구한다 — authority 검사가 **없는 게 설계다**(ADR-0025).
+
+   권한 단위(AUTHORITIES)는 "관리자가 부여하는 상승"의 어휘고, core/authorities.ts 는 상승 역할만
+   저장하며 member 는 행 없는 암묵 기본값이라고 못박았다. 팬 제안은 상승이 아니라 **로그인의 기본
+   대가**라, 여기에 authority 를 붙이려면 로그인마다 users_roles 에 아무 힘도 없는 행을 써야 하고
+   그 순간 그 설계가 뒤집힌다. 얻는 것도 없다 — 모든 로그인 사용자가 가지는 권한은 "로그인했나"와
+   같은 말이다.
+
+   대가는 안다: 남용자 한 명의 제안 권한만 뺏을 자리가 없다. 그런 요구가 실제로 서면 그때 authority
+   를 연다(ADR-0010 의 JIT) — 지금은 게임당 사람당 미처리 제안 1건(부분 UNIQUE)과 사람당 미처리
+   총량 상한이 그 자리를 대신한다.
+
+   actor 를 next 로 좁혀 넘긴다 — 다운스트림이 다시 null 검사를 하지 않아도 되고, "여긴 로그인이
+   보장된다"가 타입으로 읽힌다(role/router.ts 가 방어로 한 번 더 검사하던 자리를 없앤다). */
+export const authenticatedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.actor) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "로그인이 필요해요" });
+  }
+  return next({ ctx: { ...ctx, actor: ctx.actor } });
+});

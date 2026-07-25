@@ -82,6 +82,15 @@ async function gameCard(db: Db, row: GameRow): Promise<GameCard> {
   return { ...row, lastPlayed: agg?.lastPlayed ?? null };
 }
 
+/* 한 게임의 유도 카드를 id 로 찾는다. 팬 제안(features/suggestions)이 "지금 보드에 있는 값"을
+   읽는 자리에 쓴다 — 제안이 실제로 무언가를 바꾸는지 판정하려면 현재 값이 필요하고, 그 값은
+   **보드가 그리는 것과 같아야** 한다. 그쪽에서 따로 쿼리를 짜면 lastPlayedExpr(발행 경계)가
+   두 곳에 살아 갈리고, 그때 제안함은 "안 바뀐다"는데 보드는 다른 날짜를 그리는 상태가 된다. */
+export async function findGameCard(db: Db, id: number): Promise<GameCard | null> {
+  const [row] = await db.select().from(games).where(eq(games.id, id));
+  return row ? gameCard(db, row) : null;
+}
+
 /* 여러 날 편성된 게임의 플레이 날짜를 게임 폼이 바꾸려 했다. 라우터가 BAD_REQUEST 로 올린다.
    서비스는 tRPC 무관이라 도메인 오류로 던진다(schedule/service 의 두 오류와 같은 결).
    폼도 같은 판정으로 입력을 잠그지만(core.isPlayDateEditable), 잠금은 편의고 진짜 방어선은

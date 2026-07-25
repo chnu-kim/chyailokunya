@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { games, makeDb, scheduleEntries, scheduleWeeks } from "./index";
+import { gameSuggestions, games, makeDb, scheduleEntries, scheduleWeeks, users } from "./index";
 
 /* D1 마이그레이션 + Drizzle + 무결성 제약이 workerd 안에서 실제로 서는지 못박는다. 각 it 은
    격리 저장소라 마이그레이션된 빈 스키마에서 시작한다(setupFiles). */
@@ -154,5 +154,167 @@ describe("일정 스키마 (D1 마이그레이션 스모크)", () => {
     ).rejects.toThrow();
     const [row] = await db.select().from(scheduleWeeks);
     expect(row!.publishedAt).toBeNull(); // null = 짜는 중(미발행)
+  });
+});
+
+/* 팬 수정 제안(ADR-0025). 이 테이블은 CHECK 가 넷이라 "저장 가능한 모양"이 곧 도메인 규칙이다 —
+   그 규칙이 실제 D1 에서 서는지 못박는다(타입만으로는 SQL 값 검사를 보증 못 한다). */
+describe("제안 스키마 (D1 마이그레이션 스모크)", () => {
+  // 제안엔 작성자가 필수라 헬퍼로 뽑는다. users 는 신원 앵커라 컬럼이 타임스탬프뿐이다.
+  async function seed(db: ReturnType<typeof makeDb>) {
+    const [author] = await db.insert(users).values({}).returning();
+    const [game] = await db
+      .insert(games)
+      .values({ categoryType: "GAME", categoryValue: "젤다의 전설" })
+      .returning();
+    return { authorId: author!.id, gameId: game!.id };
+  }
+
+  it("수정 제안을 넣고 읽는다 — 기본값은 미처리(pending)·안 깬 상태", async () => {
+    const db = makeDb(env.DB);
+    const { authorId, gameId } = await seed(db);
+    const [row] = await db
+      .insert(gameSuggestions)
+      .values({ kind: "edit", gameId, authorUserId: authorId, note: "7/20 에 엔딩 봤어요" })
+      .returning();
+    expect(row!.status).toBe("pending");
+    expect(row!.proposedCleared).toBe(false);
+    expect(row!.resolvedAt).toBeNull();
+    expect(row!.proposedTitle).toBeNull();
+  });
+
+  it("추가 요청은 대상 없이 이름만 든다", async () => {
+    const db = makeDb(env.DB);
+    const { authorId } = await seed(db);
+    const [row] = await db
+      .insert(gameSuggestions)
+      .values({ kind: "add", authorUserId: authorId, proposedTitle: "새로 나온 인디게임" })
+      .returning();
+    expect(row!.gameId).toBeNull();
+    expect(row!.proposedTitle).toBe("새로 나온 인디게임");
+  });
+
+  /* 종류마다 채워지는 자리가 다르다 — 섞인 행이 저장되면 제안함이 무엇을 그릴지 화면에서 갈린다. */
+  it("종류와 안 맞는 모양은 거절한다(shape CHECK)", async () => {
+    const db = makeDb(env.DB);
+    const { authorId, gameId } = await seed(db);
+    // 수정 제안인데 대상이 없다.
+    await expect(
+      db.insert(gameSuggestions).values({ kind: "edit", authorUserId: authorId }),
+    ).rejects.toThrow();
+    // 수정 제안인데 새 이름을 들고 있다.
+    await expect(
+      db
+        .insert(gameSuggestions)
+        .values({ kind: "edit", gameId, authorUserId: authorId, proposedTitle: "딴 이름" }),
+    ).rejects.toThrow();
+    // 추가 요청인데 대상 게임이 있다.
+    await expect(
+      db
+        .insert(gameSuggestions)
+        .values({ kind: "add", gameId, authorUserId: authorId, proposedTitle: "이름" }),
+    ).rejects.toThrow();
+    // 추가 요청인데 이름이 없다.
+    await expect(
+      db.insert(gameSuggestions).values({ kind: "add", authorUserId: authorId }),
+    ).rejects.toThrow();
+  });
+
+  it("안 깬 채 클리어 날짜만 있는 제안을 거절한다(games CHECK 의 짝)", async () => {
+    const db = makeDb(env.DB);
+    const { authorId, gameId } = await seed(db);
+    await expect(
+      db.insert(gameSuggestions).values({
+        kind: "edit",
+        gameId,
+        authorUserId: authorId,
+        proposedCleared: false,
+        proposedClearedDate: "2026-07-20",
+      }),
+    ).rejects.toThrow();
+    // 깬 채 날짜를 모르는 제안은 통과한다 — 그 표현을 살리는 게 플래그를 날짜와 독립으로 둔 이유.
+    const [ok] = await db
+      .insert(gameSuggestions)
+      .values({ kind: "edit", gameId, authorUserId: authorId, proposedCleared: true })
+      .returning();
+    expect(ok!.proposedClearedDate).toBeNull();
+  });
+
+  /* "처리됐다"와 "처리 흔적이 있다"가 어긋나면 제안함 목록과 감사가 다른 집합을 본다. */
+  it("처리 상태와 처리 흔적이 어긋나면 거절한다(resolution CHECK)", async () => {
+    const db = makeDb(env.DB);
+    const { authorId, gameId } = await seed(db);
+    // 미처리인데 처리 시각이 있다.
+    await expect(
+      db
+        .insert(gameSuggestions)
+        .values({ kind: "edit", gameId, authorUserId: authorId, resolvedAt: Date.now() }),
+    ).rejects.toThrow();
+    // 처리됐는데 처리자가 없다.
+    await expect(
+      db.insert(gameSuggestions).values({
+        kind: "edit",
+        gameId,
+        authorUserId: authorId,
+        status: "accepted",
+        resolvedAt: Date.now(),
+      }),
+    ).rejects.toThrow();
+    // 둘 다 갖추면 통과한다.
+    const [ok] = await db
+      .insert(gameSuggestions)
+      .values({
+        kind: "edit",
+        gameId,
+        authorUserId: authorId,
+        status: "rejected",
+        resolvedAt: Date.now(),
+        resolvedByUserId: authorId,
+      })
+      .returning();
+    expect(ok!.status).toBe("rejected");
+  });
+
+  it("한 사람이 한 게임에 미처리 제안 하나 — 처리되면 다시 낼 수 있다", async () => {
+    const db = makeDb(env.DB);
+    const { authorId, gameId } = await seed(db);
+    const [first] = await db
+      .insert(gameSuggestions)
+      .values({ kind: "edit", gameId, authorUserId: authorId })
+      .returning();
+    await expect(
+      db.insert(gameSuggestions).values({ kind: "edit", gameId, authorUserId: authorId }),
+    ).rejects.toThrow();
+
+    /* 부분 인덱스라 처리된 제안은 제약 밖으로 빠진다 — 이력이 쌓이는 걸 막지 않는다.
+       (막으면 한 번 거절당한 사람은 그 게임에 영영 제보를 못 한다.) */
+    await db
+      .update(gameSuggestions)
+      .set({ status: "rejected", resolvedAt: Date.now(), resolvedByUserId: authorId })
+      .where(eq(gameSuggestions.id, first!.id));
+    await db.insert(gameSuggestions).values({ kind: "edit", gameId, authorUserId: authorId });
+    expect(await db.select().from(gameSuggestions)).toHaveLength(2);
+  });
+
+  it("추가 요청은 여러 건 낼 수 있다 — 대상이 없어 그 제약이 성립하지 않는다", async () => {
+    const db = makeDb(env.DB);
+    const { authorId } = await seed(db);
+    await db
+      .insert(gameSuggestions)
+      .values({ kind: "add", authorUserId: authorId, proposedTitle: "게임 A" });
+    await db
+      .insert(gameSuggestions)
+      .values({ kind: "add", authorUserId: authorId, proposedTitle: "게임 B" });
+    expect(await db.select().from(gameSuggestions)).toHaveLength(2);
+  });
+
+  /* 게임이 보드에서 사라지면 반영할 대상이 없다. SET NULL 이면 shape CHECK 를 깨서 게임 삭제
+     자체가 실패하므로 CASCADE 여야 한다 — 그 사실을 여기서 못박는다. */
+  it("게임을 지우면 그 게임의 제안도 함께 사라진다(CASCADE)", async () => {
+    const db = makeDb(env.DB);
+    const { authorId, gameId } = await seed(db);
+    await db.insert(gameSuggestions).values({ kind: "edit", gameId, authorUserId: authorId });
+    await db.delete(games).where(eq(games.id, gameId));
+    expect(await db.select().from(gameSuggestions)).toHaveLength(0);
   });
 });
