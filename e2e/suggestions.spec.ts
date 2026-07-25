@@ -289,7 +289,10 @@ test("제안: 폼이 뜨면 아래 상세는 숨고, 미저장 확인 아래로�
   await page.locator("[data-od-id^='game-suggest-']").click();
   const form = page.locator("dialog[data-od-id='game-suggest']");
   await expect(form).toBeVisible();
-  await expect(detail).not.toBeVisible();
+  /* **opacity 로 잰다.** Playwright 의 visible 판정은 opacity 를 안 보고, 우리는 일부러
+     visibility 가 아니라 opacity 를 쓴다 — visibility 는 포커스 대상까지 죽여 위 모달이 닫힐 때
+     복원이 body 로 떨어진다(games.css 의 --covered 주석, 아래 포커스 단언이 그 회귀를 잡는다). */
+  await expect(detail).toHaveCSS("opacity", "0");
 
   /* 미저장 확인은 반대다 — 아래 폼이 보이는 채로 물어야 무엇을 잃는지 알 수 있다. */
   await page.locator("[data-od-id='suggest-note']").fill("적다 만 한마디");
@@ -300,10 +303,16 @@ test("제안: 폼이 뜨면 아래 상세는 숨고, 미저장 확인 아래로�
   // 「계속 작성」으로 돌아오면 폼은 그대로고 상세는 여전히 감춰져 있다.
   await page.locator("[data-od-id='game-suggest-discard-keep']").click();
   await expect(page.locator("[data-od-id='suggest-note']")).toHaveValue("적다 만 한마디");
-  await expect(detail).not.toBeVisible();
+  await expect(detail).toHaveCSS("opacity", "0");
 
   // 폼을 취소하면 감춰 뒀던 상세가 **그대로 돌아온다**(닫은 게 아니었다).
   await page.locator("[data-od-id='suggest-cancel']").click();
   await expect(form).toHaveCount(0);
-  await expect(detail).toBeVisible();
+  await expect(detail).toHaveCSS("opacity", "1");
+
+  /* **포커스가 트리거로 돌아온다.** 감추는 방식을 visibility 로 하면 정확히 여기가 깨진다 —
+     위가 닫히는 순간 아래는 아직 감춰진 채라 복원 대상이 포커스 불가라서 body 로 떨어진다
+     (실측: main 은 복원, visibility 판은 BODY). 키보드 사용자가 탭 순서 맨 앞으로 튕기는
+     회귀라 단언으로 못박는다. */
+  await expect(page.locator("[data-od-id^='game-suggest-']")).toBeFocused();
 });
