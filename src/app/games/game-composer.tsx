@@ -7,9 +7,9 @@ import {
   composerOptionCount,
   composerReducer,
   composerResultIndex,
+  composerStateWithQuery,
   composerStep,
   DIRECT_ENTRY_INDEX,
-  initialComposerState,
   showsDirectEntry,
   type ComposerActiveMove,
 } from "@/core/games-composer";
@@ -92,15 +92,26 @@ const optionClass = (active: boolean) =>
 const keepFocusInInput = (e: React.MouseEvent) => e.preventDefault();
 
 export function GameComposer({
+  initial,
   onAdded,
   onClose,
 }: {
+  /* 팬의 **추가 요청을 반영**할 때 채워 넣는 출발점(ADR-0025). 요청은 자유 이름이라 검색어로
+     넣고, 팬이 함께 보낸 날짜·클리어를 상세 단계의 폼 값에 미리 채운다 — 관리자가 그 값을
+     옮겨 적지 않아도 되게. 없으면 평소의 빈 컴포저다. */
+  initial?: { query: string; playedDate: string; cleared: boolean; clearedDate: string };
   onAdded: (row: GameCard) => void;
   onClose: () => void;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
-  const [state, dispatch] = useReducer(composerReducer, initialComposerState);
+  /* 검색어만 채우면 debounce effect 가 평소 경로 그대로 검색을 발사한다(core 의
+     composerStateWithQuery 주석) — "열자마자 한 번 쏘기" 같은 별도 배선을 안 만드는 이유다. */
+  const [state, dispatch] = useReducer(
+    composerReducer,
+    initial?.query ?? "",
+    composerStateWithQuery,
+  );
   /* 상세 단계의 서버 쓰기 에러만 여기 든다. 검색 에러(state.searchError)는 리듀서 소관이다 —
      응답이 늦게 도착할 때 어느 단계에 속한 문구인지 판단하는 건 전이 규칙이라서. */
   const [addError, setAddError] = useState("");
@@ -108,8 +119,11 @@ export function GameComposer({
      폼 값이라서다. 대신 단계를 옮기는 두 핸들러(뒤로·다른 게임 선택)가 이 값을 직접 비운다 —
      effect 로 step 을 보고 비우면 effect 안 동기 setState 라 set-state-in-effect(Next 16
      error)에 걸린다. */
-  const [playedDate, setPlayedDate] = useState("");
-  const { draft, setDraft } = useClearedDraft({ cleared: false, clearedDate: "" });
+  const [playedDate, setPlayedDate] = useState(initial?.playedDate ?? "");
+  const { draft, setDraft } = useClearedDraft({
+    cleared: initial?.cleared ?? false,
+    clearedDate: initial?.clearedDate ?? "",
+  });
   /* 닫기 신호와, 닫힌 뒤에 부모에게 넘길 행. 추가 성공 즉시 onAdded 를 부르면 부모가 같은
      커밋에서 컴포저를 언마운트해 닫기 effect 가 아예 안 돌고, 열린 채로 DOM 에서 빠져 포커스가
      body 로 떨어진다. 그래서 성공은 행을 쥐고 신호만 세우고, 실제 인계는 브라우저가 dialog 를

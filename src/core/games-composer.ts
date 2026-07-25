@@ -65,6 +65,17 @@ export const initialComposerState: ComposerState = {
   activeIndex: -1,
 };
 
+/* 검색어가 채워진 채로 여는 초기 상태. 관리자가 팬의 **추가 요청을 반영**할 때 그 이름으로
+   컴포저를 여는 자리에 쓴다(ADR-0025) — 요청은 자유 이름이라 정본 카테고리를 여기서 고른다.
+
+   query 만 채우면 끝인 게 핵심이다: searched 가 거짓이라 composerNeedsSearch 가 곧바로 참이 되고,
+   컴포넌트의 debounce effect 가 평소 경로 그대로 검색을 발사한다. "열자마자 한 번 검색" 같은
+   별도 배선을 만들면 그 경로만 늦게 온 응답을 버리는 규칙(searchSucceeded 의 query 대조)을
+   비껴갈 수 있다. */
+export function composerStateWithQuery(query: string): ComposerState {
+  return { ...initialComposerState, query };
+}
+
 /* 키보드가 커서를 옮기는 방향. 인덱스가 아니라 **뜻**을 싣는다 — 끝에서 순환할지, 아무것도
    안 가리킬 때 ↑ 가 어디로 갈지 같은 규칙이 컴포넌트로 새면 그 규칙엔 테스트가 안 붙는다.
 

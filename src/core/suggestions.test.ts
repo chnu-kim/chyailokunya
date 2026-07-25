@@ -18,7 +18,11 @@ describe("diffSuggestion", () => {
 
   it("클리어를 켜면서 날짜를 붙이면 두 줄이다", () => {
     expect(
-      diffSuggestion(current, { cleared: true, clearedDate: "2026-07-20", playedDate: "2026-07-11" }),
+      diffSuggestion(current, {
+        cleared: true,
+        clearedDate: "2026-07-20",
+        playedDate: "2026-07-11",
+      }),
     ).toEqual([
       { field: "cleared", from: false, to: true },
       { field: "clearedDate", from: null, to: "2026-07-20" },

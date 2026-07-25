@@ -30,6 +30,11 @@
   못 쓰고, 상승 역할 `admin`/`superadmin` 이 `game:write`·`game:delete`(superadmin 은 `role:manage`
   까지)를 갖는다. 최초 superadmin 은 `SUPERADMIN_CHANNEL_ID` 부트스트랩으로만 생긴다
   ([ADR-0012](./docs/adr/0012-role-based-writes-allowlist.md)·[ADR-0014](./docs/adr/0014-v1-data-model-schema.md)·[ADR-0018](./docs/adr/0018-role-audit-and-elevation-guard.md)).
+  **로그인한 팬에게도 할 수 있는 일이 하나 있다 — 게임 수정·추가 제안**이다
+  ([ADR-0025](./docs/adr/0025-fan-suggestions.md)). 제안은 authority 가 아니라 **로그인만**
+  요구하고(`authenticatedProcedure`), member 역할 행을 만들지 않는다 — 모든 로그인 사용자가
+  가지는 권한은 "로그인했나"와 같은 말이라 저장할 것이 없다. 제안은 게임을 **안 바꾼다**:
+  관리자가 제안함에서 보고 기존 수정·추가 폼으로 반영하므로 games 쓰기 경로는 그대로 하나다.
 
 ## 검증 (빌드·테스트·린트가 대신 잡아준다)
 
@@ -367,6 +372,30 @@ Phase 4(인증)에서 밟은 것:
   팝업이 열려 있어도 textbox 소관이라는 뜻이다. 가로채면 결과가 뜬 순간부터 검색어 앞뒤로
   캐럿을 못 옮겨, 접근성을 고치려는 변경이 다른 접근성을 깬다. 함께 정의된 "visual focus 를
   textbox 로 되돌린다"가 커서 해제에 해당한다.
+
+팬 제안(ADR-0025)에서 밟은 것들:
+
+- **보드를 안 바꾸는 쓰기는 성공 신호가 하나도 없다 — 화면이 직접 말해야 한다.** 저장 폼들은
+  보드가 바뀌는 것이 곧 영수증이라 성공하면 모달을 닫아도 됐는데, 제안은 관리자가 반영해야
+  바뀌므로 같은 규약을 쓰면 **모달이 사라진 것 말고 아무 일도 안 일어난다.** 팬은 실패로 읽고
+  다시 보내고, 게임당 미처리 하나 제약에 걸려 "이미 보낸 제안이 있어요"를 만난다. 라이브 영역
+  (`role="status"`)은 대안이 못 된다 — 모달이 열려 있는 동안 바깥은 inert 라 애초에 안 읽힌다.
+  그래서 제안 폼은 닫지 않고 **성공 화면으로 바뀐다**(`suggest-dialog.tsx`).
+
+- **`getByRole("alert")` 는 Next 의 라우트 announcer 를 먼저 잡는다.** App Router 가
+  `#__next-route-announcer__`(빈 div, 같은 role)를 항상 DOM 에 두기 때문에, 우리 오류 문구를
+  재려던 단언이 빈 문자열을 보고 타임아웃한다. 에러 자리를 잴 땐 그 모달 안으로 스코프를
+  좁힌다(`[data-od-id='…'] .err`).
+
+- **`narrow-body.spec.ts` 의 터치 타깃 검사는 셀렉터를 손으로 열거한다.** 새 조작을 더해도
+  **자동으로 안 잡힌다** — 게이트가 전부 초록인데 그 버튼만 검사 밖이다. 본문에 인터랙티브
+  요소를 더했으면 그 스펙에 같이 적는다. 그리고 신원이 갈리는 조작(관리자 전용·팬 전용)은
+  한 세션으로 못 재므로 세션을 바꿔 가며 잰다(`E2E_FAN`).
+
+- **부분 UNIQUE 인덱스의 WHERE 절에 drizzle 이 테이블 한정자를 붙인다.** 생성물이
+  `WHERE "t"."status" = 'pending'` 인데 SQLite 의 `CREATE INDEX … WHERE` 가 그걸 받는지는
+  스펙만 봐선 모른다 — 받는다(실측 2026-07-26, `node:sqlite`). 마이그레이션을 만들면 생성된
+  SQL 을 스크래치 sqlite 로 한 번 재생해 보는 습관이 이 자리를 덮는다.
 
 ## 접근성 기준 (협상 대상 아님)
 

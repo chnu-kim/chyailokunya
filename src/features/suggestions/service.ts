@@ -140,10 +140,7 @@ export async function createSuggestion(
     .select({ count: sql<number>`count(*)` })
     .from(gameSuggestions)
     .where(
-      and(
-        eq(gameSuggestions.authorUserId, authorUserId),
-        eq(gameSuggestions.status, "pending"),
-      ),
+      and(eq(gameSuggestions.authorUserId, authorUserId), eq(gameSuggestions.status, "pending")),
     );
   if ((open?.count ?? 0) >= OPEN_SUGGESTION_LIMIT) throw new TooManyOpenSuggestions();
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   addWeeks,
+  dateOfInstantKST,
   isIsoDate,
   toIsoDate,
   todayKST,
@@ -219,5 +220,23 @@ describe("WEEKDAY_LABELS", () => {
     expect(WEEKDAY_LABELS).toHaveLength(weekDates(d("2026-07-20")).length);
     expect(WEEKDAY_LABELS[0]).toBe("월");
     expect(WEEKDAY_LABELS[6]).toBe("일");
+  });
+});
+
+describe("dateOfInstantKST", () => {
+  it("절대 순간을 KST 의 하루로 접는다", () => {
+    // 2026-07-20 09:00 KST = 2026-07-20T00:00Z
+    expect(dateOfInstantKST(Date.UTC(2026, 6, 20, 0, 0))).toBe("2026-07-20");
+  });
+
+  /* UTC 로는 전날인 순간이 KST 로는 다음 날이다 — 이 함수가 존재하는 이유가 그 자리다.
+     실행 환경 존을 쓰면 서버(UTC)와 브라우저(KST)가 서로 다른 날을 적는다. */
+  it("UTC 자정 직전은 KST 로 이미 다음 날이다", () => {
+    expect(dateOfInstantKST(Date.UTC(2026, 6, 20, 23, 30))).toBe("2026-07-21");
+  });
+
+  it("KST 자정 직후는 그날이다(하루가 안 밀린다)", () => {
+    // 2026-07-21 00:30 KST = 2026-07-20T15:30Z
+    expect(dateOfInstantKST(Date.UTC(2026, 6, 20, 15, 30))).toBe("2026-07-21");
   });
 });

@@ -24,38 +24,36 @@ import {
 } from "./service";
 
 export const suggestionsRouter = router({
-  create: authenticatedProcedure
-    .input(createSuggestionInput)
-    .mutation(async ({ ctx, input }) => {
-      try {
-        return await createSuggestion(ctx.db, ctx.actor.userId, input);
-      } catch (e) {
-        /* 게임당 사람당 미처리 제안 하나(부분 UNIQUE 인덱스). 사용자가 손쓸 수 있는 상황이라
+  create: authenticatedProcedure.input(createSuggestionInput).mutation(async ({ ctx, input }) => {
+    try {
+      return await createSuggestion(ctx.db, ctx.actor.userId, input);
+    } catch (e) {
+      /* 게임당 사람당 미처리 제안 하나(부분 UNIQUE 인덱스). 사용자가 손쓸 수 있는 상황이라
            — 먼저 낸 제안을 관리자가 처리하면 다시 낼 수 있다 — 그 사실까지 문구에 담는다. */
-        if (isUniqueViolation(e)) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "이 게임엔 이미 보낸 제안이 있어요. 그 제안이 처리되면 다시 보낼 수 있어요.",
-          });
-        }
-        if (e instanceof SuggestionGameNotFound) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "보드에 없는 게임이에요." });
-        }
-        if (e instanceof EmptySuggestion) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "지금 값과 똑같아요 — 고칠 값을 바꾸거나 한마디를 남겨 주세요.",
-          });
-        }
-        if (e instanceof TooManyOpenSuggestions) {
-          throw new TRPCError({
-            code: "TOO_MANY_REQUESTS",
-            message: `아직 처리 안 된 제안이 ${OPEN_SUGGESTION_LIMIT}개예요. 처리되면 더 보낼 수 있어요.`,
-          });
-        }
-        throw e;
+      if (isUniqueViolation(e)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "이 게임엔 이미 보낸 제안이 있어요. 그 제안이 처리되면 다시 보낼 수 있어요.",
+        });
       }
-    }),
+      if (e instanceof SuggestionGameNotFound) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "보드에 없는 게임이에요." });
+      }
+      if (e instanceof EmptySuggestion) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "지금 값과 똑같아요 — 고칠 값을 바꾸거나 한마디를 남겨 주세요.",
+        });
+      }
+      if (e instanceof TooManyOpenSuggestions) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: `아직 처리 안 된 제안이 ${OPEN_SUGGESTION_LIMIT}개예요. 처리되면 더 보낼 수 있어요.`,
+        });
+      }
+      throw e;
+    }
+  }),
 
   // 내가 낸 것만 본다 — 작성자 필터가 곧 그 경계다(service.listMySuggestions 주석).
   mine: authenticatedProcedure.query(({ ctx }) => listMySuggestions(ctx.db, ctx.actor.userId)),

@@ -3,6 +3,7 @@ import "./games.css";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { makeDb } from "@/db";
 import { listGames } from "@/features/games/service";
+import { countPendingSuggestions } from "@/features/suggestions/service";
 import { GameBoard } from "./game-board";
 import { getServerActor, getServerAuthorities } from "../server-session";
 import { OG_IMAGE, OG_LOCALE, OG_SITE_NAME } from "../site-meta";
@@ -27,24 +28,34 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function Games() {
-  // 목록과 권한은 서로 무관하므로 병렬로 — 직렬로 두면 D1 왕복 하나가 렌더에 그냥 더해진다.
-  // UI 분기는 편의일 뿐 — 진짜 방어선은 tRPC 뮤테이션의 서버 인가다(불변식 3). 버튼을 숨겨도
-  // 서버가 authorities 를 다시 검사한다.
-  const [games, authorities] = await Promise.all([
-    // 요청 스코프의 D1 바인딩으로 직접 조립한다 — server-session·tRPC 라우트와 같은 패턴
-    // (한때 db/runtime.getDb 가 이 한 곳만을 위해 있었다 — shallow 라 흡수).
-    listGames(makeDb(getCloudflareContext().env.DB)),
+  // 요청 스코프의 D1 바인딩으로 직접 조립한다 — server-session·tRPC 라우트와 같은 패턴
+  // (한때 db/runtime.getDb 가 이 한 곳만을 위해 있었다 — shallow 라 흡수).
+  const db = makeDb(getCloudflareContext().env.DB);
+  /* 목록과 권한은 서로 무관하므로 병렬로 — 직렬로 두면 D1 왕복 하나가 렌더에 그냥 더해진다.
+     getServerActor 를 두 번 부르는 건 중복이 아니다(react cache 로 요청 스코프 메모이즈).
+     UI 분기는 편의일 뿐 — 진짜 방어선은 tRPC 의 서버 인가다(불변식 3). */
+  const [games, authorities, actor] = await Promise.all([
+    listGames(db),
     getServerActor().then(getServerAuthorities),
+    getServerActor(),
   ]);
-  /* 보드에 신원(로그인 여부)을 넘기지 않는다. 한때 "비로그인 / 로그인+권한없음"을 갈라 서로
-     다른 안내를 띄웠지만, member 역할이 없어 둘 다 영원히 쓰기를 못 얻으므로 구분에 실익이
-     없었다(이슈 #22). 권한만 넘기면 보드는 "쓸 수 있나"만 알면 된다 — 불변식 3 과도 결이 맞다. */
+  const canWrite = authorities.has("game:write");
+  /* **신원(로그인 여부)을 넘긴다.** 한때 안 넘겼고 근거는 "비로그인과 로그인+권한없음을 갈라도
+     둘 다 영원히 쓰기를 못 얻으니 실익이 없다"였는데(이슈 #22), 팬 제안이 그 전제를 뒤집었다 —
+     이제 로그인한 사람만 할 수 있는 일이 실재하므로 그 둘의 화면이 갈려야 한다(ADR-0025).
+
+     미처리 제안 수는 **관리자일 때만** 센다. 공개 읽기에 왕복을 더하지 않으려는 것이고, 그래서
+     위 병렬 묶음에 못 넣는다(canWrite 를 알아야 셀지 정해진다). 관리자는 소수라 그 직렬 한 번이
+     공개 트래픽에 얹히지 않는다. */
+  const initialPending = canWrite ? await countPendingSuggestions(db) : 0;
   return (
     <main id="main">
       <GameBoard
         initialGames={games}
-        canWrite={authorities.has("game:write")}
+        canWrite={canWrite}
         canDelete={authorities.has("game:delete")}
+        signedIn={actor !== null}
+        initialPending={initialPending}
       />
     </main>
   );

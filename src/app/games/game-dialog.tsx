@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatMD } from "@/core/calendar";
-import { isPlayDateEditable } from "@/core/games";
+import { formatDate, isPlayDateEditable } from "@/core/games";
 
 /* 게임 보드의 모달 키트 — 컴포저(추가)와 클리어 수정이 둘 다 쓴다. 두 번째 호출자가 생기면서
    드러난 seam 이라 여기로 뺐다(ADR-0010 의 JIT 추상화). 담는 건 둘이다: 네이티브 dialog 셸과
@@ -701,5 +701,52 @@ export function ClearedFields({
         </div>
       )}
     </div>
+  );
+}
+
+/* 게임의 사실 두 줄(플레이한 날·클리어). 카드 상세와 **팬 제안 폼의 "지금 보드에 있는 값"** 이
+   나눠 쓴다 — 두 번째 호출자가 생기며 드러난 seam 이라 여기로 뺐다(ADR-0010 의 JIT 추상화).
+   두 자리가 같은 값을 다르게 적으면 팬이 제안 폼에서 본 상태와 상세에서 본 상태가 갈린다.
+
+   정의 목록인 이유: "이름: 값" 쌍이라는 걸 마크업이 말해야 스크린리더가 둘을 이어 읽는다
+   (문단 두 개로 두면 라벨과 값의 관계가 사라진다).
+
+   **값 칸은 표기형이다 — 대화체 서술을 넣지 않는다.** 한때 "했어요"·"아직이에요"였는데, 같은
+   목록의 다른 값이 '2026.03.01' 같은 표기라 이 칸만 어투가 튀어 화면이 가벼워졌다(사용자 지적,
+   PR #70). 라벨이 묻고 값이 대답하는 문장이 아니라, 카드 앞면 칩("클리어")이 쓰는 어휘 그대로의
+   표기다. 안내문·힌트의 다정한 해요체는 그대로다 — 저긴 값 칸이 아니다. */
+export function GameFacts({
+  lastPlayed,
+  cleared,
+  clearedDate,
+  idPrefix,
+}: {
+  lastPlayed: string | null;
+  cleared: boolean;
+  clearedDate: string | null;
+  // data-od-id 접두사. 상세는 "detail" 을 넘겨 기존 e2e 손잡이(detail-played·detail-cleared)를 잇는다.
+  idPrefix: string;
+}) {
+  return (
+    <dl className="detail__facts">
+      <dt>플레이한 날</dt>
+      <dd data-od-id={idPrefix + "-played"}>
+        {lastPlayed ? formatDate(lastPlayed) : <span className="detail__none">기록 없음</span>}
+      </dd>
+      <dt>클리어</dt>
+      <dd data-od-id={idPrefix + "-cleared"}>
+        {cleared ? (
+          clearedDate ? (
+            <>{formatDate(clearedDate)} 클리어</>
+          ) : (
+            // 날짜를 모르는 클리어도 유효한 상태다 — 빈칸으로 두면 안 깬 것처럼 읽힌다.
+            // 날짜가 붙은 값과 나란히 놓여야 "날짜만 모른다"가 저절로 드러난다.
+            "완료"
+          )
+        ) : (
+          <span className="detail__none">미완료</span>
+        )}
+      </dd>
+    </dl>
   );
 }

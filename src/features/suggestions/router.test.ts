@@ -162,9 +162,9 @@ describe("제안 접수 (로그인만 요구한다)", () => {
     for (let i = 0; i < OPEN_SUGGESTION_LIMIT; i++) {
       await fan.suggestions.create({ kind: "add", title: "게임 " + i });
     }
-    await expect(
-      fan.suggestions.create({ kind: "add", title: "한 개 더" }),
-    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(fan.suggestions.create({ kind: "add", title: "한 개 더" })).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+    });
   });
 });
 
@@ -174,9 +174,9 @@ describe("제안함 (game:write 가 지킨다)", () => {
     const fan = createCaller(makeCtx({ userId }));
     await expect(fan.suggestions.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(fan.suggestions.pendingCount()).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(
-      fan.suggestions.resolve({ id: 1, resolution: "accepted" }),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(fan.suggestions.resolve({ id: 1, resolution: "accepted" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
   });
 
   it("미처리 제안을 최신순으로 주고 작성자 표시명을 싣는다", async () => {

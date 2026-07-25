@@ -43,7 +43,11 @@ export const createSuggestionInput = z
     /* 없는 게임을 올려 달라. **치지직 검색을 안 열었으므로 자유 이름이다**(client_credentials 를
        공개 트래픽에 두지 않는다 — features/chzzk/router.ts). 상한 200 은 games.categoryValue 와
        같은 자리에 둔다: 관리자가 반영할 때 이 이름이 그대로 컴포저 검색어가 된다. */
-    z.object({ kind: z.literal("add"), title: z.string().trim().min(1).max(200), ...proposedValues }),
+    z.object({
+      kind: z.literal("add"),
+      title: z.string().trim().min(1).max(200),
+      ...proposedValues,
+    }),
   ])
   /* 안 깬 게임에 클리어 날짜가 붙는 모순을 입력 경계에서 막는다 — DB CHECK 와 이중이고 판정은
      games 폼과 **같은 core 함수**를 나눠 쓴다. 갈리면 제안으로는 저장되는데 반영하려는 순간

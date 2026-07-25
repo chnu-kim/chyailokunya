@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run typecheck *)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run -s typecheck *)",
+      "Bash(npm run lint *)",
+      "Bash(npm run lint)",
+      "Bash(npm run -s lint *)",
+      "Bash(npm run boundaries *)",
+      "Bash(npm run boundaries)",
+      "Bash(npm run -s boundaries *)",
+      "Bash(npm run format:check *)",
+      "Bash(npm run format:check)",
+      "Bash(npm run -s format:check *)",
+      "Bash(npm run test *)",
+      "Bash(npm run test)",
+      "Bash(npm test *)",
+      "Bash(npm test)",
+      "Bash(npx vitest run *)",
+      "Bash(npx prettier --check *)",
+      "Bash(gh secret list *)",
+      "Bash(op whoami *)",
+      "mcp__chzzk__chzzk_get_api_spec",
+      "mcp__chzzk__chzzk_list_apis",
+      "mcp__1password__list_environments",
+      "mcp__1password__list_variables"
+    ]
+  }
+}
