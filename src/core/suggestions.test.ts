@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   diffSuggestion,
+  initialPlayDateFor,
   isEmptyEditSuggestion,
   isPlayDateApplied,
   isSuggestedValuesValid,
@@ -127,5 +128,29 @@ describe("isPlayDateApplied", () => {
   it("잠겼어도 원하는 값이 이미 지금 값이면 반영된 것이다", () => {
     expect(isPlayDateApplied("2026-07-11", "2026-07-11", true)).toBe(true);
     expect(isPlayDateApplied("", "", true)).toBe(true);
+  });
+});
+
+/* 반영 폼에 무엇을 채우는가. **팬이 본 값과 관리자 폼이 읽는 값이 서로 다른 기준**이라
+   (발행 경계) 제안 스냅샷을 그대로 넣으면 팬이 못 본 날짜를 지우는 지시가 된다. */
+describe("initialPlayDateFor", () => {
+  it("제안 반영이 아니면 서버가 준 값을 그대로 쓴다", () => {
+    expect(initialPlayDateFor(undefined, "2026-07-11", "2026-07-11")).toBe("2026-07-11");
+  });
+
+  /* **이 자리가 데이터 손실이 살던 곳이다.** 초안 주에 항목이 하나 있으면 팬 화면엔 "기록 없음"
+     이라(lastPlayed 가 발행된 것만 센다) 클리어만 알려 주는 제안이 null 을 싣는데, 그 값을
+     입력에 넣으면 저장이 그 초안 항목의 게임 연결을 끊는다 — 아무도 그럴 의도가 없었다. */
+  it("팬이 안 고쳤으면 서버 값을 지킨다 — 팬에게 안 보이던 초안 항목이 살아남는다", () => {
+    expect(initialPlayDateFor("", "", "2026-07-20")).toBe("2026-07-20");
+  });
+
+  it("팬이 고쳤으면 그 값을 싣는다", () => {
+    expect(initialPlayDateFor("2026-07-21", "2026-07-11", "2026-07-11")).toBe("2026-07-21");
+  });
+
+  // 팬이 **본 날짜를 지우자고** 한 제안은 그대로 지운다 — 그건 안 보이던 값이 아니다.
+  it("보이던 날짜를 비우자는 제안은 그대로 싣는다", () => {
+    expect(initialPlayDateFor("", "2026-07-11", "2026-07-11")).toBe("");
   });
 });

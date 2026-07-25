@@ -11,7 +11,7 @@ import {
   sortGameCards,
 } from "@/core/games";
 import type { GameCard } from "@/features/games/service";
-import { isPlayDateApplied } from "@/core/suggestions";
+import { initialPlayDateFor, isPlayDateApplied } from "@/core/suggestions";
 import type { SuggestionListItem } from "@/features/suggestions/service";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
@@ -851,6 +851,11 @@ function GameEditor({
   /* 제안이 채우는 날짜. 객체가 아니라 원시값을 뽑아 두는 건 아래 effect 의존성에 싣기 위해서다 —
      initial 객체는 매 렌더 새로 만들어지므로 그대로 실으면 조회가 무한히 다시 돈다. */
   const initialPlayedDate = initial?.playedDate;
+  /* **팬이 본 값**(보드의 lastPlayed). 두 자리가 이걸 기준으로 삼는다: 제안 값을 입력에 실을지
+     (initialPlayDateFor)와 반영이 날짜까지 담았는지(isPlayDateApplied). 폼의 loadedDate 를 쓰면
+     안 되는 이유가 각각 다르다 — 앞은 팬이 못 본 초안 항목을 지우게 되고, 뒤는 여러 날 편성일 때
+     loadedDate 가 빈 값이라 정상 반영까지 미완으로 떨어진다. */
+  const shownDate = game.lastPlayed ?? "";
 
   /* 열릴 때 한 번 조회한다. setState 가 await 뒤에서만 일어나므로 effect 안 **동기** setState 를
      막는 규칙(set-state-in-effect)에 걸리지 않는다. 모달은 editing 이 null 을 거쳐 매번 리마운트
@@ -872,7 +877,9 @@ function GameEditor({
            며칠 전에 적어 낸 값이라 그 사이의 일정 변경을 조용히 되돌린다). 제안이 채우는 건
            **입력값**뿐이고, 그래서 그 값이 지금 값과 다르면 정상적으로 dateEdited 가 선다. */
         setLoadedDate(loaded);
-        setPlayedDate(initialPlayedDate ?? loaded);
+        /* 팬이 **실제로 고친** 날짜만 싣는다 — 제안 스냅샷을 그대로 넣으면 초안 주의 항목처럼
+           팬이 못 본 날짜를 지우라는 지시가 된다(core.initialPlayDateFor). */
+        setPlayedDate(initialPlayDateFor(initialPlayedDate, shownDate, loaded));
       } catch {
         if (!alive) return;
         setLoadFailed(true);
@@ -882,16 +889,14 @@ function GameEditor({
     return () => {
       alive = false;
     };
-  }, [game.id, initialPlayedDate]);
+    /* shownDate 도 싣는다 — 프리필 판정이 이걸 읽으므로 빠지면 낡은 값으로 채운다. game 이 바뀌면
+       game.id 와 함께 바뀌므로 실질적으로 재조회를 늘리지 않는다(모달은 매번 리마운트된다). */
+  }, [game.id, initialPlayedDate, shownDate]);
 
   /* 여러 날 편성이면 입력이 잠기고(core.isPlayDateEditable) 저장에 날짜를 안 싣는다.
      dateEdited 는 조회가 끝난 뒤에만 참이 될 수 있다 — dates 가 null 인 동안 playedDate 는
      아직 빈 채라, 그 차이를 "고쳤다"로 세면 열자마자 낡은 빈 값이 저장에 실린다. */
   const locked = dates !== null && !isPlayDateEditable(dates);
-  /* 제안 반영이 "날짜까지 담았나"를 재는 기준. 폼의 loadedDate 가 아니라 **보드가 그리는 날짜**
-     여야 한다 — 팬의 제안도 그 화면에서 본 값 위에서 쓰였으므로 비교 대상이 같아야 하고,
-     여러 날 편성이면 loadedDate 는 빈 값이라 기준으로 못 쓴다(위 setSaved 주석). */
-  const shownDate = game.lastPlayed ?? "";
   const dateEdited = !locked && dates !== null && playedDate !== loadedDate;
 
   function onSave(e: React.FormEvent) {

@@ -98,6 +98,32 @@ export function isEmptyEditSuggestion(
   return diffSuggestion(current, proposed).length === 0 && (note === null || note.trim() === "");
 }
 
+/* 반영 폼의 플레이 날짜 입력에 무엇을 채울 것인가.
+
+   **제안 값을 그대로 넣으면 안 된다.** 제안은 스냅샷이라 팬이 안 고친 값도 실려 오는데, 팬이
+   본 값과 관리자 폼이 읽는 값이 **서로 다른 기준**이기 때문이다:
+
+     팬(보드의 lastPlayed) — 발행 경계를 통과한 항목만 센다. 초안 주의 항목은 안 보인다.
+     관리자 폼(games.playDates) — 초안 주까지 센다(그래야 잠금 판정이 선다).
+
+   그래서 초안 주에 항목이 하나 있는 게임은 팬 화면에 "기록 없음"으로 뜨고, 클리어만 알려 주려는
+   제안이 `playedDate: null` 을 싣는다. 그 null 을 폼에 넣으면 **팬이 못 본 날짜를 지우라는
+   지시**가 되어, 저장이 그 초안 항목의 게임 연결을 끊는다 — 팬도 관리자도 그럴 의도가 없었고
+   화면엔 아무 신호도 없다(PR #71 의 GitHub Codex 리뷰가 P1 로 잡았다).
+
+   그래서 **팬이 실제로 고친 날짜만** 싣는다. 판정 기준은 "제안 값이 팬이 본 값과 다른가"이고,
+   같으면 서버가 준 값(loaded)을 그대로 둬 폼이 일정을 안 건드린다. */
+export function initialPlayDateFor(
+  // 제안이 실은 값. undefined = 제안 반영이 아니다(평소의 수정 폼).
+  proposed: string | undefined,
+  // 팬이 본 값 = 보드의 lastPlayed(빈 문자열이면 "기록 없음").
+  shown: string,
+  // 서버가 준 값 = 그 게임의 일정 항목(초안 주까지 센다).
+  loaded: string,
+): string {
+  return proposed !== undefined && proposed !== shown ? proposed : loaded;
+}
+
 /* 반영이 제안의 **플레이 날짜까지** 실제로 담았는가.
 
    왜 필요한가: 여러 날 편성된 게임은 게임 폼이 날짜를 잠근다(isPlayDateEditable) — 입력 하나로
