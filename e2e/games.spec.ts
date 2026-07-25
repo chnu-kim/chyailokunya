@@ -79,7 +79,7 @@ test("게임: 카드를 열면 날짜·클리어가 상세에 뜬다(로그아�
   const detail = page.locator('dialog[data-od-id="game-detail"]');
   await expect(detail).toBeVisible();
   await expect(detail.locator('[data-od-id="detail-played"]')).toHaveText("2026.03.01");
-  await expect(detail.locator('[data-od-id="detail-cleared"]')).toHaveText("아직이에요");
+  await expect(detail.locator('[data-od-id="detail-cleared"]')).toHaveText("미완료");
   // 조작은 권한 뒤다 — 로그아웃 상태에선 수정·삭제가 아예 없다(서버 인가와 이중, 불변식 3).
   await expect(detail.locator('[data-od-id^="game-edit-"]')).toHaveCount(0);
   await expect(detail.locator('[data-od-id^="game-del-"]')).toHaveCount(0);
@@ -89,16 +89,17 @@ test("게임: 카드를 열면 날짜·클리어가 상세에 뜬다(로그아�
   /* 클리어한 날은 **상세에만** 뜬다. 정렬 축이 아닌 날짜를 앞면에 실으면 순서가 어긋나 보이므로
      보드에선 뺐는데(위 스펙), 그렇다고 값이 사라진 건 아니라는 걸 여기가 증명한다. */
   await openCard(page, "셀레스테");
-  await expect(detail.locator('[data-od-id="detail-cleared"]')).toHaveText("2026.01.29");
+  await expect(detail.locator('[data-od-id="detail-cleared"]')).toHaveText("2026.01.29 클리어");
   await page.keyboard.press("Escape");
   await expect(detail).toHaveCount(0);
 
   /* 깼는데 날짜를 모르는 상태도 글자로 말한다 — 빈칸으로 두면 안 깬 것과 구별이 안 되고,
-     그 구별이 클리어를 날짜와 독립된 플래그로 둔 이유 그 자체다. 일정 항목도 없는 행이라
-     "아직 없어요"까지 한 화면에서 함께 본다. */
+     그 구별이 클리어를 날짜와 독립된 플래그로 둔 이유 그 자체다. "완료"(날짜 모름)와 위의
+     "2026.01.29 클리어"가 **다른 글자여야** 그 구별이 산다. 일정 항목도 없는 행이라
+     "기록 없음"까지 한 화면에서 함께 본다. */
   await openCard(page, "할로우 나이트");
-  await expect(detail.locator('[data-od-id="detail-cleared"]')).toContainText("날짜 모름");
-  await expect(detail.locator('[data-od-id="detail-played"]')).toHaveText("아직 없어요");
+  await expect(detail.locator('[data-od-id="detail-cleared"]')).toHaveText("완료");
+  await expect(detail.locator('[data-od-id="detail-played"]')).toHaveText("기록 없음");
 });
 
 /* 상세는 히스토리 엔트리 하나를 차지한다(이슈 #65). 안 그러면 모바일 하드웨어 뒤로가기·iOS
@@ -315,7 +316,7 @@ test("관리자: 고치던 폼은 배경을 클릭해도 확인 없이 닫히지
   await expect(editor).toHaveCount(0);
   await page.reload();
   await openCard(page, "스타듀 밸리");
-  await expect(page.locator('dialog[data-od-id="game-detail"]')).toContainText("아직이에요");
+  await expect(page.locator('dialog[data-od-id="game-detail"]')).toContainText("미완료");
 });
 
 /* 상세를 닫자마자 다른 카드를 누르는 연타. **엔트리를 되돌리는 history.back() 은 비동기

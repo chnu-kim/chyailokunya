@@ -679,7 +679,9 @@ export function ClearedFields({
             )
           }
         />
-        <span className="clearfields__togglelabel">클리어했어요</span>
+        {/* 조작의 이름이지 대답이 아니다 — 바로 아래 "클리어한 날"과 한 어휘로 선다
+            (상세 값 칸이 표기형으로 돌아간 것과 같은 규약). */}
+        <span className="clearfields__togglelabel">클리어함</span>
       </label>
       {draft.cleared && (
         // 라벨엔 이름만 — "모르면 비워 둬요"를 뺀 근거는 PlayedDateField 주석에 있다.
