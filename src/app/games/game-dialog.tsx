@@ -391,7 +391,19 @@ export function GameDialog({
   return (
     <>
       <dialog
-        className={className ? "composer paper " + className : "composer paper"}
+        /* covered = 내 **위에** 다른 카드가 떴다. 그동안은 숨는다 — 네이티브 dialog 두 장이
+           top layer 에 쌓이면 아래가 그대로 드러나는데, 흰 카드 두 장이 어긋나 겹친 모습이
+           그 자체로 지저분하다(사용자 지적). 닫지는 않으므로 취소하면 그대로 돌아온다
+           (ADR-0023 이 지키려던 건 "돌아갈 자리"이지 "보이는 것"이 아니다).
+
+           **미저장 확인은 이 길로 안 온다** — 그건 셸이 자기 안에서 띄우고 부모의 covered 를
+           안 건드린다. 거긴 뒤가 보이는 게 근거다(무엇을 잃는지 보면서 판단해야 한다). */
+        className={[
+          className ? "composer paper " + className : "composer paper",
+          covered && "composer--covered",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         ref={dialogRef}
         role={alert ? "alertdialog" : undefined}
         aria-labelledby={titleId}

@@ -161,15 +161,21 @@ test("관리자: 수정이 겹쳐 뜬 동안엔 뒤로가기가 페이지를 안
   await expect(page.locator('[data-od-id="editor-played"]')).toHaveValue("2026-04-11");
 
   await page.goBack();
-  // 세 가지가 전부 그대로다: 페이지 · 아래 상세 · 위 수정 폼.
+  /* 세 가지가 전부 그대로다: 페이지 · 아래 상세 · 위 수정 폼.
+
+     상세는 **열린 채인지**로 잰다(toBeVisible 이 아니라). 위에 카드가 겹치면 아래는 감춰지므로
+     (games.css 의 .composer--covered — 흰 카드 둘이 어긋나 겹쳐 보이는 걸 막는다) 눈에는 안
+     보이는데, 이 단언이 묻는 건 "뒤로가기가 상세를 **닫았나**"이지 보이느냐가 아니다. */
   await expect(page).toHaveURL(/\/games$/);
-  await expect(detail).toBeVisible();
+  await expect(detail).toHaveAttribute("open", "");
   await expect(editor).toBeVisible();
 
   /* 덫이 아니라 유예다 — 위를 닫으면 그다음 뒤로가기가 정상으로 돈다. 이 단언이 없으면
      "뒤로가기를 영영 삼킨다"는 회귀가 위 단언만으로는 초록이다. */
   await page.locator('[data-od-id="game-editor-cancel"]').click();
   await expect(editor).toHaveCount(0);
+  // 감춰 뒀던 상세가 **그대로 돌아온다** — 닫은 게 아니었다는 증거다.
+  await expect(detail).toBeVisible();
   await page.goBack();
   await expect(detail).toHaveCount(0);
   await expect(page).toHaveURL(/\/games$/);
