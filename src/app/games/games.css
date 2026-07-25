@@ -279,6 +279,14 @@ dialog.composer {
   inset: 0;
   margin: auto;
   width: min(560px, calc(100vw - 2 * var(--space-5)));
+  /* UA 스타일시트가 `dialog:modal` 에 `max-width: calc(100% - 6px - 2em)` 을 건다 — 기본
+     테두리(medium 3px 둘)와 패딩(1em 둘)을 **content-box 기준으로 미리 빼 둔** 보정이라,
+     box-sizing:border-box 인 이 저장소에선 그 38px 이 한 번 더 깎인다(실측 320px → 282px).
+     넓은 폭에선 margin:auto 가 남는 38px 을 반씩 나눠 가져 티가 안 났지만, 바텀 시트는
+     margin:0 이라 over-constrained 에서 left:0 이 이겨 **오른쪽만 38px 빈다**(이슈 #68).
+     폭은 이 컴포넌트가 두 갈래로 직접 정하므로(여기 min(), 아래 560px 쿼리의 100%) UA 상한이
+     끼어들 자리가 없다 — 끈다. */
+  max-width: none;
   max-height: calc(100vh - 2 * var(--space-6));
   overflow: visible;
   padding: var(--space-6) 0 0;
@@ -808,7 +816,14 @@ dialog.composer--detail {
   width: min(440px, calc(100vw - 2 * var(--space-5)));
 }
 
-/* 좁은 화면에선 바텀 시트 — 엄지가 닿는 곳에 붙고, 위쪽 여백으로 뒤 보드가 계속 보인다. */
+/* 좁은 화면에선 바텀 시트 — 엄지가 닿는 곳에 붙고, 위쪽 여백으로 뒤 보드가 계속 보인다.
+   여기서 `--confirm`·`--detail` 의 좁은 폭까지 덮는다(같은 특정도, 뒤에 오는 규칙이라).
+
+   **이 세 줄은 위 `max-width: none` 과 한 벌이다.** margin:0 + left/right 0 은
+   over-constrained 라 폭이 조금이라도 깎이면 그 몫이 전부 오른쪽에 몰린다(left 가 이긴다) —
+   상한을 하나라도 되살리면 이슈 #68 이 그대로 재발한다. `width: 100%` 는 고정 배치의
+   컨테이닝 블록(=뷰포트)에 대한 값이라 스크롤바를 안 세는 반면 100vw 는 세므로, 여기선
+   100vw 로 바꾸지 않는다. */
 @media (max-width: 560px) {
   dialog.composer {
     inset: auto 0 0 0;
