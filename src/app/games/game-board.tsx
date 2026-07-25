@@ -380,6 +380,7 @@ export function GameBoard({
       {inboxOpen && (
         <SuggestionInbox
           games={games}
+          pending={pending}
           onApply={onApplySuggestion}
           onResolved={() => setPending((n) => Math.max(0, n - 1))}
           onClose={() => setInboxOpen(false)}

@@ -24,11 +24,15 @@ import { GameDialog } from "./game-dialog";
    같아지기 때문이다. */
 export function SuggestionInbox({
   games,
+  pending,
   onApply,
   onResolved,
   onClose,
 }: {
   games: GameCard[];
+  /* 미처리 제안 **전체** 수(배지가 쓰는 그 값). 목록은 상한이 있어(INBOX_LIMIT) 이 수보다
+     짧을 수 있는데, 그 사실을 화면이 말하지 않으면 관리자가 "제안은 이게 전부"로 오해한다. */
+  pending: number;
   // 「반영하기」 — 부모가 제안함을 닫고 제안 값을 채운 폼을 연다.
   onApply: (item: SuggestionListItem) => void;
   // 거절로 목록이 줄었다 — 부모의 배지 수를 맞춘다.
@@ -122,6 +126,14 @@ export function SuggestionInbox({
             />
           ))}
         </ul>
+      )}
+
+      {/* 상한에 걸렸다 — 처리하면 다음 것이 올라온다(다음 장을 넘기는 UI 대신 이 흐름을 쓴다,
+          service.INBOX_LIMIT 주석). 개수는 목록과 전체 수의 차이로 구한다. */}
+      {items !== null && pending > items.length && (
+        <p className="composer__hint" data-od-id="inbox-more">
+          아직 {pending - items.length}건이 더 있어요 — 여기 있는 걸 처리하면 다음 것이 올라와요.
+        </p>
       )}
 
       {error && (

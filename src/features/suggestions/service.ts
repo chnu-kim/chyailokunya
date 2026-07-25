@@ -92,15 +92,32 @@ const authorJoin = and(
   eq(oauthAccounts.provider, "chzzk"),
 );
 
+/* 한 번에 내주는 제안 줄 수. **페이지네이션이 아니라 상한이다** — 다음 장을 넘기는 UI 를 만드는
+   대신, 처리하면 다음 것이 올라온다(제안함은 처리하는 화면이라 그 흐름이 자연스럽다).
+
+   이 상한이 있는 이유는 사람이 아니라 최악이다: 계정을 여럿 만들면 사람당 20건 상한을 우회해
+   전체 큐를 부풀릴 수 있고(적대적 리뷰가 짚었다), 그때 관리자 화면이 통째로 느려지면 **정작
+   정리해야 할 순간에 못 쓴다.** 상한이 있으면 화면은 언제나 100줄에서 멈춘다.
+
+   페이지네이션과 인덱스는 **안 만든다**: 이 저장소는 성능 인덱스를 v1 에서 미루기로 이미 정했고
+   (ADR-0014 — <100행에선 측정 자체가 안 된다), 다계정 도배는 애초에 페이지네이션으로 안 막힌다.
+   목록이 짧아져도 도배는 그대로고 진짜 대응은 계정 차단인데, 그건 authority 를 여는 일이라
+   그 요구가 실제로 설 때 한다(ADR-0025 결정 1). */
+export const INBOX_LIMIT = 100;
+
 /* 관리자 제안함 — 미처리만, 최신순. 처리된 제안은 안 싣는다: 목록의 용도가 "지금 볼 것"이고,
-   이력 조회 화면은 v1 에 요구가 없다(필요해지면 status 필터를 여는 게 그때의 최소 변경이다). */
+   이력 조회 화면은 v1 에 요구가 없다(필요해지면 status 필터를 여는 게 그때의 최소 변경이다).
+
+   상한에 걸렸는지는 **호출자가 개수로 판단한다** — 배지가 쓰는 countPendingSuggestions 가 전체
+   수를 주므로, 목록 길이와 그 수를 견주면 "더 있다"가 나온다(hasMore 를 따로 싣지 않는 이유). */
 export function listPendingSuggestions(db: Db): Promise<SuggestionListItem[]> {
   return db
     .select(listColumns)
     .from(gameSuggestions)
     .leftJoin(oauthAccounts, authorJoin)
     .where(eq(gameSuggestions.status, "pending"))
-    .orderBy(desc(gameSuggestions.createdAt));
+    .orderBy(desc(gameSuggestions.createdAt))
+    .limit(INBOX_LIMIT);
 }
 
 // 제안함 버튼의 배지. 목록을 통째로 읽지 않고 세기만 한다 — 서버 컴포넌트가 첫 페인트에 쓴다.
