@@ -373,6 +373,16 @@ export function GameBoard({
           onSent={(message) => {
             setSuggesting(null);
             setAnnouncement(message);
+            /* **아래 상세도 함께 닫는다.** 제안을 보내고 나면 그 카드에서 할 일이 끝났는데,
+               안 닫으면 성공 화면 뒤로 상세가 남아 카드 두 장이 겹쳐 보인다(사용자 지적).
+               취소하고 돌아갈 자리가 필요한 수정·삭제와 다른 지점이다 — 저쪽은 되돌아갈 값이
+               있지만 여기선 이미 보냈다.
+
+               곧장 언마운트하지 않고 닫기 신호를 세우는 건 셸이 히스토리 엔트리를 되돌릴
+               자리를 잃지 않게 하려는 것이다(onRemoved 와 같은 규약). 추가 요청은 보드 상단에서
+               열려 상세가 없으므로 그때 신호를 세우면 **다음에 여는 상세가 즉시 닫힌다** —
+               열려 있을 때만 세운다. */
+            if (detail) setDetailClosing(true);
           }}
           onClose={() => setSuggesting(null)}
         />

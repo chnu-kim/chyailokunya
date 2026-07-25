@@ -39,13 +39,21 @@ function stripComments(src: string): string {
 
    새 문장을 여기 더할 땐 그게 정말 사용자가 쓴 글인지 먼저 묻는다 — 안내문·오류·버튼이면
    합쇼체로 고칠 자리이지 여기 넣을 자리가 아니다. */
-const KEPT_COPY = new Set([
-  "오늘도 방송에서 쿠냥이들을 기다려요.",
-  "천천히 놀다 가요",
-  "오늘도 방송에서 만나요",
-  "온도차가 쿠냐예요.",
-  "치지직에서 방송하고, 유튜브에 클립 올리고, X로 소식 전해요.",
-]);
+// 이식된 소개 산문이 사는 유일한 파일. 다른 곳에 같은 문장이 생기면 그건 예외가 아니다.
+const LEGACY_COPY_FILE = "app/landing/page.tsx";
+
+const KEPT_COPY = new Set(
+  [
+    "오늘도 방송에서 쿠냥이들을 기다려요.",
+    "천천히 놀다 가요",
+    "오늘도 방송에서 만나요",
+    "온도차가 쿠냐예요.",
+    "치지직에서 방송하고, 유튜브에 클립 올리고, X로 소식 전해요.",
+    /* **파일까지 묶는다.** 문장만 보면 같은 문장을 다른 화면의 힌트·버튼에 복사해 쓰는 순간
+       그것도 통과한다 — 유일한 기계 강제에 우회로가 생긴다(적대적 리뷰가 잡았다). 예외는
+       "이 파일의 이 문장"이지 "이 문장"이 아니다. */
+  ].map((text) => `${LEGACY_COPY_FILE}\u0000${text}`),
+);
 
 function sourceFiles(dir: string = SRC_DIR): string[] {
   const found: string[] = [];
@@ -66,7 +74,7 @@ test("사용자 노출 문구에 해요체가 남아 있지 않다", () => {
     lines.forEach((line, i) => {
       for (const m of line.matchAll(HAEYO)) {
         const text = m[0].trim();
-        if (KEPT_COPY.has(text)) continue;
+        if (KEPT_COPY.has(`${rel}\u0000${text}`)) continue;
         offenders.push(`${rel}:${i + 1}  ${text}`);
       }
     });
