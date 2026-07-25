@@ -61,19 +61,19 @@ function weekToDraft(week: WeekView): WeekDraft {
    ("보드에 있는 게임")이라서다 — 원칙(우리가 확인한 것만 말한다)은 그대로 잇되 일정 어휘로 쓴다. */
 function saveErrorMessage(e: unknown): string {
   if (isAborted(e))
-    return "응답이 너무 오래 걸려서 기다리기를 멈췄어요. 저장됐을 수도 있으니 새로고침해 확인해 주세요.";
+    return "응답이 너무 오래 걸려서 기다리기를 멈췄습니다. 저장됐을 수도 있으니 새로고침해 확인해 주십시오.";
   const code = (e as { data?: { code?: string } } | null)?.data?.code ?? null;
   if (code === "UNAUTHORIZED" || code === "FORBIDDEN")
-    return "로그인이 만료됐거나 권한이 없어요. 다시 로그인해 주세요.";
+    return "로그인이 만료됐거나 권한이 없습니다. 다시 로그인해 주십시오.";
   /* 낙관적 동시성 거절. **저장되지 않았다고 단정할 수 있다** — 서버가 쓰기 전에 막았다.
      덮어쓰기를 막은 것이므로 "다시 시도"가 아니라 새로고침해서 남의 저장 위에서 다시 편집하라고
      말한다(그냥 재시도하면 같은 revision 이라 또 걸린다). */
   if (code === "CONFLICT")
-    return "다른 곳에서 이 주를 먼저 저장했어요. 저장하지 않았어요 — 새로고침해서 다시 편집해 주세요.";
+    return "다른 곳에서 이 주를 먼저 저장했습니다. 저장하지 않았습니다 — 새로고침해서 다시 편집해 주십시오.";
   // saveWeek 의 BAD_REQUEST: 삭제된 게임을 가리켰거나(FK) 날짜가 그 주를 벗어남(Zod).
   if (code === "BAD_REQUEST")
-    return "저장할 수 없는 일정이에요 — 지워진 게임을 가리켰거나 날짜가 그 주를 벗어났을 수 있어요.";
-  return "저장됐는지 확인하지 못했어요. 새로고침해서 확인해 주세요.";
+    return "저장할 수 없는 일정입니다 — 지워진 게임을 가리켰거나 날짜가 그 주를 벗어났을 수 있습니다.";
+  return "저장됐는지 확인하지 못했습니다. 새로고침해서 확인해 주십시오.";
 }
 
 export function ScheduleEditor({
@@ -130,7 +130,9 @@ export function ScheduleEditor({
       if (url.origin !== location.origin) return;
       // 같은 화면(해시 앵커 등)은 이탈이 아니다. 주 이동은 search 가 달라 여기서 걸린다.
       if (url.pathname === location.pathname && url.search === location.search) return;
-      if (!window.confirm("저장하지 않은 변경이 있어요. 이동하면 사라져요. 이동할까요?")) {
+      if (
+        !window.confirm("저장하지 않은 변경이 있습니다. 이동하면 사라집니다. 이동하시겠습니까?")
+      ) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -172,7 +174,9 @@ export function ScheduleEditor({
         setDraft(next);
         setBaseline(next);
         setRevision(saved.revision);
-        setAnnouncement(draft.published ? "일정을 저장하고 발행했어요" : "일정을 저장했어요(초안)");
+        setAnnouncement(
+          draft.published ? "일정을 저장하고 발행했습니다" : "일정을 저장했습니다(초안)",
+        );
       } catch (e) {
         setError(saveErrorMessage(e));
       }
@@ -203,7 +207,7 @@ export function ScheduleEditor({
             className="sched-field"
             type="text"
             maxLength={500}
-            placeholder="예: 이번 주는 젤다 위주로 달려요"
+            placeholder="예: 이번 주는 젤다 위주로 달립니다"
             value={draft.note}
             data-od-id="schedule-note-input"
             onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}

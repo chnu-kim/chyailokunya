@@ -210,7 +210,7 @@ export function GameBoard({
     if (!game) {
       // 제안함을 열어 둔 사이 그 게임이 지워졌다 — 열 폼이 없으므로 정직하게 말하고 멈춘다.
       setApplying(null);
-      setAnnouncement("그 게임이 보드에 없어요 — 새로고침해 주세요");
+      setAnnouncement("그 게임이 보드에 없습니다 — 새로고침해 주십시오");
       return;
     }
     setEditing(game);
@@ -244,7 +244,7 @@ export function GameBoard({
        반영할 수 있고, 왜 남았는지는 라이브 영역이 말한다. */
     if (!dateApplied) {
       setAnnouncement(
-        "클리어만 반영했어요 — 여러 날 편성이라 날짜는 일정에서 고쳐 주세요. 제안은 그대로 뒀어요",
+        "클리어만 반영했습니다 — 여러 날 편성이라 날짜는 일정에서 고쳐 주십시오. 제안은 그대로 뒀습니다",
       );
       return;
     }
@@ -262,9 +262,9 @@ export function GameBoard({
         { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
       );
       if (resolved) setPending((n) => Math.max(0, n - 1));
-      else setAnnouncement("저장했어요 — 그 제안은 다른 관리자가 이미 처리해 뒀더라고요");
+      else setAnnouncement("저장했습니다 — 그 제안은 다른 관리자가 이미 처리했습니다");
     } catch {
-      setAnnouncement("반영은 됐지만 제안함 표시를 못 바꿨어요 — 제안함에서 확인해 주세요");
+      setAnnouncement("반영은 됐지만 제안함 표시를 못 바꿨습니다 — 제안함에서 확인해 주십시오");
     }
   }
 
@@ -642,7 +642,7 @@ function GameDetail({
           </div>
         ) : (
           <p className="composer__hint" data-od-id="detail-signin-hint">
-            치지직으로 로그인하면 고칠 값을 제안할 수 있어요.
+            치지직으로 로그인하면 고칠 값을 제안할 수 있습니다.
           </p>
         ))}
 
@@ -1003,7 +1003,7 @@ function GameEditor({
 
         {loadFailed && (
           <p className="err" role="alert">
-            일정을 못 불러와서 저장할 수 없어요. 닫았다 다시 열어 주세요.
+            일정을 못 불러와서 저장할 수 없습니다. 닫았다 다시 열어 주십시오.
           </p>
         )}
 

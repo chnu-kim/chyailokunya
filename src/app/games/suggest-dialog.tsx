@@ -104,7 +104,7 @@ export function SuggestDialog({
       onClose={() =>
         sent
           ? onSent(
-              game ? game.categoryValue + " 수정 제안을 보냈어요" : "게임 추가 요청을 보냈어요",
+              game ? game.categoryValue + " 수정 제안을 보냈습니다" : "게임 추가 요청을 보냈습니다",
             )
           : onClose()
       }
@@ -120,11 +120,11 @@ export function SuggestDialog({
           말해야 한다. */}
       {sent ? (
         <div className="composer__detail" data-od-id="suggest-sent">
-          <p className="suggest__sent">보냈어요!</p>
+          <p className="suggest__sent">보냈습니다</p>
           <p className="composer__hint">
             {game
-              ? "관리자가 확인하고 반영하면 보드에 나타나요. 그때까진 지금 값 그대로예요."
-              : "관리자가 확인하고 보드에 올려요. 조금만 기다려 주세요."}
+              ? "관리자가 확인해 반영하면 보드에 나타납니다. 그때까지는 지금 값 그대로입니다."
+              : "관리자가 확인한 뒤 보드에 올립니다."}
           </p>
           <div className="composer__actions">
             <button
@@ -143,8 +143,8 @@ export function SuggestDialog({
             곧바로 안 바뀐다는 사실을 **먼저** 말한다 — 그걸 모르면 성공을 실패로 읽는다. */}
           <p className="composer__hint">
             {game
-              ? "고쳤으면 하는 값으로 바꿔서 보내 주세요. 관리자가 확인하고 반영해요."
-              : "보드에 없는 게임을 알려 주세요. 관리자가 확인하고 올려요."}
+              ? "고쳤으면 하는 값으로 바꿔서 보내 주십시오. 관리자가 확인한 뒤 반영합니다."
+              : "보드에 없는 게임을 알려 주십시오. 관리자가 확인한 뒤 올립니다."}
           </p>
 
           {game ? (
@@ -197,14 +197,12 @@ export function SuggestDialog({
                 onChange={(e) => setTitle(e.target.value)}
               />
               <p className="datefield__hint" id={idPrefix + "-title-hint"}>
-                방송에서 부르던 이름 그대로 적어 주셔도 돼요.
+                방송에서 부르던 이름 그대로 적어도 됩니다.
               </p>
             </div>
           )}
 
-          <h3 className="suggest__subhead">
-            {game ? "이렇게 바꿔 주세요" : "아는 만큼 알려 주세요"}
-          </h3>
+          <h3 className="suggest__subhead">{game ? "바꿀 값" : "알고 있는 값"}</h3>
 
           {/* 게임 폼의 PlayedDateField 를 안 쓴다 — 그쪽 문구는 일정 항목을 직접 고치는 사람의
             어휘다("비우면 일정에서 연결만 풀려요"·"여러 날 편성이라 여기선 못 고쳐요"). 팬은
@@ -253,7 +251,7 @@ export function SuggestDialog({
               onChange={(e) => setNote(e.target.value)}
             />
             <p className="datefield__hint" id={idPrefix + "-note-hint"}>
-              값으로 적기 어려운 건 여기 적어 주세요. 표지가 다르다거나, 이름이 틀렸다거나.
+              값으로 적기 어려운 것을 적어 주십시오. 표지가 다르거나 이름이 틀린 경우 등입니다.
             </p>
           </div>
 

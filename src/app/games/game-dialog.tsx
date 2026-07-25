@@ -598,7 +598,8 @@ export function PlayedDateField({
           {dates.map(formatMD).join(" · ")} <span>({dates.length}일)</span>
         </p>
         <p className="composer__hint">
-          여러 날 편성이라 여기선 못 고쳐요 — <Link href="/schedule">일정</Link>에서 고쳐 주세요.
+          여러 날 편성이라 여기선 못 고칩니다 — <Link href="/schedule">일정</Link>에서 고쳐
+          주십시오.
         </p>
       </div>
     );
@@ -635,7 +636,7 @@ export function PlayedDateField({
       />
       {hasEntry && (
         <p className="datefield__hint" id={hintId}>
-          비우면 일정에서 이 게임과의 연결만 풀려요.
+          비우면 일정에서 이 게임과의 연결만 풀립니다.
         </p>
       )}
     </div>

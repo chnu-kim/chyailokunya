@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     images: [OG_IMAGE],
     url: "/schedule",
     title: "챠이로 쿠냐 — 주간 일정",
-    description: "챠이로 쿠냐의 이번 주 방송 일정. 언제 뭘 하는지 여기서 확인해요.",
+    description: "챠이로 쿠냐의 이번 주 방송 일정. 언제 뭘 하는지 여기서 확인합니다.",
   },
 };
 

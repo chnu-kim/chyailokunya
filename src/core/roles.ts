@@ -21,17 +21,20 @@ export function authorizeRoleChange(input: RoleChange): RoleChangeDecision {
   // role:manage 는 superadmin 만 가진다(authorities.ts). admin 은 여기서 이미 막힌다 —
   // admin 이 다른 admin 을 임명·강등하지 못하는 상승 가드가 매핑에서 흘러온다.
   if (!hasAuthority(input.actorAuthorities, "role:manage")) {
-    return { ok: false, reason: "역할을 관리할 권한이 없어요" };
+    return { ok: false, reason: "역할을 관리할 권한이 없습니다" };
   }
   // 자기 자신의 역할은 못 바꾼다 — 자기 승격과 마지막 superadmin 의 자기 강등(락아웃)을
   // 한 규칙으로 닫는다. actor·target 은 같은 좌표계(치지직 channelId)라 직접 비교한다.
   if (input.actorChannelId.trim() === input.targetChannelId.trim()) {
-    return { ok: false, reason: "자기 자신의 역할은 바꿀 수 없어요" };
+    return { ok: false, reason: "자기 자신의 역할은 바꿀 수 없습니다" };
   }
   // superadmin 은 API 로 부여·회수하지 않는다 — 오직 SUPERADMIN_CHANNEL_ID 부트스트랩으로만
   // 존재한다. API 로 열면 superadmin 증식·마지막 superadmin 제거가 가능해진다.
   if (input.role === "superadmin") {
-    return { ok: false, reason: "superadmin 은 부트스트랩(SUPERADMIN_CHANNEL_ID)으로만 부여돼요" };
+    return {
+      ok: false,
+      reason: "superadmin 은 부트스트랩(SUPERADMIN_CHANNEL_ID)으로만 부여됩니다",
+    };
   }
   return { ok: true };
 }

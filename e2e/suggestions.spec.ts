@@ -74,7 +74,7 @@ test("제안: 팬이 보낸 제안이 접수된다", async ({ page, baseURL }) =
 
   // 닫으면 모달이 사라지고 라이브 영역이 결과를 말한다. 보드 값은 그대로다 — 제안은 게임을 안 바꾼다.
   await expect(page.locator("[data-od-id='game-suggest']")).toHaveCount(0);
-  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈어요");
+  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈습니다");
   await expect(
     page.locator(".game").filter({ hasText: "마인크래프트" }).getByText("클리어"),
   ).toHaveCount(0);
@@ -89,7 +89,7 @@ test("제안: 같은 게임에 두 번째 제안은 막힌다(처리될 때까�
      바뀌고 한마디만 실린다. 그것도 유효한 제안이라는 걸 이 자리가 겸해서 덮는다
      (값으로 표현 못 하는 제보의 길 — core.isEmptyEditSuggestion). */
   await sendSuggestion(page, "셀레스테", "첫 번째 제안");
-  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈어요");
+  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈습니다");
 
   /* 두 번째. 첫 제안을 닫아도 **상세는 열린 채 남으므로**(제안 폼은 그 위에 겹쳐 떴다) 카드를
      다시 열지 않는다. 폼은 그대로 열리고 **서버가** 거절한다 — 화면이 먼저 막지 않는 건 그
@@ -101,7 +101,7 @@ test("제안: 같은 게임에 두 번째 제안은 막힌다(처리될 때까�
   /* getByRole("alert") 로 잡으면 Next 의 라우트 announcer(빈 div, 같은 role)가 먼저 걸린다 —
      우리 문구 자리로 좁힌다. */
   await expect(page.locator("[data-od-id='game-suggest'] .err")).toContainText(
-    "이미 보낸 제안이 있어요",
+    "이미 보낸 제안이 있습니다",
   );
   // 실패했으니 폼은 열린 채여야 한다 — 닫히면 사용자가 쓴 글이 사라진다.
   await expect(page.locator("[data-od-id='game-suggest']")).toBeVisible();
@@ -116,7 +116,7 @@ test("제안: 관리자 제안함이 현재→제안 차이를 보여주고, 반
   await page.goto("/games");
   await expectSignedIn(page);
   await sendSuggestion(page, "스타듀 밸리", "여기 한마디");
-  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈어요");
+  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈습니다");
 
   // 같은 브라우저로 신원만 바꾼다 — 쿠키를 비우고 관리자(user 1)로 다시 심는다.
   await context.clearCookies();
@@ -149,7 +149,7 @@ test("제안: 거절하면 제안함에서 사라진다", async ({ page, baseURL
   await page.goto("/games");
   await expectSignedIn(page);
   await sendSuggestion(page, "할로우 나이트", "거절될 제안");
-  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈어요");
+  await expect(page.locator("[role='status']")).toContainText("수정 제안을 보냈습니다");
 
   await context.clearCookies();
   await signIn(context, baseURL!);

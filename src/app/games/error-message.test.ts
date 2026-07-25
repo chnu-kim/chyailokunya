@@ -65,7 +65,7 @@ describe("writeErrorMessage — 확인 안 된 것은 말하지 않는다", () =
 
   it("BAD_REQUEST 는 우리 결함이라 재시도를 권하지 않는다 — 재시도로는 안 풀린다", () => {
     const msg = writeErrorMessage(trpc("BAD_REQUEST"));
-    expect(msg).toContain("저장되지 않았어요");
+    expect(msg).toContain("저장되지 않았습니다");
     expect(msg).not.toContain("다시 시도");
   });
 
@@ -88,21 +88,21 @@ describe("writeErrorMessage — 확인 안 된 것은 말하지 않는다", () =
      정직함이 isAborted 의 정확성에 매달리지 않는다. */
   it("코드도 없고 중단도 아니면 원인을 말하지 않고 확인 방법만 준다", () => {
     const msg = writeErrorMessage(new Error("네트워크 연결 끊김"));
-    expect(msg).toContain("확인하지 못했어요");
+    expect(msg).toContain("확인하지 못했습니다");
     expect(msg).toContain("새로고침");
     expect(msg).not.toContain("네트워크");
   });
 
   it("INTERNAL_SERVER_ERROR 는 어느 단계에서 죽었는지 모르므로 저장을 단정하지 않는다", () => {
     const msg = writeErrorMessage(trpc("INTERNAL_SERVER_ERROR"));
-    expect(msg).toContain("확인하지 못했어요");
+    expect(msg).toContain("확인하지 못했습니다");
     expect(msg).not.toContain("저장되지 않았");
   });
 });
 
 /* 수정 경로의 CONFLICT 는 **뜻이 다르다.** add 는 category_id UNIQUE("이미 보드에 있는 게임"),
    update 는 폼이 읽은 플레이 날짜가 낡았다는 신호다. 한 문구로 뭉치면 남의 일정 변경을 덮지
-   않으려고 막은 저장에 "이미 보드에 있는 게임이에요"가 떠, 사용자가 원인도 못 알아보고 할 일
+   않으려고 막은 저장에 "이미 보드에 있는 게임입니다"가 떠, 사용자가 원인도 못 알아보고 할 일
    (새로고침)도 못 듣는다 — 새 서버 오류를 더하면서 클라이언트 매퍼를 안 본 자리다(리뷰 7라운드). */
 describe("updateErrorMessage — 수정의 CONFLICT 는 중복이 아니라 낡은 날짜다", () => {
   it("CONFLICT 에 중복 게임 문구를 쓰지 않고, 새로고침을 안내한다", () => {
@@ -110,7 +110,7 @@ describe("updateErrorMessage — 수정의 CONFLICT 는 중복이 아니라 낡�
     expect(msg).not.toContain("이미 보드에 있는");
     expect(msg).toContain("새로고침");
     // 서버가 쓰기 전에 막았으므로 저장 여부를 단정할 수 있다 — "저장됐을 수도"는 거짓말이다.
-    expect(msg).toContain("저장하지 않았어요");
+    expect(msg).toContain("저장하지 않았습니다");
     expect(msg).not.toContain("저장됐을 수도");
   });
 
@@ -153,7 +153,7 @@ describe("deleteErrorMessage — 삭제는 저장이 아니다", () => {
   it("INTERNAL_SERVER_ERROR·연결 실패는 어느 단계에서 죽었는지 모르므로 단정하지 않는다", () => {
     for (const e of [trpc("INTERNAL_SERVER_ERROR"), new Error("연결 끊김")]) {
       const msg = deleteErrorMessage(e);
-      expect(msg).toContain("삭제됐는지 확인하지 못했어요");
+      expect(msg).toContain("삭제됐는지 확인하지 못했습니다");
       expect(msg).toContain("새로고침");
     }
   });
@@ -163,10 +163,10 @@ describe("deleteErrorMessage — 삭제는 저장이 아니다", () => {
      "쓰기 전에 거절됨" 하나로 모은다. */
   it("삭제에 도달 불가한 코드에 추가 문구를 만들지 않는다", () => {
     expect(deleteErrorMessage(trpc("CONFLICT"))).toBe(
-      "삭제하지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "삭제하지 못했습니다. 잠시 후 다시 시도해 주십시오.",
     );
     expect(deleteErrorMessage(trpc("NOT_FOUND"))).toBe(
-      "삭제하지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "삭제하지 못했습니다. 잠시 후 다시 시도해 주십시오.",
     );
   });
 
@@ -189,7 +189,7 @@ describe("readErrorMessage", () => {
 
   it("치지직 자격증명 부재(PRECONDITION_FAILED)는 사용자가 못 푸는 일이라 그렇게 말한다", () => {
     expect(readErrorMessage(trpc("PRECONDITION_FAILED"))).toContain(
-      "지금은 게임 검색을 쓸 수 없어요",
+      "지금은 게임 검색을 쓸 수 없습니다",
     );
   });
 
@@ -198,6 +198,6 @@ describe("readErrorMessage", () => {
   });
 
   it("상한에 걸리면 검색이 멈췄다고 말한다", () => {
-    expect(readErrorMessage(wrapped(timeout()))).toContain("오래 걸려서 멈췄어요");
+    expect(readErrorMessage(wrapped(timeout()))).toContain("오래 걸려서 멈췄습니다");
   });
 });
