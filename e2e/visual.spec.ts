@@ -125,3 +125,44 @@ for (const theme of ["light", "dark"] as const) {
     });
   });
 }
+
+/* 겹친 다이얼로그의 시각 구성. **이 상태는 다른 스냅샷이 하나도 안 덮는다** — 위 여섯 장은
+   모달이 닫힌 화면이고, `games 쓰기 권한` 두 장은 `.games` 격자만 찍는다. 그래서 백드롭 농도와
+   두 카드의 겹침이 시각 회귀 밖에 있었고, 실제로 그 자리에서 결함이 났다: 아래 상세가 그대로
+   비쳐 흰 카드 둘이 어긋나 보이는 걸 사용자가 라이브에서 지적했다(PR #76).
+
+   스모크가 못 보는 것을 이 장이 본다. 거긴 "아래가 opacity 0 인가"를 값으로 재지만, 그 결과가
+   **어떻게 보이는가**(스크림이 한 겹인지, 카드가 어디 앉는지, 테마마다 같은지)는 사람이 판단할
+   그림이 있어야 한다.
+
+   범위가 뷰포트 전체인 이유: 백드롭이 이 장의 주인공이라 모달만 잘라내면 정작 볼 것이 빠진다.
+   fullPage 는 안 쓴다 — 모달이 뜬 채로 페이지를 이어 붙이면 top layer 가 스크롤을 안 따라와
+   그림이 어긋난다. */
+for (const theme of ["light", "dark"] as const) {
+  test(`시각: 겹친 다이얼로그(상세 위 수정) · ${theme}`, async ({ page, baseURL }) => {
+    await page.addInitScript((t) => {
+      try {
+        localStorage.setItem("theme", t);
+      } catch {
+        // 위 스냅샷들과 같은 이유로 무해하다.
+      }
+    }, theme);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await signIn(page.context(), baseURL!);
+
+    await page.goto("/games");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expectSignedIn(page);
+    await page.evaluate(() => document.fonts.ready);
+
+    await page.locator('[data-od-id="game-open-1"]').click();
+    await page.locator('[data-od-id="game-edit-1"]').click();
+    /* 조회가 끝나기 전에 찍으면 잠긴 입력이 구워진다 — 값이 든 걸 보고 시작한다
+       (games.spec 의 같은 자리와 같은 이유). */
+    await expect(page.locator('[data-od-id="editor-played"]')).toHaveValue("2026-03-01");
+
+    await expect(page).toHaveScreenshot(`stacked-dialog-${theme}.png`, {
+      animations: "disabled",
+    });
+  });
+}
