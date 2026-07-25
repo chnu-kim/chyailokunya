@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { dateOfInstantKST } from "@/core/calendar";
 import { formatDate } from "@/core/games";
 import { diffSuggestion, type SuggestionChange } from "@/core/suggestions";
 import type { GameCard } from "@/features/games/service";
-import type { SuggestionListItem } from "@/features/suggestions/service";
+import { INBOX_LIMIT, type SuggestionListItem } from "@/features/suggestions/service";
 import { trpc } from "@/features/trpc/client";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, resolveErrorMessage } from "./error-message";
 import { GameDialog } from "./game-dialog";
@@ -47,26 +47,41 @@ export function SuggestionInbox({
   const [rejectingId, setRejectingId] = useState<number | null>(null);
 
   /* 열릴 때 한 번 불러온다. setState 가 await 뒤에서만 일어나므로 effect 안 **동기** setState 를
-     막는 규칙(set-state-in-effect)에 안 걸린다. */
+     막는 규칙(set-state-in-effect)에 안 걸린다. 처리 뒤 다시 읽는 경로도 이 함수를 쓴다 —
+     목록을 채우는 규칙이 두 벌이면 한쪽만 고쳐진 채 남는다. */
+  /* **읽기만 하고 상태는 안 건드린다.** setState 까지 여기서 하면 effect 가 그걸 동기로 부르는
+     모양이 돼 set-state-in-effect(Next 16 의 error)에 걸린다 — 호출자가 await 뒤에 넣어야 한다. */
+  const fetchPending = useCallback(
+    () =>
+      trpc.suggestions.list.query(undefined, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+    [],
+  );
+
   useEffect(() => {
     let alive = true;
     void (async () => {
       try {
-        const found = await trpc.suggestions.list.query(undefined, {
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
+        const found = await fetchPending();
         if (alive) setItems(found);
       } catch (e) {
         if (alive) setError(readErrorMessage(e));
       }
     })();
+    // 응답이 늦게 와도 언마운트 뒤엔 상태를 안 건드린다.
     return () => {
       alive = false;
     };
-  }, []);
+  }, [fetchPending]);
 
   function onReject(item: SuggestionListItem) {
     setRejectingId(item.id);
+    /* 지금 화면이 **상한에 걸려 있었나**(처리 전 기준). 걸려 있었다면 한 줄을 비운 자리에
+       다음 제안이 올라와야 한다 — 안 그러면 화면이 "처리하면 다음 것이 올라와요"라고 적어
+       놓고 실제로는 안 올리는 거짓말이 되고, 큐가 넘친 상황에서 관리자는 닫았다 여는 조작을
+       반복해야 한다(적대적 리뷰 5라운드 — 상한을 넣은 4라운드 수정이 만든 자리다). */
+    const wasCapped = (items?.length ?? 0) >= INBOX_LIMIT;
     startReject(async () => {
       setError("");
       try {
@@ -80,6 +95,16 @@ export function SuggestionInbox({
            다른 관리자가 먼저 처리했으면 false 가 오는데, 그때도 줄이면 이미 남이 줄인 수에서
            한 번 더 빠져 배지가 실제 미처리 수보다 작아진다. */
         if (resolved) onResolved();
+        // 넘친 큐를 여기서 이어 받는다. 안 넘쳤으면 왕복을 아낀다(대부분의 실사용이 그쪽이다).
+        // 이 읽기가 실패해도 거절은 이미 성공했다 — 아래 catch 가 삼켜 "거절 실패"로 말하면
+        // 거짓이 되므로 따로 잡는다(화면은 한 줄 줄어든 채 남고, 다시 열면 채워진다).
+        if (wasCapped) {
+          try {
+            setItems(await fetchPending());
+          } catch {
+            setError("다음 제안을 못 불러왔어요 — 닫았다 열면 이어서 보여요.");
+          }
+        }
       } catch (e) {
         setError(resolveErrorMessage(e));
       } finally {
