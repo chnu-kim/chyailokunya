@@ -188,3 +188,73 @@ test("제안: 추가 요청 폼은 뒤로가기에 페이지를 안 떠난다", 
   await expect(page).toHaveURL(/\/games$/);
   await expect(page.locator("[data-od-id='suggest-title']")).toHaveValue("적다 만 이름");
 });
+
+/* 추가 요청을 반영할 때 **팬이 함께 보낸 날짜·클리어가 살아남는가.** 컴포저는 검색 결과를 고르는
+   순간 폼 값을 되돌리는데(다음 게임에 이전 입력이 따라가면 안 된다), 그 되돌림이 무조건 비우는
+   것이면 제안 값이 조용히 날아가고 저장은 "반영됨"으로 처리된다 — 리뷰 둘이 같은 자리를 잡았다.
+
+   **치지직 검색을 모킹한다.** 이 저장소는 진짜 경로를 태우는 걸 원칙으로 하지만, 여기선 외부
+   API 자격증명이 없으면(CI 가 그렇다) 검색이 실패하고 직접 입력 줄도 안 열려(searchFailed 는
+   searched 를 안 세운다 — core 주석) 상세 단계에 **도달할 방법 자체가 없다.** 모킹하는 것은
+   외부 응답 하나뿐이고, 그 뒤의 전이·폼 값은 전부 진짜 코드가 돈다.
+
+   **저장은 안 한다.** 게임이 하나 늘면 공유 픽스처가 오염돼 games.spec 의 카드 수 단언이 깨진다
+   (이 파일 맨 위 주석과 같은 이유). 값이 상세 단계까지 살아 오는지가 이 결함의 전부다. */
+test("제안: 추가 요청을 반영해도 팬이 보낸 날짜·클리어가 살아남는다", async ({ page, baseURL }) => {
+  const context = page.context();
+  await signIn(context, baseURL!, E2E_FAN);
+  await page.goto("/games");
+  await expectSignedIn(page);
+
+  await page.locator("[data-od-id='suggest-add-open']").click();
+  await page.locator("[data-od-id='suggest-title']").fill("모킹된 게임");
+  await page.locator("[data-od-id='suggest-played']").fill("2026-06-15");
+  await page.locator("[data-od-id='suggest-clear-cleared']").check();
+  await page.locator("[data-od-id='suggest-clear-date']").fill("2026-06-16");
+  await page.locator("[data-od-id='suggest-submit']").click();
+  await page.locator("[data-od-id='suggest-done']").click();
+  /* **모달이 실제로 닫힐 때까지 기다린다.** 이 폼은 히스토리 엔트리를 차지하므로(최상위라
+     history 가 켜져 있다) 닫힘이 history.back() 의 **비동기 왕복**을 태우는데, 그 사이에
+     goto 하면 네비게이션이 중단돼 ERR_ABORTED 로 죽는다(실측). */
+  await expect(page.locator("[data-od-id='game-suggest']")).toHaveCount(0);
+
+  await context.clearCookies();
+  await signIn(context, baseURL!);
+  await page.goto("/games");
+  await expectSignedIn(page);
+
+  /* 자격증명 없이도 상세 단계까지 가도록 검색 응답만 가로챈다(httpLink 라 배치가 아니다).
+   **네비게이션 뒤에 건다** — goto 전에 걸면 그 goto 자체가 ERR_ABORTED 로 죽는다(실측). */
+  await page.route("**/api/trpc/chzzk.categorySearch*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        result: {
+          data: [
+            {
+              categoryType: "GAME",
+              categoryId: "e2e-mocked",
+              categoryValue: "모킹된 게임",
+              posterImageUrl: null,
+            },
+          ],
+        },
+      }),
+    }),
+  );
+
+  await page.locator("[data-od-id='inbox-open']").click();
+  const row = page.locator(".inbox__item").filter({ hasText: "모킹된 게임" });
+  await expect(row).toBeVisible();
+  await row.locator("[data-od-id^='suggestion-apply-']").click();
+
+  // 검색어가 채워진 채 열리고, debounce 뒤 자동 검색이 나간다(별도 배선 없이 평소 경로 그대로).
+  await expect(page.locator("[data-od-id='composer-input']")).toHaveValue("모킹된 게임");
+  await page.locator("#composer-results [role='option']").first().click();
+
+  /* 상세 단계. **여기가 결함이 살던 자리다** — 고르는 순간 값이 비워지면 아래 셋이 전부 빈다. */
+  await expect(page.locator("[data-od-id='composer-played']")).toHaveValue("2026-06-15");
+  await expect(page.locator("[data-od-id='composer-clear-cleared']")).toBeChecked();
+  await expect(page.locator("[data-od-id='composer-clear-date']")).toHaveValue("2026-06-16");
+});

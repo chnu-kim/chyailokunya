@@ -317,10 +317,18 @@ export function GameComposer({
     });
   }
 
-  // 고르던 게임을 물릴 때 그 게임에 넣던 값도 함께 버린다(다음 게임에 따라가면 안 된다).
+  /* 고르던 게임을 물릴 때 그 게임에 넣던 값도 함께 버린다(다음 게임에 따라가면 안 된다).
+
+     **비우는 게 아니라 출발점으로 되돌린다.** 평소엔 출발점이 빈 값이라 결과가 같지만, 팬의
+     추가 요청을 반영하려고 연 컴포저에선 출발점이 곧 **제안 값**이다 — 무조건 비우면 관리자가
+     검색 결과를 고르는 순간(choose 가 이걸 부른다) 팬이 적어 보낸 날짜·클리어가 조용히 날아가고,
+     그대로 저장되면 제안은 "반영됨"으로 사라진다(리뷰 둘이 같은 자리를 잡았다).
+
+     되돌아갈 자리가 제안 값인 게 맞는 이유: 추가 요청에서 게임을 고르는 건 **정본 카테고리를
+     정하는 일**이고, 날짜·클리어는 어느 카테고리를 고르든 그 제안이 말한 사실 그대로다. */
   function resetDraft() {
-    setPlayedDate("");
-    setDraft({ cleared: false, clearedDate: "" });
+    setPlayedDate(initial?.playedDate ?? "");
+    setDraft({ cleared: initial?.cleared ?? false, clearedDate: initial?.clearedDate ?? "" });
     setAddError("");
   }
 
