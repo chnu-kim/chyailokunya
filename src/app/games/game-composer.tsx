@@ -2,11 +2,18 @@
 
 import { useEffect, useReducer, useRef, useState, useTransition } from "react";
 import {
+  composerActiveOption,
+  composerNeedsSearch,
+  composerOptionCount,
   composerReducer,
+  composerResultIndex,
   composerStep,
+  DIRECT_ENTRY_INDEX,
   initialComposerState,
   showsDirectEntry,
+  type ComposerActiveMove,
 } from "@/core/games-composer";
+import type { ChzzkCategory } from "@/core/games";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
@@ -40,6 +47,50 @@ import { ClearedFields, GameDialog, PlayedDateField, useClearedDraft } from "./g
    350 은 그 사이의 흔한 값이다 — 사람이 한 글자를 더 칠지 결정하는 시간보다 살짝 길다. */
 const SEARCH_DEBOUNCE_MS = 350;
 
+/* 검색 단계는 WAI-ARIA 콤보박스다 — 입력이 combobox, 결과 ul 이 listbox, 각 줄이 option 이고
+   **포커스는 입력에 머문 채** aria-activedescendant 만 옮긴다(항목을 button 으로 두면 role 이
+   충돌하고 포커스가 목록으로 새어 이어 치던 검색어를 계속 못 친다).
+
+   항목 id 를 치지직이 준 categoryId 가 아니라 **인덱스**로 짓는 이유: 그 값은 외부 API 가
+   주는 문자열이라 공백·따옴표가 섞이면 IDREF 가 깨지는데, aria-activedescendant 는 IDREF 라
+   깨져도 예외 하나 없이 낭독만 조용해진다. 인덱스가 뜻을 바꾸는 순간은 결과가 갈릴 때뿐이고
+   그때 리듀서가 커서를 접는다. 컴포저는 화면에 하나뿐이라(보드가 한 번만 렌더한다) 접두사
+   충돌도 없다 — 이미 입력 id 가 같은 규약으로 고정돼 있다. */
+const RESULTS_ID = "composer-results";
+const INPUT_HINT_ID = "composer-input-hint";
+const optionId = (index: number) => "composer-option-" + index;
+
+/* 커서를 옮기는 키. 표로 두는 이유는 분기 하나를 아끼려는 게 아니라, **여기 없는 키는 전부
+   입력의 것**이라는 규칙을 한눈에 두려는 것이다 — 콤보박스가 키를 하나 더 가져갈 때마다
+   텍스트 편집이 그만큼 불편해진다. 끝에서 순환할지 같은 규칙 자체는 core 가 쥔다.
+
+   **Home/End 는 일부러 없다.** W3C APG 의 editable combobox 는 이 둘을 Textbox 키로 못박는다
+   ("beginning/end of the field") — Listbox Popup 표에는 아예 없다. 여기 넣었던 옛 판은 결과가
+   뜬 동안 Home/End 를 목록의 처음·끝으로 가로채(first/last) 캐럿 이동 자체를 막았다(실측:
+   결과가 없을 땐 정상, 뜨면 Home 을 눌러도 캐럿이 그대로). 아래 onSearchKeyDown 이 그 둘을
+   따로 받아 **커서만 접고 preventDefault 는 안 한다** — 캐럿은 브라우저 기본 동작에 맡긴다. */
+const ARROW_MOVES: Partial<Record<string, ComposerActiveMove>> = {
+  ArrowDown: "next",
+  ArrowUp: "prev",
+};
+
+/* 커서가 얹힌 줄에만 붙는 클래스. 결과 줄과 직접 추가 줄이 **같은 표시**를 써야 하므로
+   문자열을 두 군데서 짓지 않는다. */
+const optionClass = (active: boolean) =>
+  active ? "composer__pick composer__pick--active" : "composer__pick";
+
+/* 포커스는 콤보박스 규약상 입력에 머문다. li 는 포커서블이 아니지만, mousedown 의 기본 동작을
+   막지 않으면 누르는 순간 입력이 포커스를 잃고(포커스가 dialog 로 떨어진다) 이어 치던 검색어를
+   계속 못 친다. click 은 그대로 도니 선택은 막히지 않고, 카드 밖 클릭으로 닫는 셸의 판정도
+   그대로다(전파는 안 막는다).
+
+   **ul(.composer__results) 에 건다 — li 마다 따로 안 붙인다.** mousedown 은 버블링하니
+   위임으로 항목도 그대로 덮이는데, li 에만 달면 항목 **사이**(.composer__results 의 6px gap,
+   실측 14px 로 벌어지는 직접 추가 줄 아래)를 누른 mousedown 은 어느 li 도 안 거쳐 그대로
+   기본 동작을 타 입력이 포커스를 잃는다 — 커서 표시(activeIndex)는 그대로 칠해진 채 이후
+   타이핑·Enter·↓ 가 전부 죽는 자리다(실측: PROBE-C). */
+const keepFocusInInput = (e: React.MouseEvent) => e.preventDefault();
+
 export function GameComposer({
   onAdded,
   onClose,
@@ -70,6 +121,10 @@ export function GameComposer({
   const { selected } = state;
   const step = composerStep(state);
   const query = state.query.trim();
+  /* 목록에 그려지는 항목 수와 지금 활성인 항목. 둘 다 리듀서 쪽 셀렉터를 쓴다 — 여기서 다시
+     세면 화면과 커서가 서로 다른 목록을 보게 된다. */
+  const optionCount = composerOptionCount(state);
+  const activeOption = composerActiveOption(state);
 
   /* 단계가 바뀌면 포커스를 그 단계의 첫 조작점으로 옮긴다. 단계를 여는 버튼(결과 항목·뒤로·
      직접 입력)은 전부 **자기 자신을 언마운트**하므로, 안 옮기면 포커스가 dialog 로 떨어져
@@ -108,23 +163,116 @@ export function GameComposer({
      걸리고 앞 타이머는 cleanup 이 지운다 — 그게 debounce 다.
 
      effect 안에서 **동기로** 상태를 건드리지 않는다(setTimeout 콜백 안이라 Next 16 의
-     set-state-in-effect 에 안 걸린다). 상세 단계(selected)에선 안 돈다: 그 화면엔 결과 목록이
-     낄 자리가 없고, 리듀서도 그 응답을 통째로 버린다. */
+     set-state-in-effect 에 안 걸린다).
+
+     **쏠지 말지는 이 파일이 안 정한다**(core.composerNeedsSearch). 상세로 갔다 「뒤로」로
+     돌아오면 selected 가 바뀌어 이 effect 가 다시 도는데, 여기서 조건을 따로 적으면 그 경로가
+     같은 검색어를 한 번 더 쏴서 목록은 그대로인 채 사용자가 방금 세운 커서만 지운다 —
+     실제로 그렇게 새어 있었다(그 실측은 core 의 searchSucceeded 주석). searched 를 그 판정에
+     넣었으니 **의존성 배열에도 함께 싣는다** — 안 실으면 결론이 난 뒤에도 옛 판정이 남는다. */
   useEffect(() => {
-    if (!query || selected) return;
+    if (!composerNeedsSearch(state)) return;
     const timer = setTimeout(() => void runSearch(state.query), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-    /* query 는 state.query 의 파생값이라 배열에 안 싣는다. runSearch 도 안 싣는다 — 매 렌더
-       새로 만들어지지만 읽는 건 인자로 들어오는 검색어뿐이고, 실으면 타이머가 매 렌더 새로
-       걸려 debounce 가 통째로 죽는다. */
+    /* state 전체가 아니라 판정이 읽는 세 값만 싣는다. runSearch 는 안 싣는다 — 매 렌더 새로
+       만들어지지만 읽는 건 인자로 들어오는 검색어뿐이고, 실으면 타이머가 매 렌더 새로 걸려
+       debounce 가 통째로 죽는다. */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.query, selected]);
+  }, [state.query, state.searched, selected]);
+
+  /* 활성 항목이 스크롤 밖이면 끌어온다. 목록은 카드 본문(.composer__body)이 스크롤하는데
+     scroll-behavior:smooth 는 html 에만 걸려 있어 여기선 즉시 이동이다 — 새 애니메이션이
+     아니라 감축 가드가 따로 필요 없다. block:"nearest" 라 이미 보이는 항목은 화면을 안 흔든다.
+     effect 안에서 상태를 안 건드리므로 set-state-in-effect 에도 안 걸린다. */
+  useEffect(() => {
+    if (state.activeIndex < 0) return;
+    document.getElementById(optionId(state.activeIndex))?.scrollIntoView({ block: "nearest" });
+  }, [state.activeIndex]);
+
+  /* 항목을 고른다. **Enter 와 클릭이 같은 함수를 탄다** — 갈라 두면 한쪽만 고쳐진 채로 오래
+     간다(키보드 경로는 눈에 안 띄니 늘 그쪽이 남는다). */
+  function choose(option: ChzzkCategory | "direct") {
+    resetDraft();
+    if (option === "direct") {
+      dispatch({ type: "manualPicked" });
+      return;
+    }
+    dispatch({
+      type: "picked",
+      selection: {
+        categoryId: option.categoryId,
+        categoryValue: option.categoryValue,
+        posterImageUrl: option.posterImageUrl,
+      },
+    });
+  }
+
+  /* 검색 입력의 키 조작(콤보박스 규약).
+
+     조합 중(isComposing)엔 통째로 흘려보낸다: 한글은 Enter 로 조합을 확정하고 ↑↓ 로 후보를
+     고르는 입력기 위에서 쳐지므로, 그걸 항목 선택으로 읽으면 '마인크래프트'를 확정하려던
+     Enter 가 엉뚱한 게임을 붙인다.
+
+     목록이 비어 있을 때도 흘려보낸다 — ↑↓·Home·End 는 원래 캐럿을 옮기는 텍스트 편집 키다.
+     가로챌 목록이 없는데 뺏으면 입력이 평범한 텍스트 상자로도 안 굴러간다. */
+  function onSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.nativeEvent.isComposing) return;
+
+    if (e.key === "Escape") {
+      /* 커서가 있으면 **그것만** 접고 이벤트를 소비한다. 통째로 뺏으면 안 된다 — 이 모달의
+         Esc 는 이미 '닫기'로 확립돼 있고(GameDialog 의 onCancel), 커서가 없으면 흘려보내야
+         그 뜻이 산다. keydown 의 기본 동작을 막는 것이 곧 dialog 의 close request 를 막는
+         길이다(close watcher 는 취소된 keydown 을 안 처리한다).
+         흘려보낸 Esc 를 곧장 dialog 가 받는 건 아니다: type=search 라 검색어가 남아 있으면
+         UA 가 먼저 값을 비우고, 그러고도 남는 Esc 가 모달을 닫는다(실측). 우리 규칙이 아니라
+         UA 동작이라 그대로 두고, 순서는 e2e 가 못박는다. */
+      if (state.activeIndex < 0) return;
+      e.preventDefault();
+      dispatch({ type: "activeMoved", to: "none" });
+      return;
+    }
+
+    if (e.key === "Enter") {
+      // 가리키는 항목이 없으면 아무 일도 안 한다(폼 자체가 submit 을 이미 막는다).
+      if (!activeOption) return;
+      e.preventDefault();
+      choose(activeOption);
+      return;
+    }
+
+    if (e.key === "Home" || e.key === "End") {
+      /* modifier 조합(Shift+Home 의 텍스트 선택 등)은 우리 몫이 아니다 — 그대로 흘려보낸다.
+         가리는 게 있으면 그 조합의 뜻 자체가 달라진다(Shift+Home 은 "선택 시작점까지 지운다"가
+         아니라 "커서까지 선택한다"). 여기서 손대면 관여 안 하기로 한 원칙이 modifier 앞에서
+         깨진다. */
+      if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      // 캐럿은 UA 기본 동작에 맡긴다(preventDefault 안 한다) — 활성 옵션이 있으면 그것만 접는다.
+      if (state.activeIndex >= 0) dispatch({ type: "activeMoved", to: "none" });
+      return;
+    }
+
+    if (optionCount === 0) return;
+    const to = ARROW_MOVES[e.key];
+    if (!to) return;
+    e.preventDefault();
+    dispatch({ type: "activeMoved", to });
+  }
 
   /* 아직 답을 못 받은 검색이 있는가 — **debounce 대기와 요청 중을 하나로 묶는다.** 사용자에겐
      둘이 같은 사건("치고 기다리는 중")이고, 가르면 타이핑이 멈춘 350ms 동안 목록도 안내도 없는
      빈 화면이 스친다. searched·searchError 둘 다 아직 없다는 건 이 검색어의 결론이 안 났다는
      뜻이다(queryChanged 가 둘을 함께 비운다). */
   const finding = query !== "" && !state.searched && state.searchError === "";
+
+  /* 아래 라이브 리전이 읽을 문구. 검색 실패는 여기서 말하지 않는다 — 그건 role="alert" 문단이
+     삽입되며 이미 알린다(같은 사실을 두 번 말하는 게 더 나쁘다). 상세 단계에선 비운다:
+     화면에 없는 목록을 계속 말하고 있으면 뒤로 돌아왔을 때 다시 알려 줄 변화가 없다. */
+  const searchStatus =
+    selected || !state.searched
+      ? ""
+      : state.results.length > 0
+        ? `‘${query}’ 검색 결과 ${state.results.length}건이에요.`
+        : `‘${query}’ 검색 결과가 없어요. 목록 맨 위에서 직접 추가할 수 있어요.`;
 
   function onAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -168,6 +316,10 @@ export function GameComposer({
       odId="composer"
       closing={closing}
       busy={adding}
+      /* 뒤로가기도 이 셋을 태운다. **여기가 보드에서 유일하게 미저장 입력을 든 화면이라**
+         빠지면 안 되는 자리다 — 상세만 히스토리에 얹었던 앞 판에선 검색해서 고른 뒤의
+         뒤로가기가 확인도 없이 페이지를 통째로 떠났다(리뷰 실측). */
+      history
       /* 상세 단계에 들어온 것 자체를 "잃을 작업"으로 본다 — 검색해서 고르기까지가 이미 한 벌의
          조작이고, 배경을 잘못 스쳐 그게 날아가면 처음부터 다시다. 검색 단계는 안 묻는다:
          거기서 잃는 건 검색어 한 줄이고, 매번 되묻으면 그냥 닫으려는 사람에게 문이 하나 더 는다. */
@@ -261,9 +413,28 @@ export function GameComposer({
               value={state.query}
               ref={searchRef}
               autoComplete="off"
+              role="combobox"
+              // 목록이 실제로 그려질 때만 펼침이다 — 빈 listbox 를 펼쳤다고 말하면 ↓ 를 눌러도
+              // 아무 일이 없는 이유를 사용자가 알 길이 없다.
+              aria-expanded={optionCount > 0}
+              aria-controls={RESULTS_ID}
+              aria-autocomplete="list"
+              /* 가리키는 항목이 없으면 **속성 자체를 뺀다.** 빈 문자열이나 없는 id 를 남기면
+                 AT 는 "가리키는 항목이 있다"고 믿고 그걸 찾다가 입력 낭독까지 조용해진다. */
+              aria-activedescendant={
+                state.activeIndex >= 0 ? optionId(state.activeIndex) : undefined
+              }
+              aria-describedby={INPUT_HINT_ID}
               onChange={(e) => dispatch({ type: "queryChanged", query: e.target.value })}
+              onKeyDown={onSearchKeyDown}
               data-od-id="composer-input"
             />
+            {/* 조작법은 라이브 리전이 아니라 입력의 **설명**으로 단다 — 검색마다 되풀이하면
+                그게 소음이고, describedby 는 입력에 포커스가 갈 때 한 번 읽힌다. 눈으로 보는
+                사람에겐 커서 표시가 같은 말을 하므로 화면엔 안 낸다. */}
+            <p className="sr-only" id={INPUT_HINT_ID}>
+              이름을 치면 자동으로 찾아요. 결과가 뜨면 위아래 화살표 키로 고르고 엔터 키로 선택해요.
+            </p>
           </form>
 
           {state.searchError && (
@@ -287,23 +458,79 @@ export function GameComposer({
             </p>
           )}
 
-          <ul className="composer__results" data-od-id="composer-results">
-            {state.results.map((c) => (
-              <li key={c.categoryId}>
-                <button
-                  className="composer__pick"
-                  type="button"
-                  onClick={() => {
-                    resetDraft();
-                    dispatch({
-                      type: "picked",
-                      selection: {
-                        categoryId: c.categoryId,
-                        categoryValue: c.categoryValue,
-                        posterImageUrl: c.posterImageUrl,
-                      },
-                    });
-                  }}
+          {/* 항목이 li 자체다(안에 button 을 두지 않는다) — listbox 안의 option 이 button 이면
+              role 이 충돌하고, 눌러서 포커스가 목록으로 옮겨 가면 "포커스는 입력에 머문다"는
+              콤보박스 규약이 그 자리에서 깨진다. 클릭이 계속 도는 건 li 의 onClick 덕이고,
+              44 하한은 .composer__pick 이 들고 있던 min-height 가 그대로 li 로 옮겨간 것이다. */}
+          <ul
+            className="composer__results"
+            id={RESULTS_ID}
+            role="listbox"
+            aria-label="게임 검색 결과"
+            data-od-id="composer-results"
+            /* 비면 접근성 트리에서도 접는다 — 입력은 aria-expanded="false" 라고 말하는데 빈
+               listbox 가 트리에 남으면 그 둘이 서로 다른 말을 한다. 요소를 지우지 않는 이유는
+               입력의 aria-controls 가 이 id 를 가리키기 때문이다(games.css 의 [hidden] 규칙). */
+            hidden={optionCount === 0}
+            onMouseDown={keepFocusInInput}
+          >
+            {/* 직접 입력은 이제 **목록 맨 위**다(과제 D) — 검색이 12건을 주면 그 끝까지
+                스크롤해야 만나던 자리를, 찾는 게임이 없어서 손으로 넣으려는 사람이 정확히
+                그 상황에 있다는 이유로 앞으로 옮겼다. 노출 규칙(정확히 같은 이름이 결과에
+                있으면 감춘다)의 정본은 그대로 core.showsDirectEntry — 바뀐 건 자리뿐이다.
+
+                자리가 위계를 못 지므로 이제 **문구가 진다**: 라벨이 "찾는 게임이 없다면"
+                으로 시작해 이 줄이 정답이 아니라 결과에 없을 때의 길임을 먼저 말한다.
+                형태(.composer__pick--direct 의 구분선 + 넓힌 간격 + 점선 마크)는 거들 뿐이다 —
+                구분선은 --border 라 라이트 1.13:1 · 다크 1.30:1 이라 사실상 안 보이고, 그건
+                저장소 표준 헤어라인이라 여기만 진하게 하면 오히려 어긋난다(적대적 리뷰가
+                "위계의 절반을 구분선이 진다"는 앞 판 서술을 실측으로 반박했다).
+                그래도 같은 .composer__pick 을 입혀 결과와 같은 종류의 조작(고르면 상세로
+                간다)으로 읽히게 한다 — 통째로 다른 부품으로 세우면 "검색이 실패했다"는
+                신호가 되어 결과가 멀쩡히 있는데도 사용자를 멈춰 세운다.
+
+                인덱스는 **0**(DIRECT_ENTRY_INDEX, core)이다. 맨 위인데 인덱스가 끝(옛 자리)
+                이면 아무것도 안 가리키던 상태에서 ↓ 첫 타가 화면 두 번째 줄(첫 결과)을 잡아
+                시각 순서와 키보드 순서가 어긋난다 — 그래서 결과 쪽 인덱스를 아래에서
+                core.composerResultIndex 로 한 칸씩 밀었다. 화면과 core 양쪽이 이 두 함수를
+                거치지 않고 인덱스를 다시 계산하면 그 순간 커서가 없는 id 를 가리킨다.
+
+                앞에 !finding 가드가 하나 더 있었다. showsDirectEntry 는 searched 를 요구하고
+                finding 은 !searched 를 요구하니 둘은 같은 시점에 참일 수 없어 늘 통과하던
+                조건이었고, 남겨 두면 "이 줄이 그려지는가"의 답이 두 군데가 되어 리듀서가 세는
+                항목 수와 어긋날 여지가 생긴다. */}
+            {showsDirectEntry(state) && (
+              <li
+                className={
+                  optionClass(state.activeIndex === DIRECT_ENTRY_INDEX) + " composer__pick--direct"
+                }
+                id={optionId(DIRECT_ENTRY_INDEX)}
+                role="option"
+                aria-selected={state.activeIndex === DIRECT_ENTRY_INDEX}
+                data-od-id="composer-direct"
+                onMouseMove={() => dispatch({ type: "activeSet", index: DIRECT_ENTRY_INDEX })}
+                onClick={() => choose("direct")}
+              >
+                <span className="composer__directmark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <span className="composer__pickname">찾는 게임이 없다면 ‘{query}’ 직접 추가</span>
+              </li>
+            )}
+
+            {state.results.map((c, i) => {
+              const idx = composerResultIndex(state, i);
+              return (
+                <li
+                  className={optionClass(state.activeIndex === idx)}
+                  key={c.categoryId}
+                  id={optionId(idx)}
+                  role="option"
+                  aria-selected={state.activeIndex === idx}
+                  onMouseMove={() => dispatch({ type: "activeSet", index: idx })}
+                  onClick={() => choose(c)}
                 >
                   {c.posterImageUrl ? (
                     <img
@@ -320,34 +547,9 @@ export function GameComposer({
                     </span>
                   )}
                   <span className="composer__pickname">{c.categoryValue}</span>
-                </button>
-              </li>
-            ))}
-
-            {/* 직접 입력은 **목록의 마지막 항목**이다 — 결과와 같은 종류의 조작(고르면 상세로
-                간다)이라 다른 부품으로 세우면 "검색이 실패했다"는 신호로 읽힌다. 결과가 0건이면
-                이 항목만 남아 옛 비상구와 같은 화면이 된다. 노출 규칙(정확히 같은 이름이 결과에
-                있으면 감춘다)의 정본은 core.showsDirectEntry. */}
-            {!finding && showsDirectEntry(state) && (
-              <li>
-                <button
-                  className="composer__pick composer__pick--direct"
-                  type="button"
-                  data-od-id="composer-direct"
-                  onClick={() => {
-                    resetDraft();
-                    dispatch({ type: "manualPicked" });
-                  }}
-                >
-                  <span className="composer__directmark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-                    </svg>
-                  </span>
-                  <span className="composer__pickname">‘{query}’ 직접 추가</span>
-                </button>
-              </li>
-            )}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
@@ -356,6 +558,24 @@ export function GameComposer({
           보드의 announcement 규약과 같이 한 줄로 알린다. */}
       <p className="sr-only" role="status">
         {selected ? selected.categoryValue + " 선택됨. 추가하려면 확인하세요." : ""}
+      </p>
+
+      {/* 검색 결론을 알리는 자리. 자동 검색이라 "검색 버튼을 눌렀다"는 사건이 아예 없어서,
+          이게 없으면 결과가 도착한 사실 자체를 눈으로 안 보는 사람은 알 방법이 없다.
+
+          **결론이 난 시점(searched)에만** 말한다 — 타이핑마다 발화하면 그게 소음이고, 진행 중은
+          눈에 보이는 '찾는 중…' 문단이 자기 라이브 리전으로 이미 말한다. 둘을 한 노드에 합치면
+          서로를 덮어써 결론이 진행 안내에 지워진다. 선택됨 안내와도 나눠 두는 이유가
+          같다: 한 노드에 두 사건을 실으면 늦게 온 쪽이 앞의 말을 자른다.
+
+          단계와 무관하게 **늘 마운트해 둔다.** 라이브 리전은 글자가 바뀔 때 발화하는데,
+          텍스트를 품은 채 새로 삽입되면 발화를 건너뛰는 리더가 있다 — 검색 단계 안에 두면
+          결과가 도착할 때마다 그 함정을 새로 밟는다.
+
+          문구에 검색어를 싣는 이유도 같은 규칙에서 나온다: 글자가 그대로면 아무 말도 안 나가서,
+          다른 검색어가 같은 건수를 주면(3건 → 3건) 두 번째 결과는 통째로 조용하다. */}
+      <p className="sr-only" role="status" data-od-id="composer-search-status">
+        {searchStatus}
       </p>
     </GameDialog>
   );

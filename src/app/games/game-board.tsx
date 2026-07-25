@@ -53,6 +53,11 @@ function cssVars(vars: Record<string, string | number>): CSSProperties {
   return vars as CSSProperties;
 }
 
+/* 방금 추가한 카드의 강조 링(.game--just-added, games.css)이 스스로 걷히기까지 기다리는
+   시간. 화면을 훑어 카드를 찾기엔(정렬이 카드를 뒤로 보내 스크롤이 필요할 수 있다) 충분하고,
+   그보다 오래 남으면 "이 카드가 특별하다"는 잘못된 인상을 준다. */
+const JUST_ADDED_MS = 2000;
+
 export function GameBoard({
   initialGames,
   canWrite,
@@ -69,6 +74,15 @@ export function GameBoard({
      상세로 돌아오고, 포커스 복원을 브라우저의 dialog 스택이 그대로 맡는다. 행 전체를 들고
      있는 이유는 아래 editing 과 같다. */
   const [detail, setDetail] = useState<GameCard | null>(null);
+  /* 상세에 보내는 "이제 닫아라" 신호. 쓰는 길은 **삭제 성공** 하나다(onRemoved) — 나머지 닫는
+     길은 셸이 스스로 처리하고, 뒤로가기도 이제 셸이 받는다(GameDialog 의 history). 이 신호를
+     거치는 이유는 곧장 언마운트하면 dialog 가 열린 채 DOM 에서 빠져 close 이벤트가 아예 안
+     오기 때문이다 — 그러면 셸이 히스토리 엔트리를 되돌릴 자리를 잃는다. */
+  const [detailClosing, setDetailClosing] = useState(false);
+  /* 이번 닫힘이 **삭제 때문인가.** 포커스를 어디로 넘길지가 여기서 갈린다(onDetailClosed).
+     state 가 아니라 ref 인 이유: 이 값이 바뀐다고 다시 그릴 것이 없고, 닫기 신호를 세우는
+     같은 tick 에 쓰고 close 이벤트에서 읽는 자리라 리렌더를 기다리면 늦는다. */
+  const detailRemovedRef = useRef(false);
   // 고치는 중인 행(플레이 날짜·클리어). 행 전체를 들고 있는 이유: 모달이 제목·포스터로
   // "무엇을 고치는지"를 다시 보여줘야 하고, id 만 들면 목록에서 매번 되찾아야 한다.
   const [editing, setEditing] = useState<GameCard | null>(null);
@@ -76,8 +90,9 @@ export function GameBoard({
   // "무엇을 떼는지"를 되짚어 줘야 하고, 되돌릴 수 없는 행동일수록 그 확인이 정확해야 한다.
   const [deleting, setDeleting] = useState<GameCard | null>(null);
   const addSlotRef = useRef<HTMLButtonElement>(null);
-  /* 방금 붙인 카드. 정렬이 그 카드를 어디로 보내든 사용자가 그것을 찾을 수 있어야 한다
-     (아래 onAdded 주석). */
+  /* 방금 붙인 카드. 정렬이 그 카드를 어디로 보내든 사용자가 그것을 찾을 수 있어야 한다(아래
+     onAdded 주석) — 포커스 이동과 강조 링(.game--just-added, games.css) 둘 다 이 id 하나로
+     켠다. */
   const [justAdded, setJustAdded] = useState<number | null>(null);
   const justAddedRef = useRef<HTMLButtonElement | null>(null);
 
@@ -96,7 +111,11 @@ export function GameBoard({
     /* 정렬이 카드를 화면 밖으로 보낼 수 있으므로(날짜를 안 넣으면 날짜 있는 게임들 뒤로
        간다) 그 카드로 포커스를 옮긴다. 스크롤이 아니라 포커스인 이유: 스크롤만 하면 키보드
        사용자는 뷰포트와 포커스가 갈린 채 남는다(모달이 닫히며 포커스는 추가 슬롯으로
-       복원된다). focus() 가 스크롤도 함께 하므로 시각 사용자에게도 같은 결과다. */
+       복원된다). focus() 가 스크롤도 함께 하므로 시각 사용자에게도 같은 결과다.
+
+       포커스만으로는 부족하다 — 마우스로 추가하면 :focus-visible 이 안 떠 아무 표시도 없다
+       (아래 강조 링 effect 주석). justAdded 하나가 포커스 이동과 그 표시(.game--just-added)
+       를 함께 켠다. */
     setJustAdded(row.id);
   }
 
@@ -107,6 +126,35 @@ export function GameBoard({
     if (justAdded === null) return;
     justAddedRef.current?.focus();
   }, [justAdded]);
+
+  /* 강조 링을 스스로 건다. setTimeout 콜백 안의 setState 라 effect 안 **동기** setState 를
+     막는 규칙(set-state-in-effect)에 안 걸린다. 타이머로 클래스를 통째로 떼는 게 계약이라
+     트랜지션이 없고, 그래서 reduced-motion 가드도 따로 안 붙는다(games.css 의 .game--just-added
+     주석). 언마운트·재추가(justAdded 가 다른 id 로 바뀜) 둘 다 cleanup 이 정리한다 — 안 하면
+     먼저 추가한 카드의 타이머가 나중에 추가한 카드의 링을 꺼 버린다. */
+  useEffect(() => {
+    if (justAdded === null) return;
+    const timer = setTimeout(() => setJustAdded(null), JUST_ADDED_MS);
+    return () => clearTimeout(timer);
+  }, [justAdded]);
+
+  /* 상세가 실제로 닫힌 뒤(브라우저의 close 이벤트). 닫은 주체가 누구든 여기로 모인다.
+     히스토리 엔트리 되돌리기는 여기 없다 — 셸이 같은 이벤트에서 이미 한다(GameDialog). */
+  function onDetailClosed() {
+    setDetail(null);
+    setDetailClosing(false);
+    if (!detailRemovedRef.current) return;
+    detailRemovedRef.current = false;
+    /* 삭제로 닫힌 길만 포커스를 옮긴다. 브라우저는 포커스를 트리거로 되돌리는데 그 트리거는
+       방금 지운 카드라 함께 사라졌다 — 그대로 두면 body 로 떨어져 키보드 사용자가 탭 순서 맨
+       앞으로 튕긴다. 붙이기 슬롯은 카드가 아니라 그리드의 고정 첫 칸이라 지워지지 않으므로
+       여기로 넘긴다(삭제 권한이 있으면 쓰기 권한도 있다 — core/authorities). */
+    addSlotRef.current?.focus();
+  }
+
+  /* 상세 **위에** 겹친 모달이 떠 있는가. 뒤로가기가 왔을 때 셸이 무엇을 할지가 여기서 갈린다
+     (GameDialog 의 covered) — 셸은 자기 위에 뭐가 얹혔는지 못 보므로 보드가 알려 준다. */
+  const detailCovered = editing !== null || deleting !== null;
 
   /* 날짜를 고치면 lastPlayed 가 바뀌어 **자리도 달라져야 한다** — 제자리 교체만 하면 새로고침
      전까지 보드가 날짜순이 아닌 채로 남는다. 정렬 규칙은 core 가 쥔다(서버 SQL 의 짝). */
@@ -123,14 +171,14 @@ export function GameBoard({
   function onRemoved(row: GameCard) {
     setGames((prev) => prev.filter((g) => g.id !== row.id));
     setDeleting(null);
-    // 상세는 방금 사라진 게임을 보여주고 있었다 — 같이 닫는다.
-    setDetail(null);
     setAnnouncement(row.categoryValue + " 삭제됨");
-    /* 모달을 닫으면 브라우저가 포커스를 트리거로 되돌리는데, 그 트리거는 방금 지운 카드의
-       상세 안에 있어 같은 커밋에서 사라진다 — 그대로 두면 포커스가 body 로 떨어져 키보드
-       사용자가 탭 순서 맨 앞으로 튕긴다. 붙이기 슬롯은 카드가 아니라 그리드의 고정 첫 칸이라
-       지워지지 않으므로 여기로 넘긴다(삭제 권한이 있으면 쓰기 권한도 있다 — core/authorities). */
-    addSlotRef.current?.focus();
+    /* 상세는 방금 사라진 게임을 보여주고 있었다 — 같이 닫는다. **곧장 언마운트하지 않고 닫기
+       신호를 세운다**: 그래야 브라우저의 close 이벤트가 오고, 셸이 거기서 히스토리 엔트리를
+       되돌린다(안 되돌리면 삭제하고 나온 사람의 뒤로가기 한 번이 아무 일도 안 한다).
+       그 대가인 "포커스가 body 로 떨어짐"은 onDetailClosed 가 추가 슬롯으로 갚는다 —
+       포커스가 돌아갈 트리거(카드)는 어차피 같은 커밋에서 사라진다. */
+    detailRemovedRef.current = true;
+    setDetailClosing(true);
   }
 
   return (
@@ -157,9 +205,11 @@ export function GameBoard({
           game={detail}
           canWrite={canWrite}
           canDelete={canDelete}
+          closing={detailClosing}
+          covered={detailCovered}
           onEdit={() => setEditing(detail)}
           onDelete={() => setDeleting(detail)}
-          onClose={() => setDetail(null)}
+          onClose={onDetailClosed}
         />
       )}
       {/* 상세가 아래 열려 있으면 스크림을 한 겹 더 깔지 않는다(GameDialog 의 className). */}
@@ -221,7 +271,7 @@ export function GameBoard({
               return (
                 <div
                   key={g.id}
-                  className="polaroid game"
+                  className={"polaroid game" + (g.id === justAdded ? " game--just-added" : "")}
                   style={cssVars({ "--rest-rot": rot, "--thumb-a": ang })}
                   data-od-id={"game-card-" + g.id}
                 >
@@ -266,6 +316,7 @@ export function GameBoard({
                         data-od-id={"game-open-" + g.id}
                         // 방금 붙인 카드에만 걸린다 — 정렬 뒤 그 카드를 찾아 주는 손잡이다.
                         ref={g.id === justAdded ? justAddedRef : undefined}
+                        // 히스토리 엔트리는 여는 쪽이 아니라 셸이 쌓는다(GameDialog 의 history).
                         onClick={() => setDetail(g)}
                       >
                         {/* 두 줄 말줄임은 이 span 이 진다 — 버튼에 직접 걸면 함께 필요한
@@ -318,6 +369,8 @@ function GameDetail({
   game,
   canWrite,
   canDelete,
+  closing,
+  covered,
   onEdit,
   onDelete,
   onClose,
@@ -325,6 +378,12 @@ function GameDetail({
   game: GameCard;
   canWrite: boolean;
   canDelete: boolean;
+  /* 부모가 세우는 닫기 신호. 이 화면에 그럴 일이 하나 있다 — **삭제 성공**. 곧장 언마운트하는
+     대신 신호를 세워야 close 이벤트가 오고, 셸이 거기서 히스토리 엔트리를 되돌린다.
+     뒤로가기를 포함한 나머지 닫는 길은 셸이 스스로 처리하므로 여기 안 온다. */
+  closing: boolean;
+  // 수정·삭제가 이 위에 겹쳐 떴는가 — 그동안 뒤로가기가 이 화면을 닫으면 안 된다.
+  covered: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -334,7 +393,11 @@ function GameDetail({
       title={game.categoryValue}
       odId="game-detail"
       className="composer--detail"
-      closing={false}
+      closing={closing}
+      /* 뒤로가기가 페이지가 아니라 이 모달을 닫는다(이슈 #65). 겹친 모달이 떠 있는 동안은
+         유예된다 — 그 판정을 셸이 하도록 covered 로 넘긴다(GameDialog 의 history·covered). */
+      history
+      covered={covered}
       onClose={onClose}
     >
       <div className="detail__head">
