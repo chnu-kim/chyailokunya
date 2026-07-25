@@ -318,3 +318,61 @@ describe("제안 스키마 (D1 마이그레이션 스모크)", () => {
     expect(await db.select().from(gameSuggestions)).toHaveLength(0);
   });
 });
+
+/* 도배 상한의 **진짜 방어선**(마이그레이션 0010 의 BEFORE INSERT 트리거). 앱 쪽 검사는
+   count → insert 두 왕복이라 동시 요청 앞에서 통째로 뚫린다 — 그래서 여기선 앱을 거치지 않고
+   db 에 직접 넣어, 판정이 쓰기 연산 자체에 붙어 있는지를 본다(그게 경합에서도 서는 유일한 이유). */
+describe("제안 도배 상한 (트리거)", () => {
+  // 마이그레이션 0010 의 RAISE 조건과 같은 값. 갈리면 이 테스트가 먼저 빨개진다.
+  const LIMIT = 20;
+
+  async function seedAuthor(db: ReturnType<typeof makeDb>): Promise<number> {
+    const [row] = await db.insert(users).values({}).returning();
+    return row!.id;
+  }
+
+  it("미처리 제안이 상한에 닿으면 그다음 INSERT 를 DB 가 거절한다", async () => {
+    const db = makeDb(env.DB);
+    const authorId = await seedAuthor(db);
+    for (let i = 0; i < LIMIT; i++) {
+      await db
+        .insert(gameSuggestions)
+        .values({ kind: "add", authorUserId: authorId, proposedTitle: "게임 " + i });
+    }
+    await expect(
+      db
+        .insert(gameSuggestions)
+        .values({ kind: "add", authorUserId: authorId, proposedTitle: "한 개 더" }),
+    ).rejects.toThrow();
+    expect(await db.select().from(gameSuggestions)).toHaveLength(LIMIT);
+  });
+
+  it("상한은 **작성자별**이고 처리된 제안은 안 센다", async () => {
+    const db = makeDb(env.DB);
+    const a = await seedAuthor(db);
+    const b = await seedAuthor(db);
+    for (let i = 0; i < LIMIT; i++) {
+      await db
+        .insert(gameSuggestions)
+        .values({ kind: "add", authorUserId: a, proposedTitle: "A" + i });
+    }
+    // 남의 상한이 내 제안을 막으면 한 사람이 사이트 전체의 제안을 잠글 수 있다.
+    await expect(
+      db.insert(gameSuggestions).values({ kind: "add", authorUserId: b, proposedTitle: "B" }),
+    ).resolves.toBeDefined();
+
+    /* 처리하면 자리가 난다 — 안 그러면 상한에 닿은 사람은 관리자가 무엇을 하든 영영 못 낸다.
+       status 를 보는 조건이 트리거에 실제로 들어 있는지가 여기서 갈린다. */
+    const [first] = await db
+      .select()
+      .from(gameSuggestions)
+      .where(eq(gameSuggestions.authorUserId, a));
+    await db
+      .update(gameSuggestions)
+      .set({ status: "rejected", resolvedAt: Date.now(), resolvedByUserId: a })
+      .where(eq(gameSuggestions.id, first!.id));
+    await expect(
+      db.insert(gameSuggestions).values({ kind: "add", authorUserId: a, proposedTitle: "다시" }),
+    ).resolves.toBeDefined();
+  });
+});

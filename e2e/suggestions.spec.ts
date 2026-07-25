@@ -164,3 +164,27 @@ test("제안: 거절하면 제안함에서 사라진다", async ({ page, baseURL
   // 목록에서 빠진다. 개수는 안 센다 — 다른 테스트의 제안이 같은 목록에 섞인다(위 주석).
   await expect(row).toHaveCount(0);
 });
+
+/* 보드에서 여는 추가 요청 폼은 **미저장 입력을 든 최상위 모달**이다 — 뒤로가기가 페이지를
+   떠나면 팬이 적던 것이 통째로 사라진다. GameDialog 주석이 "잃을 게 없는 상세는 히스토리로
+   보호받고 정작 입력을 든 컴포저는 안 받는 비대칭"이라 부른 그 자리라, 컴포저와 같은 대접을
+   받아야 한다(리뷰가 잡았다). */
+test("제안: 추가 요청 폼은 뒤로가기에 페이지를 안 떠난다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!, E2E_FAN);
+  await page.goto("/games");
+  await expectSignedIn(page);
+
+  await page.locator("[data-od-id='suggest-add-open']").click();
+  await page.locator("[data-od-id='suggest-title']").fill("적다 만 이름");
+
+  await page.goBack();
+
+  // 미저장 입력이 있으므로 곧바로 닫히지 않고 셸의 확인이 뜬다(dirty 가드).
+  const discard = page.locator("[data-od-id='game-suggest-discard']");
+  await expect(discard).toBeVisible();
+  await page.locator("[data-od-id='game-suggest-discard-keep']").click();
+
+  // 페이지를 안 떠났고 적던 것도 그대로다.
+  await expect(page).toHaveURL(/\/games$/);
+  await expect(page.locator("[data-od-id='suggest-title']")).toHaveValue("적다 만 이름");
+});

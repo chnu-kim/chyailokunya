@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   diffSuggestion,
   isEmptyEditSuggestion,
+  isPlayDateApplied,
   isSuggestedValuesValid,
   type CurrentValues,
   type SuggestedValues,
@@ -107,5 +108,24 @@ describe("isSuggestedValuesValid", () => {
     expect(isSuggestedValuesValid({ cleared: true, clearedDate: null, playedDate: null })).toBe(
       true,
     );
+  });
+});
+
+describe("isPlayDateApplied", () => {
+  it("잠기지 않았으면 폼이 입력을 그대로 실었다", () => {
+    expect(isPlayDateApplied("2026-07-20", "2026-07-11", false)).toBe(true);
+  });
+
+  /* 여러 날 편성이라 폼이 날짜를 잠갔는데 제안이 다른 날짜를 원했다 — 클리어만 저장됐다.
+     여기서 참을 돌려주면 팬의 날짜 제안이 제안함에서 조용히 사라진다. */
+  it("잠긴 채 다른 날짜를 원했으면 반영되지 않았다", () => {
+    expect(isPlayDateApplied("2026-07-20", "2026-07-11", true)).toBe(false);
+  });
+
+  /* 잠겼어도 할 일이 없었으면 반영된 것이다 — 이 갈래가 없으면 여러 날 편성 게임의 클리어를
+     고치는 정상 반영이 영영 "미완"으로 남아 제안이 처리되지 않는다. */
+  it("잠겼어도 원하는 값이 이미 지금 값이면 반영된 것이다", () => {
+    expect(isPlayDateApplied("2026-07-11", "2026-07-11", true)).toBe(true);
+    expect(isPlayDateApplied("", "", true)).toBe(true);
   });
 });

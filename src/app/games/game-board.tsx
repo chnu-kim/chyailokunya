@@ -11,6 +11,7 @@ import {
   sortGameCards,
 } from "@/core/games";
 import type { GameCard } from "@/features/games/service";
+import { isPlayDateApplied } from "@/core/suggestions";
 import type { SuggestionListItem } from "@/features/suggestions/service";
 import { trpc } from "@/features/trpc/client";
 import { GameComposer } from "./game-composer";
@@ -217,14 +218,14 @@ export function GameBoard({
 
   /* 날짜를 고치면 lastPlayed 가 바뀌어 **자리도 달라져야 한다** — 제자리 교체만 하면 새로고침
      전까지 보드가 날짜순이 아닌 채로 남는다. 정렬 규칙은 core 가 쥔다(서버 SQL 의 짝). */
-  function onUpdated(row: GameCard) {
+  function onUpdated(row: GameCard, meta: { dateApplied: boolean }) {
     setGames((prev) => sortGameCards(prev.map((g) => (g.id === row.id ? row : g))));
     setEditing(null);
     /* 상세가 아래 열려 있으면 그 화면도 새 값으로 갈아 끼운다 — 안 하면 방금 고친 날짜가
        돌아온 화면에 옛 값으로 떠 "저장이 안 됐다"로 읽힌다. */
     setDetail((prev) => (prev && prev.id === row.id ? row : prev));
     setAnnouncement(row.categoryValue + " 수정됨");
-    void markApplied();
+    void markApplied(meta.dateApplied);
   }
 
   /* 반영이 끝났으니 그 제안을 accepted 로 표시한다. **게임 쓰기와 별개 요청이다** — 묶으면
@@ -233,10 +234,20 @@ export function GameBoard({
      실패해도 사용자에게 던지지 않는다: 반영 자체는 성공했고(보드가 이미 바뀌었다) 남은 문제는
      제안함에 줄이 남는 것뿐이라, 여기서 오류를 띄우면 방금 성공한 저장이 실패로 읽힌다.
      대신 라이브 영역으로 알려 관리자가 제안함에서 직접 정리할 수 있게 한다. */
-  async function markApplied() {
+  async function markApplied(dateApplied = true) {
     if (!applying) return;
     const target = applying;
     setApplying(null);
+    /* **날짜를 못 실었으면 처리로 표시하지 않는다.** 여러 날 편성이라 폼이 날짜를 잠근 경우가
+       그렇다 — 클리어만 저장됐는데 제안이 제안함에서 사라지면 팬의 날짜 제안이 조용히 증발한다
+       (리뷰가 잡았다). 제안을 미처리로 남겨 두면 관리자가 /schedule 에서 날짜를 고친 뒤 다시
+       반영할 수 있고, 왜 남았는지는 라이브 영역이 말한다. */
+    if (!dateApplied) {
+      setAnnouncement(
+        "클리어만 반영했어요 — 여러 날 편성이라 날짜는 일정에서 고쳐 주세요. 제안은 그대로 뒀어요",
+      );
+      return;
+    }
     try {
       await trpc.suggestions.resolve.mutate(
         { id: target.id, resolution: "accepted" },
@@ -371,7 +382,12 @@ export function GameBoard({
           game={editing}
           stacked={detail !== null}
           /* 반영 중인 제안이 **이 게임의 것일 때만** 값을 채운다 — id 를 안 대조하면 추가 요청을
-             반영하려다 취소하고 다른 카드를 수정할 때 남의 제안 값이 폼에 실린다. */
+             반영하려다 취소하고 다른 카드를 수정할 때 남의 제안 값이 폼에 실린다.
+
+             **채우는 건 입력값뿐이고 precondition 은 안 건드린다**(GameEditor 의 조회 주석).
+             그리고 그 보호는 플레이 날짜에만 붙는다 — 클리어는 precondition 없이 늘 실리므로
+             폼이 열린 뒤 딴 데서 바뀌면 저장이 덮는다. 기존 수정 폼의 성질을 그대로 물려받은
+             것이라 여기서 갈라 고치지 않는다(ADR-0025 결정 2 의 보호 범위 절). */
           initial={
             applying && applying.gameId === editing.id
               ? {
@@ -797,7 +813,9 @@ function GameEditor({
      제안함에서 본 값을 손으로 옮겨 적지 않아도 되고, 저장은 평소의 update 경로를 그대로 탄다 —
      승인 전용 쓰기를 안 만드는 게 이 설계의 핵심이라(결정 2) 여기서 갈라지면 안 된다. */
   initial?: { cleared: boolean; clearedDate: string; playedDate: string };
-  onUpdated: (row: GameCard) => void;
+  /* dateApplied = 이번 저장이 **요청된 플레이 날짜까지** 담았나. 제안을 반영하는 부모가 이걸
+     알아야 "클리어만 반영됐는데 제안은 처리됨으로 사라지는" 자리를 막는다(core.isPlayDateApplied). */
+  onUpdated: (row: GameCard, meta: { dateApplied: boolean }) => void;
   onClose: () => void;
 }) {
   const { draft, setDraft } = useClearedDraft({
@@ -817,7 +835,7 @@ function GameEditor({
   // 닫기 신호와 인계할 행. 컴포저와 같은 이유로 성공 즉시 onUpdated 를 부르지 않는다 —
   // 부모가 같은 커밋에서 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
   const [closing, setClosing] = useState(false);
-  const [saved, setSaved] = useState<GameCard | null>(null);
+  const [saved, setSaved] = useState<{ row: GameCard; dateApplied: boolean } | null>(null);
   const [saving, startSave] = useTransition();
 
   /* 제안이 채우는 날짜. 객체가 아니라 원시값을 뽑아 두는 건 아래 effect 의존성에 싣기 위해서다 —
@@ -860,6 +878,10 @@ function GameEditor({
      dateEdited 는 조회가 끝난 뒤에만 참이 될 수 있다 — dates 가 null 인 동안 playedDate 는
      아직 빈 채라, 그 차이를 "고쳤다"로 세면 열자마자 낡은 빈 값이 저장에 실린다. */
   const locked = dates !== null && !isPlayDateEditable(dates);
+  /* 제안 반영이 "날짜까지 담았나"를 재는 기준. 폼의 loadedDate 가 아니라 **보드가 그리는 날짜**
+     여야 한다 — 팬의 제안도 그 화면에서 본 값 위에서 쓰였으므로 비교 대상이 같아야 하고,
+     여러 날 편성이면 loadedDate 는 빈 값이라 기준으로 못 쓴다(위 setSaved 주석). */
+  const shownDate = game.lastPlayed ?? "";
   const dateEdited = !locked && dates !== null && playedDate !== loadedDate;
 
   function onSave(e: React.FormEvent) {
@@ -890,7 +912,15 @@ function GameEditor({
           // 상한이 없으면 saving 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
           { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
         );
-        setSaved(row);
+        /* 잠금 때문에 날짜를 못 실었는지 여기서 판정해 인계한다 — 부모는 폼의 잠금 상태를
+           못 보고, 저장 결과(row.lastPlayed)만으로는 초안 주 항목이 섞여 판단이 안 선다.
+
+           기준은 **보드가 그리는 날짜**(shownDate)다. loadedDate 로 재면 여러 날 편성일 때 그
+           값이 빈 문자열이라, 클리어만 고치는 정상 반영까지 "날짜를 못 실었다"로 떨어진다. */
+        setSaved({
+          row,
+          dateApplied: isPlayDateApplied(initial?.playedDate ?? shownDate, shownDate, locked),
+        });
         setClosing(true);
       } catch (e) {
         // 수정 전용 문구다 — 이 경로의 CONFLICT 는 중복 게임이 아니라 낡은 플레이 날짜다.
@@ -917,7 +947,7 @@ function GameEditor({
       dirty={dirty}
       // 삭제 확인과 같은 이유로 X 를 끈다 — 본문에 "취소"가 있다(GameDialog 의 closeButton).
       closeButton={false}
-      onClose={() => (saved ? onUpdated(saved) : onClose())}
+      onClose={() => (saved ? onUpdated(saved.row, { dateApplied: saved.dateApplied }) : onClose())}
     >
       <form className="composer__detail" onSubmit={onSave}>
         {/* 첫 필드가 플레이 날짜라 안내도 그 순서로 말한다 — 클리어만 언급하면 바로 아래

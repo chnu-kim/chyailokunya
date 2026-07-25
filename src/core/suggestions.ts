@@ -98,6 +98,27 @@ export function isEmptyEditSuggestion(
   return diffSuggestion(current, proposed).length === 0 && (note === null || note.trim() === "");
 }
 
+/* 반영이 제안의 **플레이 날짜까지** 실제로 담았는가.
+
+   왜 필요한가: 여러 날 편성된 게임은 게임 폼이 날짜를 잠근다(isPlayDateEditable) — 입력 하나로
+   여러 날을 표현할 수 없어서다. 그 상태로 저장하면 클리어만 반영되고 날짜는 그대로 남는데,
+   그때 제안을 "처리됨"으로 표시하면 **팬의 날짜 제안이 조용히 사라진다**(관리자는 반영했다고
+   믿고 제안함에서 그 줄이 없어진다 — 리뷰가 잡은 자리다).
+
+   잠기지 않았으면 폼이 입력을 그대로 실었으므로 참이다. 잠겼어도 **원하는 값이 이미 현재 값이면**
+   할 일이 애초에 없었으므로 참이다 — 그 경우까지 미완으로 세면 클리어만 고치는 정상 반영이
+   영영 처리로 안 넘어간다. */
+export function isPlayDateApplied(
+  /* 제안이 원한 날짜. 제안은 팬이 **보드에서 본 값** 위에서 쓰이므로 current 도 같은 기준
+     (보드가 그리는 lastPlayed)이어야 한다 — 폼이 잠겼을 때 그 입력이 비는 것과 혼동하면
+     클리어만 고치는 정상 반영까지 미완으로 떨어진다. */
+  wanted: string | null,
+  current: string | null,
+  locked: boolean,
+): boolean {
+  return !locked || wanted === current;
+}
+
 /* 제안 값 자체가 성립하는가 — 안 깬 게임에 클리어 날짜가 붙는 모순만 막는다. games 의 CHECK·
    Zod 와 **같은 함수**를 나눠 쓴다: 여기만 따로 짜면 제안으로는 저장 가능한데 반영하려는
    순간 게임 쪽 경계가 거절하는 조합이 생겨, 관리자가 손쓸 수 없는 제안이 제안함에 남는다. */

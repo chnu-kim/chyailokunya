@@ -127,10 +127,18 @@ export function listMySuggestions(db: Db, authorUserId: number): Promise<MySugge
 /* 제안 접수. 검사 셋을 통과해야 저장된다: 도배 상한 · 대상 존재 · 빈 제안.
 
    ── 알고 수용한 한계: 상한 검사와 insert 사이 gap ────────────────────────────────
-   세기와 쓰기가 별개 왕복이라(D1 엔 대화형 트랜잭션이 없다 — AGENTS.md) 같은 사람이 두 탭에서
-   동시에 보내면 상한을 한두 건 넘길 수 있다. 막으려면 조건부 INSERT 가 필요한데 D1 의 batch 는
-   앞 문의 rowcount 로 뒤 문을 건너뛰지 못한다(saveWeek 이 만난 그 벽). 넘쳐도 결과는 제안함에
-   줄이 몇 개 더 서는 것뿐이고 관리자가 거절하면 끝이라, 여기선 그 gap 을 받는다. */
+   ── 상한은 **두 겹**이고, 진짜 방어선은 DB 쪽이다 ───────────────────────────────
+   아래 count 는 세기와 쓰기가 별개 왕복이라(D1 엔 대화형 트랜잭션이 없다) **동시 요청 앞에서
+   통째로 뚫린다** — 각 요청이 같은 낮은 수를 읽고 전부 통과하므로 한 번에 100개를 쏘면 100개가
+   다 들어간다(적대적 리뷰가 잡았다. 한때 이 주석은 "한두 건"이라고 적었는데 틀렸다).
+
+   그래서 판정을 **INSERT 자체에** 붙였다: 마이그레이션 0010 의 BEFORE INSERT 트리거가 같은
+   상한을 SQLite 안에서 강제한다. 조건부 INSERT 를 못 만든다는 벽(saveWeek 이 만난 그것)은
+   그대로지만, 트리거는 그 벽을 우회하지 않고 **판정 자체를 쓰기 연산 안으로 옮긴다.**
+
+   그럼 여기 count 는 왜 남나: 문구 때문이다. 트리거는 SQLITE_CONSTRAINT 로만 말해서 그걸 그대로
+   올리면 사용자가 원인을 알 수 없다. 정상 경로에선 이 검사가 먼저 걸려 친절한 오류가 나가고,
+   경합으로 새어 나간 요청만 트리거에 막혀 같은 오류로 맵된다(아래 catch). */
 export async function createSuggestion(
   db: Db,
   authorUserId: number,
@@ -163,21 +171,40 @@ export async function createSuggestion(
     if (isEmptyEditSuggestion(current, proposed, input.note)) throw new EmptySuggestion();
   }
 
-  const [row] = await db
-    .insert(gameSuggestions)
-    .values({
-      kind: input.kind,
-      // 종류마다 채워지는 자리가 갈린다(shape CHECK) — 반대쪽은 반드시 null 이어야 한다.
-      gameId: input.kind === "edit" ? input.gameId : null,
-      proposedTitle: input.kind === "add" ? input.title : null,
-      authorUserId,
-      proposedCleared: proposed.cleared,
-      proposedClearedDate: proposed.clearedDate,
-      proposedPlayedDate: proposed.playedDate,
-      note: input.note,
-    })
-    .returning();
+  let row: GameSuggestionRow | undefined;
+  try {
+    [row] = await db
+      .insert(gameSuggestions)
+      .values({
+        kind: input.kind,
+        // 종류마다 채워지는 자리가 갈린다(shape CHECK) — 반대쪽은 반드시 null 이어야 한다.
+        gameId: input.kind === "edit" ? input.gameId : null,
+        proposedTitle: input.kind === "add" ? input.title : null,
+        authorUserId,
+        proposedCleared: proposed.cleared,
+        proposedClearedDate: proposed.clearedDate,
+        proposedPlayedDate: proposed.playedDate,
+        note: input.note,
+      })
+      .returning();
+  } catch (e) {
+    /* 위 count 를 지나쳐 온 요청이 트리거에 막혔다 = 경합으로 상한을 넘겼다. 같은 도메인 오류로
+       맵해 호출자가 두 경로를 구분할 필요가 없게 한다(사용자에겐 같은 사건이다). UNIQUE 위반은
+       여기서 안 잡는다 — 그건 라우터가 CONFLICT 로 따로 맵하는 다른 사건이다. */
+    if (isQuotaViolation(e)) throw new TooManyOpenSuggestions();
+    throw e;
+  }
   return row!;
+}
+
+/* 트리거가 RAISE(ABORT) 로 남긴 메시지를 찾는다. drizzle 은 D1 에러를 DrizzleQueryError 로 감싸
+   원인이 top message 가 아니라 .cause 에 있으므로 체인을 끝까지 훑는다(UNIQUE 를 찾을 때와 같은
+   함정·같은 처방). 문자열은 마이그레이션 0010 의 RAISE 인자와 **글자 그대로 같아야 한다.** */
+function isQuotaViolation(e: unknown): boolean {
+  for (let cur: unknown = e; cur instanceof Error; cur = cur.cause) {
+    if (/too many pending suggestions/i.test(cur.message)) return true;
+  }
+  return false;
 }
 
 /* 처리(반영함·거절함) 표시. **미처리인 것만 고친다** — 조건이 곧 CAS 다: 제안함을 열어 둔 사이

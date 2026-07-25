@@ -90,6 +90,15 @@ export function SuggestDialog({
       closing={closing}
       busy={sending}
       dirty={dirty}
+      /* **최상위로 뜰 때만 히스토리를 차지한다**(= 보드의 「게임 추가 요청」). 이 폼은 미저장
+         입력을 들고 있어 뒤로가기가 페이지를 떠나면 통째로 날아가는데, 그건 GameDialog 주석이
+         "잃을 게 없는 상세는 보호받고 정작 입력을 든 컴포저는 안 받는 비대칭"이라 부른 그
+         자리다 — 컴포저와 같은 대접을 해야 한다(리뷰가 잡았다).
+
+         상세 위에 겹쳐 뜬 경우(stacked)는 안 켠다: 겹친 모달까지 각자 엔트리를 얹으면 뒤로가기
+         한 번이 몇 겹 중 어디를 닫는지 화면만 봐선 알 수 없어진다(수정·삭제와 같은 규약). 그동안
+         아래 상세는 covered 로 잠기므로 뒤로가기가 그쪽을 닫지도 않는다. */
+      history={!stacked}
       // 삭제 확인·수정과 같은 이유로 X 를 끈다 — 본문에 「취소」가 있다(GameDialog 의 closeButton).
       closeButton={false}
       onClose={() =>
