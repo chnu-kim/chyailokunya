@@ -266,3 +266,44 @@ test("제안: 추가 요청을 반영해도 팬이 보낸 날짜·클리어가 �
   await expect(admin.locator("[data-od-id='composer-clear-cleared']")).toBeChecked();
   await expect(admin.locator("[data-od-id='composer-clear-date']")).toHaveValue("2026-06-16");
 });
+
+/* 겹친 카드의 가시성. **아래 상세는 숨고, 미저장 확인 아래의 폼은 보인다** — 방향이 반대인 두
+   규칙이라 함께 못박는다.
+
+   앞은 사용자가 라이브에서 지적한 자리다: 네이티브 dialog 두 장이 top layer 에 쌓이면 아래가
+   그대로 드러나 흰 카드 둘이 어긋나 겹쳐 보였다. 뒤는 그 반대로 **보이는 게 근거**다 —
+   무엇을 잃는지 보면서 판단해야 한다(game-dialog 의 DiscardConfirm 주석). */
+test("제안: 폼이 뜨면 아래 상세는 숨고, 미저장 확인 아래로는 폼이 보인다", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!, E2E_FAN);
+  await page.goto("/games");
+  await expectSignedIn(page);
+
+  const detail = page.locator("dialog[data-od-id='game-detail']");
+  await openCard(page, "리틀 나이트메어");
+  await expect(detail).toBeVisible();
+
+  // 제안 폼이 그 위에 뜨면 상세는 **보이지 않는다**(닫히는 게 아니라 감춰진다 — 취소하면 돌아온다).
+  await page.locator("[data-od-id^='game-suggest-']").click();
+  const form = page.locator("dialog[data-od-id='game-suggest']");
+  await expect(form).toBeVisible();
+  await expect(detail).not.toBeVisible();
+
+  /* 미저장 확인은 반대다 — 아래 폼이 보이는 채로 물어야 무엇을 잃는지 알 수 있다. */
+  await page.locator("[data-od-id='suggest-note']").fill("적다 만 한마디");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-od-id='game-suggest-discard']")).toBeVisible();
+  await expect(form).toBeVisible();
+
+  // 「계속 작성」으로 돌아오면 폼은 그대로고 상세는 여전히 감춰져 있다.
+  await page.locator("[data-od-id='game-suggest-discard-keep']").click();
+  await expect(page.locator("[data-od-id='suggest-note']")).toHaveValue("적다 만 한마디");
+  await expect(detail).not.toBeVisible();
+
+  // 폼을 취소하면 감춰 뒀던 상세가 **그대로 돌아온다**(닫은 게 아니었다).
+  await page.locator("[data-od-id='suggest-cancel']").click();
+  await expect(form).toHaveCount(0);
+  await expect(detail).toBeVisible();
+});
