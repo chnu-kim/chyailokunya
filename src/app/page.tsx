@@ -153,7 +153,7 @@ export default function Home() {
                 <path d="M7.5 11v3M6 12.5h3M15.5 11.5h.01M18 13.5h.01" />
               </svg>
               <h2>플레이 게임</h2>
-              <p>방송에서 플레이한 게임 보드. 직접 추가·삭제하고 상태로 골라볼 수 있어요.</p>
+              <p>방송에서 플레이한 게임 보드. 직접 추가·삭제하고 상태로 골라볼 수 있습니다.</p>
             </Link>
           </div>
           <span className="mascot-sticker" aria-hidden="true" />

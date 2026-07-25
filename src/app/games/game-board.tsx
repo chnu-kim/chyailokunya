@@ -532,7 +532,7 @@ export function GameBoard({
           {games.length === 0 && (
             <div className="grid-empty" data-od-id="game-grid-empty">
               <span className="t-hand">텅 비었네냥…</span>
-              <span>아직 등록된 게임이 없어요.</span>
+              <span>아직 등록된 게임이 없습니다.</span>
             </div>
           )}
 
@@ -967,7 +967,7 @@ function GameEditor({
       <form className="composer__detail" onSubmit={onSave}>
         {/* 첫 필드가 플레이 날짜라 안내도 그 순서로 말한다 — 클리어만 언급하면 바로 아래
             날짜 입력이 무엇인지 설명 없이 서 있다. */}
-        <p className="composer__hint">플레이한 날과 클리어 여부를 고칠 수 있어요.</p>
+        <p className="composer__hint">플레이한 날과 클리어 여부를 고칠 수 있습니다.</p>
 
         <div className="composer__chosen" data-od-id="game-editor-game">
           {game.posterImageUrl ? (

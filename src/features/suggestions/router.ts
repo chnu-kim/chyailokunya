@@ -48,7 +48,7 @@ export const suggestionsRouter = router({
       if (e instanceof TooManyOpenSuggestions) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
-          message: `아직 처리 안 된 제안이 ${OPEN_SUGGESTION_LIMIT}개예요. 처리되면 더 보낼 수 있어요.`,
+          message: `아직 처리 안 된 제안이 ${OPEN_SUGGESTION_LIMIT}개입니다. 처리되면 더 보낼 수 있습니다.`,
         });
       }
       throw e;

@@ -22,10 +22,10 @@ function parseJwk(json: string, label: string): JWK {
   try {
     value = JSON.parse(json);
   } catch {
-    throw new Error(`${label} 파싱 실패 — JWK JSON 이어야 해요`);
+    throw new Error(`${label} 파싱 실패 — JWK JSON 이어야 합니다`);
   }
   if (!value || typeof value !== "object") {
-    throw new Error(`${label} 파싱 실패 — JWK JSON 이어야 해요`);
+    throw new Error(`${label} 파싱 실패 — JWK JSON 이어야 합니다`);
   }
 
   const jwk = value as JWK;
