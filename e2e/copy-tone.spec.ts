@@ -29,10 +29,23 @@ function stripComments(src: string): string {
   return noBlock.replace(/\/\/[^\n]*/g, "");
 }
 
-/* 소개 카피는 예외다 — UI 문구가 아니라 **사용자가 쓴 글**이고, 구 정적 사이트에서 그대로
-   이식됐다(Phase 2). 캐릭터 소개·인사말의 어투를 규칙으로 눌러 고치면 글맛이 죽는다.
-   파일 단위로 열어 두되 그 밖의 어디서도 예외를 허용하지 않는다 — 예외가 늘면 규칙이 흐려진다. */
-const COPY_FILES = new Set(["app/landing/page.tsx"]);
+/* 예외는 **문장 단위**다. 한때 `app/landing/page.tsx` 를 파일째 건너뛰었는데, 그러면 그 페이지에
+   새 문구가 들어와도 영영 안 걸린다 — 규칙을 세워 놓고 뒷문을 같이 낸 셈이다(적대적 리뷰가 잡았다).
+
+   여기 있는 다섯은 구 정적 사이트에서 이식된 **소개 산문**이다(Phase 2). landing 은 페이지
+   전체가 하나의 소개 글이라("어디서 만날까냥" 같은 제목까지 그 문체다) 그 안에서 "이건 UI,
+   저건 산문"을 가르는 건 자의적이고, 어투를 규칙으로 눌러 고치면 글맛이 죽는다. 대신 **목록에
+   적힌 문장만** 통과시켜 새 문구는 반드시 걸리게 한다.
+
+   새 문장을 여기 더할 땐 그게 정말 사용자가 쓴 글인지 먼저 묻는다 — 안내문·오류·버튼이면
+   합쇼체로 고칠 자리이지 여기 넣을 자리가 아니다. */
+const KEPT_COPY = new Set([
+  "오늘도 방송에서 쿠냥이들을 기다려요.",
+  "천천히 놀다 가요",
+  "오늘도 방송에서 만나요",
+  "온도차가 쿠냐예요.",
+  "치지직에서 방송하고, 유튜브에 클립 올리고, X로 소식 전해요.",
+]);
 
 function sourceFiles(dir: string = SRC_DIR): string[] {
   const found: string[] = [];
@@ -49,15 +62,19 @@ test("사용자 노출 문구에 해요체가 남아 있지 않다", () => {
   const offenders: string[] = [];
   for (const file of sourceFiles()) {
     const rel = file.slice(SRC_DIR.length + 1).replaceAll("\\", "/");
-    if (COPY_FILES.has(rel)) continue;
     const lines = stripComments(readFileSync(file, "utf8")).split("\n");
     lines.forEach((line, i) => {
-      for (const m of line.matchAll(HAEYO)) offenders.push(`${rel}:${i + 1}  ${m[0].trim()}`);
+      for (const m of line.matchAll(HAEYO)) {
+        const text = m[0].trim();
+        if (KEPT_COPY.has(text)) continue;
+        offenders.push(`${rel}:${i + 1}  ${text}`);
+      }
     });
   }
   /* 빈 배열과 대조한다 — 개수를 세면 "몇 개까지는 괜찮다"로 읽히고, 실패 메시지에 어느 줄인지가
      안 남아 고치는 사람이 다시 찾아야 한다. */
-  expect(offenders, "합쇼체로 고친다(AGENTS.md 톤 규칙). 소개 카피면 COPY_FILES 에 넣는다").toEqual(
-    [],
-  );
+  expect(
+    offenders,
+    "합쇼체로 고친다(AGENTS.md 톤 규칙). 이식된 소개 산문이면 KEPT_COPY 에 그 문장을 적는다",
+  ).toEqual([]);
 });
