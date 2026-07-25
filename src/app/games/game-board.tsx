@@ -415,29 +415,33 @@ function GameDetail({
           </span>
         )}
         {/* 사실 두 줄은 정의 목록이다 — "이름: 값" 쌍이라는 걸 마크업이 말해야 스크린리더가
-            둘을 이어 읽는다(문단 두 개로 두면 라벨과 값의 관계가 사라진다). */}
+            둘을 이어 읽는다(문단 두 개로 두면 라벨과 값의 관계가 사라진다).
+
+            **값 칸은 표기형이다 — 대화체 서술을 넣지 않는다.** 한때 "했어요"·"아직이에요"였는데,
+            같은 목록의 다른 값이 '2026.03.01' 같은 표기라 이 칸만 어투가 튀어 화면이 가벼워졌다
+            (사용자 지적). 라벨이 묻고 값이 대답하는 문장이 아니라, 카드 앞면 칩("클리어")이 쓰는
+            어휘 그대로의 표기다. 안내문·힌트의 다정한 해요체는 그대로다 — 저긴 값 칸이 아니다. */}
         <dl className="detail__facts">
           <dt>플레이한 날</dt>
           <dd data-od-id="detail-played">
             {game.lastPlayed ? (
               formatDate(game.lastPlayed)
             ) : (
-              <span className="detail__none">아직 없어요</span>
+              <span className="detail__none">기록 없음</span>
             )}
           </dd>
           <dt>클리어</dt>
           <dd data-od-id="detail-cleared">
             {game.cleared ? (
               game.clearedDate ? (
-                formatDate(game.clearedDate)
+                <>{formatDate(game.clearedDate)} 클리어</>
               ) : (
                 // 날짜를 모르는 클리어도 유효한 상태다 — 빈칸으로 두면 안 깬 것처럼 읽힌다.
-                <>
-                  했어요 <span className="detail__none">(날짜 모름)</span>
-                </>
+                // 날짜가 붙은 값과 나란히 놓여야 "날짜만 모른다"가 저절로 드러난다.
+                "완료"
               )
             ) : (
-              <span className="detail__none">아직이에요</span>
+              <span className="detail__none">미완료</span>
             )}
           </dd>
         </dl>
