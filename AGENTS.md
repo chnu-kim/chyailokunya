@@ -184,6 +184,13 @@ Phase 1 스캐폴딩에서 실제로 터진 것들. 같은 실수를 반복하�
 - **npm 11 은 install 스크립트를 게이팅한다.** workerd·esbuild·sharp postinstall 이 안 돌면
   바이너리가 없어 build 가 깨진다. 승인은 `npm approve-scripts <pkg>` 로 하고, 그 결과가
   `package.json` 의 `allowScripts` 에 지속돼 CI 의 `npm ci` 도 동일하게 재현한다.
+- **`next-env.d.ts` 는 dev 서버가 다시 쓴다 — e2e 를 돌린 뒤 `git add -A` 하면 dev 전용 경로가
+  저장소에 들어간다.** `next dev` 는 그 파일을 `./.next/dev/types/routes.d.ts` 로 바꾸는데, 그
+  경로는 dev 를 돌린 적 있는 머신에만 있다. CI 처럼 `next typegen` 만 도는 환경에선 비-dev 경로가
+  다시 쓰여 **검증만 해도 워킹트리가 더러워지고**, 이 파일을 커밋하는 이유(typecheck 가 build 를
+  선행하지 않고도 서게 한다)가 도로 무너진다. 2026-07-26 에 같은 실수를 두 번 했다 — CI 게이트의
+  `git diff --exit-code -- next-env.d.ts` 가 이제 그걸 잡는다. 로컬에선 e2e 뒤 커밋 전에
+  `git checkout origin/main -- next-env.d.ts` 로 되돌린다.
 - **`next-env.d.ts`·`cloudflare-env.d.ts` 는 생성물이지만 커밋한다.** 그래야 CI 의 typecheck
   단계가 `next build`/`cf-typegen` 을 선행하지 않고도 성립한다. 대신 lint·prettier 대상에선
   제외한다.
