@@ -249,11 +249,20 @@ export function GameBoard({
       return;
     }
     try {
-      await trpc.suggestions.resolve.mutate(
+      /* **resolved 를 읽는다.** 서버는 미처리인 것만 고치므로(CAS), 제안함을 열어 둔 사이 다른
+         관리자가 같은 줄을 먼저 처리했으면 false 가 온다. 그때 배지를 또 줄이면 이미 남이 줄인
+         수에서 한 번 더 빠져 화면이 어긋나고, 더 나쁘게는 관리자가 **자기가 처리했다고 믿는다.**
+
+         저장 자체는 되돌리지 않는다 — 그건 이 관리자가 폼에서 값을 보고 확정한 쓰기이고, 제안이
+         거절됐든 아니든 그에겐 그럴 권한이 있다(카드를 그냥 열어 고쳐도 같은 결과다). 제안은 그
+         값의 출처일 뿐 쓰기 주체가 아니라는 게 결정 2 의 요지다. 그러니 되돌릴 게 아니라
+         **사실을 알린다.** */
+      const { resolved } = await trpc.suggestions.resolve.mutate(
         { id: target.id, resolution: "accepted" },
         { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
       );
-      setPending((n) => Math.max(0, n - 1));
+      if (resolved) setPending((n) => Math.max(0, n - 1));
+      else setAnnouncement("저장했어요 — 그 제안은 다른 관리자가 이미 처리해 뒀더라고요");
     } catch {
       setAnnouncement("반영은 됐지만 제안함 표시를 못 바꿨어요 — 제안함에서 확인해 주세요");
     }

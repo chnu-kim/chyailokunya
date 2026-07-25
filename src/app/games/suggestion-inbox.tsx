@@ -66,12 +66,16 @@ export function SuggestionInbox({
     startReject(async () => {
       setError("");
       try {
-        await trpc.suggestions.resolve.mutate(
+        const { resolved } = await trpc.suggestions.resolve.mutate(
           { id: item.id, resolution: "rejected" },
           { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
         );
+        // 목록에서는 어느 쪽이든 뺀다 — 이미 처리된 줄도 여기 남을 이유가 없다.
         setItems((prev) => (prev ?? []).filter((i) => i.id !== item.id));
-        onResolved();
+        /* **배지는 우리가 실제로 처리했을 때만 줄인다.** 서버는 미처리인 것만 고치므로(CAS)
+           다른 관리자가 먼저 처리했으면 false 가 오는데, 그때도 줄이면 이미 남이 줄인 수에서
+           한 번 더 빠져 배지가 실제 미처리 수보다 작아진다. */
+        if (resolved) onResolved();
       } catch (e) {
         setError(resolveErrorMessage(e));
       } finally {
