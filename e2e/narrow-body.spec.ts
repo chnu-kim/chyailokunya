@@ -406,6 +406,9 @@ test.describe("composer 바텀시트", () => {
       const dialog = page.locator("dialog.composer");
       await expect(dialog).toBeVisible();
 
+      /* 이 두 줄이 보는 건 **화면 밖으로 안 나갔는가**뿐이다 — 안쪽으로 들어와 앉아도 통과한다.
+         실제로 이슈 #68(오른쪽만 38px 빔)이 여기를 초록으로 지나갔다. 좌우가 화면 끝에 닿는지는
+         아래 「바텀시트 전폭」이 별도로 못박는다. */
       const box = (await dialog.boundingBox())!;
       expect(box.x, "왼쪽으로 삐져나갔다").toBeGreaterThanOrEqual(0);
       expect(box.x + box.width, "오른쪽으로 삐져나갔다").toBeLessThanOrEqual(width);
@@ -415,4 +418,138 @@ test.describe("composer 바텀시트", () => {
       await expectTouchTarget(page.locator('[data-od-id="composer-input"]'), "검색 입력");
     });
   }
+});
+
+/* 바텀시트는 **화면 끝에서 끝까지** 깔린다(이슈 #68).
+
+   왜 별도 축인가: 위 「composer 바텀시트」의 두 단언은 "화면 밖으로 안 나갔는가"만 봐서,
+   시트가 왼쪽에 붙고 오른쪽만 38px 비는 상태를 초록으로 통과시켰다. 시트의 계약은 "안에
+   들어 있다"가 아니라 **좌우 여백 0** 이다 — 한쪽만 빈 시트는 화면이 기운 것처럼 읽힌다.
+
+   38px 의 출처가 이 스펙이 지키는 제약이다: Chrome UA 스타일시트가 `dialog:modal` 에
+   `max-width: calc(100% - 6px - 2em)` 을 거는데, 그건 기본 테두리(medium 3px 둘)와
+   패딩(1em 둘)을 **content-box 기준으로 미리 뺀** 보정이라 box-sizing:border-box 인 이
+   저장소에선 한 번 더 깎인다. 그 상태에서 시트는 `margin:0` + `left/right:0` 이라
+   over-constrained 이고, over-constrained 의 승자는 언제나 `left` 다 — 깎인 몫이 전부
+   오른쪽에 몰린다. games.css 의 `max-width: none` 이 그 상한을 끄고, 이 스펙이 그 줄을
+   지운 순간 빨개진다(실측: 320 → 오른쪽 끝 282, 390 → 352, 560 → 522).
+
+   **변종을 전부 연다.** 좁은 폭 규칙은 `dialog.composer` 하나에 걸려 있어 상세(`--detail`
+   440px)·미저장 확인(`--confirm` 380px)·겹친 수정/삭제(`--stacked`)가 전부 그 폭 선언을
+   덮어쓰는 구조다 — 어느 하나의 특정도가 올라가면 그 변종만 조용히 옛 폭으로 돌아간다.
+   여기서 D1 은 안 건드린다(고르기·되돌리기·취소까지만 간다) — 픽스처를 공유하는 다른
+   스펙과 안 싸운다.
+
+   폭은 320·390(이슈가 지목한 두 폭)과 560(시트가 켜지는 경계 자신)이다. */
+const SHEET_WIDTHS = [320, 390, 560] as const;
+
+async function expectFlush(dialog: Locator, width: number, label: string): Promise<void> {
+  const box = await dialog.boundingBox();
+  expect(box, `${label}: 상자를 못 잰다`).not.toBeNull();
+  // 0.5px 은 소수점 레이아웃이 정수로 반올림될 때의 흔들림 몫이다. 이 스펙이 잡는 결함은
+  // 38px 단위라 이 관용으로 이빨이 무뎌지지 않는다.
+  expect(
+    Math.abs(box!.x),
+    `${width}px ${label}: 왼쪽이 ${box!.x} 에서 시작한다`,
+  ).toBeLessThanOrEqual(0.5);
+  expect(
+    Math.abs(box!.x + box!.width - width),
+    `${width}px ${label}: 오른쪽 끝이 ${box!.x + box!.width} 라 ${width} 에 안 닿는다`,
+  ).toBeLessThanOrEqual(0.5);
+}
+
+test.describe("바텀시트 전폭", () => {
+  for (const width of SHEET_WIDTHS) {
+    test(`${width}px: 컴포저·상세·수정·삭제·미저장 확인이 좌우 끝에 닿는다`, async ({
+      page,
+      baseURL,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await signIn(page.context(), baseURL!);
+      await page.goto("/games");
+      await expectSignedIn(page);
+      await page.evaluate(() => document.fonts.ready);
+
+      // (1) 컴포저. dirty 가 아니므로 Esc 가 그대로 닫는다.
+      await page.locator('[data-od-id="composer-open"]').click();
+      const composer = page.locator('dialog[data-od-id="composer"]');
+      await expect(composer).toBeVisible();
+      await expectFlush(composer, width, "컴포저");
+      await page.keyboard.press("Escape");
+      await expect(composer).toHaveCount(0);
+
+      /* (2) 상세. behavior:"instant" 가 필수다 — 사이트가 `scroll-behavior: smooth` 를 켜 둬서
+         기본값이면 클릭이 스크롤 전 좌표로 나간다(위 터치 타깃 describe 와 같은 이유). */
+      await page
+        .locator('[data-od-id="game-card-1"]')
+        .evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+      await page.locator('[data-od-id="game-open-1"]').click();
+      const detail = page.locator('dialog[data-od-id="game-detail"]');
+      await expect(detail).toBeVisible();
+      await expectFlush(detail, width, "상세(--detail 440px)");
+
+      // (3) 수정 — 상세 **위에** 겹쳐 뜬다(--stacked).
+      await page.locator('[data-od-id="game-edit-1"]').click();
+      const editor = page.locator('dialog[data-od-id="game-editor"]');
+      await expect(editor).toBeVisible();
+      await expectFlush(editor, width, "수정(--stacked)");
+
+      /* (4) 미저장 확인 — 클리어 체크를 뒤집으면 dirty 가 되고, 그때의 Esc 가 이 카드를 부른다.
+         검색으로 dirty 를 만들면 치지직 프록시를 가로채야 하는데(games-composer.spec.ts),
+         여기서 볼 것은 검색이 아니라 폭이라 그 배선을 안 들인다. */
+      await page.locator('[data-od-id="editor-clear-cleared"]').click();
+      await page.keyboard.press("Escape");
+      const discard = page.locator('dialog[data-od-id="game-editor-discard"]');
+      await expect(discard).toBeVisible();
+      await expectFlush(discard, width, "미저장 확인(--confirm 380px)");
+      await page.locator('[data-od-id="game-editor-discard-keep"]').click();
+      await expect(discard).toHaveCount(0);
+      // 취소는 dirty 가드를 안 거친다(부모가 세우는 closing 신호 — game-dialog.tsx).
+      await page.locator('[data-od-id="game-editor-cancel"]').click();
+      await expect(editor).toHaveCount(0);
+
+      // (5) 삭제 확인. 여는 데까지만 간다 — 확정하면 픽스처가 줄어 남의 스펙이 빨개진다.
+      await page.locator('[data-od-id="game-del-1"]').click();
+      const del = page.locator('dialog[data-od-id="game-delete"]');
+      await expect(del).toBeVisible();
+      await expectFlush(del, width, "삭제 확인(--stacked)");
+    });
+  }
+});
+
+/* 시트가 **켜지고 꺼지는** 자리. 위 describe 는 켜진 뒤의 결과만 보므로 560px 쿼리를 통째로
+   지우거나 넓게 옮겨도 다른 데서 우연히 통과할 수 있다 — 경계 ±1px 로 전환 자체를 못박는다
+   (이 파일의 「감축 경로 — 경계」와 같은 장치다).
+
+   561 쪽 단언이 이 테스트의 이빨이다: 좌우 여백이 **같고 0 이 아닌지**를 본다. 폭을 안 박는
+   건 의도적이다 — `--detail` 의 440px 은 디자인 값이라 패딩·토큰이 바뀌면 따라 움직이는데,
+   그때마다 이 스펙이 깨지면 신호가 잡음이 된다. 여기서 지킬 계약은 "넓은 폭에선 가운데"다.
+
+   열린 채로 뷰포트만 넓힌다 — 시트/카드 전환은 CSS 미디어 쿼리라 리마운트가 필요 없고,
+   같은 요소를 재야 "전환됐다"가 요소 교체로 가려지지 않는다. */
+test("560/561 경계: 바텀시트가 켜지고, 한 픽셀 넓으면 가운데 카드로 돌아온다", async ({
+  page,
+  baseURL,
+}) => {
+  await page.setViewportSize({ width: 560, height: 800 });
+  await signIn(page.context(), baseURL!);
+  await page.goto("/games");
+  await expectSignedIn(page);
+  await page.evaluate(() => document.fonts.ready);
+
+  await page
+    .locator('[data-od-id="game-card-1"]')
+    .evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+  await page.locator('[data-od-id="game-open-1"]').click();
+  const detail = page.locator('dialog[data-od-id="game-detail"]');
+  await expect(detail).toBeVisible();
+  await expectFlush(detail, 560, "상세");
+
+  await page.setViewportSize({ width: 561, height: 800 });
+  const box = (await detail.boundingBox())!;
+  expect(box.x, "561px 는 시트가 아니라 가운데 카드여야 한다").toBeGreaterThan(0);
+  expect(
+    Math.abs(box.x - (561 - box.x - box.width)),
+    `561px: 좌우 여백이 다르다(왼 ${box.x} / 오른 ${561 - box.x - box.width})`,
+  ).toBeLessThanOrEqual(0.5);
 });
