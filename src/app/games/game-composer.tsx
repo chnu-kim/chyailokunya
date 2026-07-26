@@ -17,7 +17,8 @@ import type { ChzzkCategory } from "@/core/games";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
-import { ClearedFields, GameDialog, PlayedDateField, useClearedDraft } from "./game-dialog";
+import { GameDialog } from "./game-dialog";
+import { ClearedFields, PlayedDateField, useClearedDraft } from "./game-fields";
 
 /* 게임 추가 컴포저(ADR-0015·0017). 두 단계다:
 
