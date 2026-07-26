@@ -59,6 +59,13 @@ DOM API 를 안 준다(Cloudflare Workers 런타임엔 없다).
 없고, 서버·도메인 로직과 같은 계약(배포 런타임에서 돈다)을 그대로 받는 게 이득이다.
 `dom` 프로젝트가 맡는 건 **머신을 문 컴포넌트가 실제 DOM 이벤트에 옳게 반응하는가**다.
 
+**이 PR(#78 PR 1, ADR만)엔 위 표가 아직 실체가 없다.** `vitest.config.ts` 를
+`projects:[workerd, dom]` 으로 실제로 가르고 `happy-dom`·`@testing-library/react`·
+`@testing-library/jest-dom` 의존성을 넣는 건 다음 PR(#78 PR 2, 프로덕션 코드 0·테스트
+토대만)이 한다 — 그 전까지 `src/app/**/*.test.tsx` 는 실행되지 않는다. 이 절이 "결정"인
+이유는 스파이크(아래)로 실현 가능성을 먼저 증명했기 때문이지, 이미 구성이 끝났다는 뜻이
+아니다.
+
 ### 스파이크로 확인한 경계
 
 문서화 전에 실제로 돌려 확인했다(AGENTS.md Phase 4 지뢰와 같은 규율 — 런타임 계약은
