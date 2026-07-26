@@ -4,8 +4,8 @@ import { useMachine } from "@xstate/react";
 import { useState } from "react";
 import { suggestErrorMessage } from "@/core/error-message";
 import { createSubmitMachine } from "@/core/submit.machine";
-import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
+import { BoardOverlay } from "./board-overlay-context";
 import { GameDialog } from "./game-dialog";
 import { ClearedFields, GameFacts, useClearedDraft } from "./game-fields";
 
@@ -31,19 +31,18 @@ const suggestMachine = createSubmitMachine<
 
    추가 요청이 이름만 받는 이유는 치지직 검색을 비관리자에게 안 열기 때문이다(client_credentials
    노출 — features/chzzk/router.ts). 정본 카테고리·표지는 관리자가 반영할 때 컴포저에서 정한다. */
-export function SuggestDialog({
-  game,
-  stacked,
-  onSent,
-  onClose,
-}: {
+/* 이 컴포넌트는 board-overlay 머신이 `suggestAdd`(보드 상단 「추가 요청」) 또는
+   `detail.suggesting`(카드 상세의 「수정 제안」) 상태일 때 마운트된다(game-board.tsx) — 두
+   상태가 각각 이 폼의 두 모드(추가 요청 vs 수정 제안)와 정확히 대응하므로 어느 쪽인지를
+   selector 로 직접 가른다. */
+export function SuggestDialog() {
+  const actorRef = BoardOverlay.useActorRef();
+  const detailGame = BoardOverlay.useSelector((s) => s.context.detailGame);
+  const suggestingAdd = BoardOverlay.useSelector((s) => s.matches("suggestAdd"));
   // null = 보드에 없는 게임을 올려 달라는 요청.
-  game: GameCard | null;
+  const game = suggestingAdd ? null : detailGame;
   // 카드 상세 위에 겹쳐 떴는가 — 그렇다면 스크림을 한 겹 더 깔지 않는다.
-  stacked: boolean;
-  onSent: (message: string) => void;
-  onClose: () => void;
-}) {
+  const stacked = BoardOverlay.useSelector((s) => s.matches({ detail: "suggesting" }));
   const [title, setTitle] = useState("");
   // 수정 제안은 지금 값에서 출발한다(위 주석). 추가 요청엔 출발점이 없어 빈 값이다.
   const [playedDate, setPlayedDate] = useState(game?.lastPlayed ?? "");
@@ -52,10 +51,10 @@ export function SuggestDialog({
     clearedDate: game?.clearedDate ?? "",
   });
   const [note, setNote] = useState("");
-  /* 닫기 신호. 성공 즉시 onSent 를 부르지 않는 건 컴포저·수정과 같은 규약이다 — 부모가 같은
-     커밋에서 언마운트하면 dialog 가 열린 채 DOM 에서 빠져 포커스가 body 로 떨어진다. "보냈다"
-     표시는 state.matches("done") 이 대신한다(성공해도 닫지 않고 화면만 바꾸므로 별도 신호가
-     아니라 머신 상태 그 자체가 정본이다). */
+  /* 닫기 신호. 성공 즉시 SUGGESTION_SENT 를 보내지 않는 건 컴포저·수정과 같은 규약이다 —
+     머신이 같은 커밋에서 이 컴포넌트를 언마운트하면 dialog 가 열린 채 DOM 에서 빠져 포커스가
+     body 로 떨어진다. "보냈다" 표시는 state.matches("done") 이 대신한다(성공해도 닫지 않고
+     화면만 바꾸므로 별도 신호가 아니라 이 폼 자신의 제출 머신 상태가 정본이다). */
   const [manualClosing, setManualClosing] = useState(false);
   const [state, send] = useMachine(suggestMachine, {
     input: {
@@ -113,13 +112,18 @@ export function SuggestDialog({
       history={!stacked}
       // 삭제 확인·수정과 같은 이유로 X 를 끈다 — 본문에 「취소」가 있다(GameDialog 의 closeButton).
       closeButton={false}
-      onClose={() =>
-        sent
-          ? onSent(
-              game ? game.categoryValue + " 수정 제안을 보냈습니다" : "게임 추가 요청을 보냈습니다",
-            )
-          : onClose()
-      }
+      onClose={() => {
+        if (sent) {
+          actorRef.send({
+            type: "SUGGESTION_SENT",
+            announcement: game
+              ? game.categoryValue + " 수정 제안을 보냈습니다"
+              : "게임 추가 요청을 보냈습니다",
+          });
+          return;
+        }
+        actorRef.send({ type: "CANCEL_SUGGEST" });
+      }}
     >
       {/* ── 보낸 뒤의 화면 ─────────────────────────────────────────────────────────
           **폼을 곧바로 닫지 않는다.** 제안은 보드를 안 바꾸므로(관리자가 반영해야 바뀐다) 모달이

@@ -8,6 +8,7 @@ import { initialPlayDateFor, isPlayDateApplied } from "@/core/suggestions";
 import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
+import { BoardOverlay, useMarkApplied } from "./board-overlay-context";
 import { GameDialog } from "./game-dialog";
 import { ClearedFields, PlayedDateField, useClearedDraft } from "./game-fields";
 
@@ -34,28 +35,40 @@ const editMachine = createSubmitMachine<
 
    조회 실패는 저장을 막는다. 날짜를 모르는 채로 저장하면 빈 입력이 그대로 나가 멀쩡한 일정
    항목이 지워진다(playedDate=null 은 삭제다) — 그 자리는 조용해서 특히 위험하다. */
-export function GameEditor({
-  game,
-  stacked,
-  initial,
-  onUpdated,
-  onClose,
-}: {
-  game: GameCard;
-  // 카드 상세 위에 겹쳐 떴는가 — 그렇다면 스크림을 한 겹 더 깔지 않는다.
-  stacked: boolean;
-  /* 팬 제안을 **반영**하려고 열었을 때의 출발점(ADR-0025). 값을 미리 채워 두면 관리자가
-     제안함에서 본 값을 손으로 옮겨 적지 않아도 되고, 저장은 평소의 update 경로를 그대로 탄다 —
-     승인 전용 쓰기를 안 만드는 게 이 설계의 핵심이라(결정 2) 여기서 갈라지면 안 된다. */
-  initial?: { cleared: boolean; clearedDate: string; playedDate: string };
-  /* dateApplied = 이번 저장이 **요청된 플레이 날짜까지** 담았나. 제안을 반영하는 부모가 이걸
-     알아야 "클리어만 반영됐는데 제안은 처리됨으로 사라지는" 자리를 막는다(core.isPlayDateApplied). */
-  onUpdated: (row: GameCard, meta: { dateApplied: boolean }) => void;
-  onClose: () => void;
-}) {
+/* 이 컴포넌트는 board-overlay 머신이 `detail.editing` **또는** `applyingEditSuggestion`
+   상태일 때 마운트된다(game-board.tsx) — 부모가 둘인 유일한 노드라(이슈 #81 주석), 대상 게임을
+   prop 이 아니라 컨텍스트에서 읽으면 "어느 부모를 거쳐 왔는가"를 이 컴포넌트가 몰라도 된다.
+   GAME_UPDATED·CANCEL_EDIT 은 두 상태 모두에 정의돼 있어 지금 어느 쪽에 있든 같은 이벤트로
+   충분하다. */
+export function GameEditor() {
+  const actorRef = BoardOverlay.useActorRef();
+  const game = BoardOverlay.useSelector((s) => s.context.editingGame);
+  // 카드 상세 위에 겹쳐 떴는가 — 그렇다면 스크림을 한 겹 더 깔지 않는다. applyingEditSuggestion
+  // 은 detail 을 안 거치므로 이때는 늘 false 다.
+  const stacked = BoardOverlay.useSelector((s) => s.context.detailGame !== null);
+  /* 지금 반영 중인 제안(제안함의 「반영하기」가 이 게임을 골랐을 때만 자기 것이다 — gameId 로
+     대조한다). GAME_UPDATED 를 보내면 머신이 이 값을 지우므로(board-overlay.machine.ts 의
+     "주의"), markApplied 에 넘길 값은 그 전에 미리 읽어 둔다. */
+  const applying = BoardOverlay.useSelector((s) => s.context.applying);
+  const markApplied = useMarkApplied();
+  /* 팬 제안을 **반영**하려고 열렸다면(ADR-0025) 값을 미리 채운다 — 관리자가 제안함에서 본 값을
+     손으로 옮겨 적지 않아도 되고, 저장은 평소의 update 경로를 그대로 탄다(승인 전용 쓰기를 안
+     만드는 게 결정 2 의 핵심).
+
+     **채우는 건 입력값뿐이고 precondition 은 안 건드린다**(아래 조회 effect 참고). 그 보호는
+     플레이 날짜에만 붙는다 — 클리어는 precondition 없이 늘 실리므로 폼이 열린 뒤 딴 데서
+     바뀌면 저장이 덮는다(ADR-0025 결정 2 의 보호 범위 절). */
+  const initial =
+    applying && game && applying.gameId === game.id
+      ? {
+          cleared: applying.proposed.cleared,
+          clearedDate: applying.proposed.clearedDate ?? "",
+          playedDate: applying.proposed.playedDate ?? "",
+        }
+      : undefined;
   const { draft, setDraft } = useClearedDraft({
-    cleared: initial?.cleared ?? game.cleared,
-    clearedDate: initial?.clearedDate ?? game.clearedDate ?? "",
+    cleared: initial?.cleared ?? game?.cleared ?? false,
+    clearedDate: initial?.clearedDate ?? game?.clearedDate ?? "",
   });
   /* 이 게임의 일정 날짜. null = 아직 불러오는 중(그동안 날짜 입력은 잠긴다 — PlayedDateField
      주석의 "빈 칸을 날짜 없음으로 오해해 지우는" 자리). */
@@ -66,8 +79,8 @@ export function GameEditor({
      CONFLICT 를 낸다(schema.playedDateWas). */
   const [loadedDate, setLoadedDate] = useState("");
   const [loadFailed, setLoadFailed] = useState(false);
-  // 닫기 신호. 컴포저와 같은 이유로 성공 즉시 onUpdated 를 부르지 않는다 — 부모가 같은 커밋에서
-  // 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
+  // 닫기 신호. 컴포저와 같은 이유로 성공 즉시 GAME_UPDATED 를 보내지 않는다 — 머신이 같은
+  // 커밋에서 이 컴포넌트를 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
   const [manualClosing, setManualClosing] = useState(false);
   const [state, send] = useMachine(editMachine, {
     input: {
@@ -90,12 +103,16 @@ export function GameEditor({
      (initialPlayDateFor)와 반영이 날짜까지 담았는지(isPlayDateApplied). 폼의 loadedDate 를 쓰면
      안 되는 이유가 각각 다르다 — 앞은 팬이 못 본 초안 항목을 지우게 되고, 뒤는 여러 날 편성일 때
      loadedDate 가 빈 값이라 정상 반영까지 미완으로 떨어진다. */
-  const shownDate = game.lastPlayed ?? "";
+  const shownDate = game?.lastPlayed ?? "";
 
   /* 열릴 때 한 번 조회한다. setState 가 await 뒤에서만 일어나므로 effect 안 **동기** setState 를
      막는 규칙(set-state-in-effect)에 걸리지 않는다. 모달은 editing 이 null 을 거쳐 매번 리마운트
-     되므로 게임이 바뀌면 이 effect 도 다시 돈다 — 의존성에 game.id 를 두는 건 그 사실의 표시다. */
+     되므로 게임이 바뀌면 이 effect 도 다시 돈다 — 의존성에 game.id 를 두는 건 그 사실의 표시다.
+
+     game 이 null 인 렌더는 실제로 없다(부모가 editingGame !== null 일 때만 이 컴포넌트를
+     마운트한다) — 훅은 조건 없이 불러야 하므로 가드는 안(내부)에 둔다. */
   useEffect(() => {
+    if (!game) return;
     let alive = true;
     void (async () => {
       try {
@@ -126,7 +143,11 @@ export function GameEditor({
     };
     /* shownDate 도 싣는다 — 프리필 판정이 이걸 읽으므로 빠지면 낡은 값으로 채운다. game 이 바뀌면
        game.id 와 함께 바뀌므로 실질적으로 재조회를 늘리지 않는다(모달은 매번 리마운트된다). */
-  }, [game.id, initialPlayedDate, shownDate]);
+  }, [game, initialPlayedDate, shownDate]);
+
+  // 위 훅 전부를 부른 뒤에만 놓는다(react-hooks/rules-of-hooks) — 실제로는 부모가 editingGame
+  // !== null 일 때만 마운트하므로 이 분기는 안 밟힌다.
+  if (!game) return null;
 
   /* 여러 날 편성이면 입력이 잠기고(core.isPlayDateEditable) 저장에 날짜를 안 싣는다.
      dateEdited 는 조회가 끝난 뒤에만 참이 될 수 있다 — dates 가 null 인 동안 playedDate 는
@@ -136,6 +157,9 @@ export function GameEditor({
 
   function onSave(e: React.FormEvent) {
     e.preventDefault();
+    // 함수 선언은 호이스팅돼 위 널 가드의 좁힘을 못 물려받는다(TS) — 실제로는 이 폼이 열려
+    // 있는 한 game 이 있어야만 onSubmit 이 불린다.
+    if (!game) return;
     /* playedDate 를 **싣지 않는 경우가 둘**이고, 둘 다 "일정을 안 건드린다"는 뜻이다
        (서버 playDateInput 규약 — 필드 부재).
 
@@ -186,7 +210,18 @@ export function GameEditor({
       dirty={dirty}
       // 삭제 확인과 같은 이유로 X 를 끈다 — 본문에 "취소"가 있다(GameDialog 의 closeButton).
       closeButton={false}
-      onClose={() => (saved ? onUpdated(saved.row, { dateApplied: saved.dateApplied }) : onClose())}
+      onClose={() => {
+        if (saved) {
+          actorRef.send({
+            type: "GAME_UPDATED",
+            row: saved.row,
+            announcement: saved.row.categoryValue + " 수정됨",
+          });
+          void markApplied(applying, saved.dateApplied);
+          return;
+        }
+        actorRef.send({ type: "CANCEL_EDIT" });
+      }}
     >
       <form className="composer__detail" onSubmit={onSave}>
         {/* 첫 필드가 플레이 날짜라 안내도 그 순서로 말한다 — 클리어만 언급하면 바로 아래

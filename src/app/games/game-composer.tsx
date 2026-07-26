@@ -19,6 +19,7 @@ import {
 import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
+import { BoardOverlay, useMarkApplied } from "./board-overlay-context";
 import { GameDialog } from "./game-dialog";
 import { ClearedFields, PlayedDateField, useClearedDraft } from "./game-fields";
 
@@ -96,18 +97,17 @@ const optionClass = (active: boolean) =>
    타이핑·Enter·↓ 가 전부 죽는 자리다(실측: PROBE-C). */
 const keepFocusInInput = (e: React.MouseEvent) => e.preventDefault();
 
-export function GameComposer({
-  initial,
-  onAdded,
-  onClose,
-}: {
-  /* 팬의 **추가 요청을 반영**할 때 채워 넣는 출발점(ADR-0025). 요청은 자유 이름이라 검색어로
-     넣고, 팬이 함께 보낸 날짜·클리어를 상세 단계의 폼 값에 미리 채운다 — 관리자가 그 값을
-     옮겨 적지 않아도 되게. 없으면 평소의 빈 컴포저다. */
-  initial?: { query: string; playedDate: string; cleared: boolean; clearedDate: string };
-  onAdded: (row: GameCard) => void;
-  onClose: () => void;
-}) {
+/* 이 컴포넌트는 board-overlay 머신이 `composing` 상태일 때만 마운트된다(game-board.tsx) —
+   그래서 열고 닫는 신호·출발점 값을 props 로 안 받고 컨텍스트에서 직접 읽는다(ADR-0026 —
+   화면 공유 액터, game-dialog.tsx 의 dialog-history 모듈 싱글턴과 같은 모양). */
+export function GameComposer() {
+  const actorRef = BoardOverlay.useActorRef();
+  // 팬의 **추가 요청을 반영**할 때 채워 넣는 출발점(ADR-0025). 없으면 평소의 빈 컴포저다.
+  const initial = BoardOverlay.useSelector((s) => s.context.composerInitial);
+  /* 지금 반영 중인 제안. GAME_ADDED 를 보내면 머신이 이 값을 지우므로(board-overlay.machine.ts
+     의 "주의"), markApplied 에 넘길 값은 그 전에 미리 읽어 둔다. */
+  const applying = BoardOverlay.useSelector((s) => s.context.applying);
+  const markApplied = useMarkApplied();
   const searchRef = useRef<HTMLInputElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
   /* 검색어만 채우면 debounce effect 가 평소 경로 그대로 검색을 발사한다(core 의
@@ -126,10 +126,10 @@ export function GameComposer({
     cleared: initial?.cleared ?? false,
     clearedDate: initial?.clearedDate ?? "",
   });
-  /* 닫기 신호. 추가 성공 즉시 onAdded 를 부르면 부모가 같은 커밋에서 컴포저를 언마운트해 닫기
-     effect 가 아예 안 돌고, 열린 채로 DOM 에서 빠져 포커스가 body 로 떨어진다. 그래서 성공은
-     addState.matches("done") 신호만 세우고(context.result 가 곧 인계할 행이다), 실제 인계는
-     브라우저가 dialog 를 닫은 뒤 오는 onClose 이벤트에서 한다. */
+  /* 닫기 신호. 추가 성공 즉시 GAME_ADDED 를 보내면 머신이 같은 커밋에서 이 컴포넌트를
+     언마운트해 닫기 effect 가 아예 안 돌고, 열린 채로 DOM 에서 빠져 포커스가 body 로 떨어진다.
+     그래서 성공은 addState.matches("done") 신호만 세우고(context.result 가 곧 인계할 행이다),
+     실제 인계는 브라우저가 dialog 를 닫은 뒤 오는 onClose 이벤트에서 한다. */
   const [manualClosing, setManualClosing] = useState(false);
   const [addState, sendAdd] = useMachine(addMachine, {
     input: {
@@ -351,7 +351,20 @@ export function GameComposer({
          조작이고, 배경을 잘못 스쳐 그게 날아가면 처음부터 다시다. 검색 단계는 안 묻는다:
          거기서 잃는 건 검색어 한 줄이고, 매번 되묻으면 그냥 닫으려는 사람에게 문이 하나 더 는다. */
       dirty={selected !== null}
-      onClose={() => (added ? onAdded(added) : onClose())}
+      onClose={() => {
+        if (added) {
+          actorRef.send({
+            type: "GAME_ADDED",
+            row: added,
+            announcement: added.categoryValue + " 추가됨",
+          });
+          void markApplied(applying);
+          return;
+        }
+        // 반영을 도중에 접었다 — 제안은 미처리로 남는다(관리자가 다시 열 수 있다, CLOSE_COMPOSER
+        // 액션이 applying 을 지운다).
+        actorRef.send({ type: "CLOSE_COMPOSER" });
+      }}
     >
       {selected ? (
         <form className="composer__detail" onSubmit={onAdd}>

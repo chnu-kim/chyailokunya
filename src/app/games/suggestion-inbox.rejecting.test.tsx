@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
+import { INBOX_LIMIT } from "@/features/suggestions/service";
+import { BoardOverlay } from "./board-overlay-context";
 import { SuggestionInbox } from "./suggestion-inbox";
 import { makeGameCard, makeSuggestion } from "./test-fixtures";
-import { INBOX_LIMIT } from "@/features/suggestions/service";
 
 /* 특성화 8(#78) — 제안함 거절 진행 중 표시(rejectingId). 버튼 하나만 잠가야 한다 — 전체를
    잠그면 다른 줄도 못 읽는다(suggestion-inbox.tsx 주석). */
@@ -33,13 +34,9 @@ describe("제안 거절 진행 중 표시", () => {
     );
 
     render(
-      <SuggestionInbox
-        games={[makeGameCard({ id: 1 })]}
-        pending={2}
-        onApply={() => {}}
-        onResolved={() => {}}
-        onClose={() => {}}
-      />,
+      <BoardOverlay.Provider options={{ input: { games: [makeGameCard({ id: 1 })], pending: 2 } }}>
+        <SuggestionInbox />
+      </BoardOverlay.Provider>,
     );
 
     fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
@@ -74,13 +71,9 @@ describe("제안 거절 진행 중 표시", () => {
       .mockImplementationOnce(() => new Promise((r) => (resolve2 = r)));
 
     render(
-      <SuggestionInbox
-        games={[makeGameCard({ id: 1 })]}
-        pending={2}
-        onApply={() => {}}
-        onResolved={() => {}}
-        onClose={() => {}}
-      />,
+      <BoardOverlay.Provider options={{ input: { games: [makeGameCard({ id: 1 })], pending: 2 } }}>
+        <SuggestionInbox />
+      </BoardOverlay.Provider>,
     );
 
     fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
@@ -128,13 +121,9 @@ describe("제안 거절 진행 중 표시", () => {
       .mockImplementationOnce(() => new Promise((r) => (resolveFetch2 = r))); // item2 가 던지는 재조회
 
     render(
-      <SuggestionInbox
-        games={[]}
-        pending={INBOX_LIMIT}
-        onApply={() => {}}
-        onResolved={() => {}}
-        onClose={() => {}}
-      />,
+      <BoardOverlay.Provider options={{ input: { games: [], pending: INBOX_LIMIT } }}>
+        <SuggestionInbox />
+      </BoardOverlay.Provider>,
     );
 
     fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
@@ -185,13 +174,9 @@ describe("제안 거절 진행 중 표시", () => {
       .mockImplementationOnce(() => new Promise((r) => (resolveFetch1 = r))); // item1 의 재조회
 
     render(
-      <SuggestionInbox
-        games={[]}
-        pending={INBOX_LIMIT}
-        onApply={() => {}}
-        onResolved={() => {}}
-        onClose={() => {}}
-      />,
+      <BoardOverlay.Provider options={{ input: { games: [], pending: INBOX_LIMIT } }}>
+        <SuggestionInbox />
+      </BoardOverlay.Provider>,
     );
 
     fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
@@ -234,13 +219,9 @@ describe("제안 거절 진행 중 표시", () => {
       .mockResolvedValueOnce(items.slice(2)); // item2 의 재조회는 성공
 
     render(
-      <SuggestionInbox
-        games={[]}
-        pending={INBOX_LIMIT + 1}
-        onApply={() => {}}
-        onResolved={() => {}}
-        onClose={() => {}}
-      />,
+      <BoardOverlay.Provider options={{ input: { games: [], pending: INBOX_LIMIT + 1 } }}>
+        <SuggestionInbox />
+      </BoardOverlay.Provider>,
     );
 
     fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
@@ -277,13 +258,9 @@ describe("제안 거절 진행 중 표시", () => {
     );
 
     render(
-      <SuggestionInbox
-        games={[makeGameCard({ id: 1 })]}
-        pending={1}
-        onApply={() => {}}
-        onResolved={() => {}}
-        onClose={() => {}}
-      />,
+      <BoardOverlay.Provider options={{ input: { games: [makeGameCard({ id: 1 })], pending: 1 } }}>
+        <SuggestionInbox />
+      </BoardOverlay.Provider>,
     );
 
     fireEvent.click(await screen.findByTestId("suggestion-reject-1"));

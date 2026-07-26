@@ -1,6 +1,6 @@
 "use client";
 
-import type { GameCard } from "@/features/games/service";
+import { BoardOverlay } from "./board-overlay-context";
 import { GameDialog } from "./game-dialog";
 import { GameFacts } from "./game-fields";
 
@@ -17,34 +17,35 @@ import { GameFacts } from "./game-fields";
    플레이 날짜는 lastPlayed 를 그대로 읽는다 — 발행 경계를 통과한 값이라 초안 주의 편성은 안
    보인다(ADR-0022). 고치려고 여는 GameEditor 는 다른 값을 쓴다(초안까지 세는 playDates) —
    보는 화면과 고치는 화면의 질문이 다르기 때문이다. */
+/* 이 컴포넌트는 board-overlay 머신이 `detail` 상태(또는 그 자식)일 때만 마운트된다
+   (game-board.tsx) — 겹침·닫기 신호는 props 로 안 받고 컨텍스트에서 직접 읽고 보고한다
+   (ADR-0026). canWrite·canDelete·signedIn 은 머신 상태가 아니라 페이지 인가 정보라 그대로
+   prop 으로 받는다. */
 export function GameDetail({
-  game,
   canWrite,
   canDelete,
   signedIn,
-  closing,
-  covered,
-  onEdit,
-  onDelete,
-  onSuggest,
-  onClose,
 }: {
-  game: GameCard;
   canWrite: boolean;
   canDelete: boolean;
   // 로그인했는가 — 제안 버튼과 로그인 안내가 이 값으로 갈린다(ADR-0025).
   signedIn: boolean;
-  /* 부모가 세우는 닫기 신호. 이 화면에 그럴 일이 하나 있다 — **삭제 성공**. 곧장 언마운트하는
-     대신 신호를 세워야 close 이벤트가 오고, 셸이 거기서 히스토리 엔트리를 되돌린다.
-     뒤로가기를 포함한 나머지 닫는 길은 셸이 스스로 처리하므로 여기 안 온다. */
-  closing: boolean;
-  // 수정·삭제가 이 위에 겹쳐 떴는가 — 그동안 뒤로가기가 이 화면을 닫으면 안 된다.
-  covered: boolean;
-  onEdit: () => void;
-  onDelete: () => void;
-  onSuggest: () => void;
-  onClose: () => void;
 }) {
+  const actorRef = BoardOverlay.useActorRef();
+  const game = BoardOverlay.useSelector((s) => s.context.detailGame);
+  /* 부모(머신)가 세우는 닫기 신호. 이 화면에 그럴 일이 하나 있다 — **삭제 성공**. 곧장
+     언마운트하는 대신 신호를 세워야 close 이벤트가 오고, 셸이 거기서 히스토리 엔트리를
+     되돌린다. 뒤로가기를 포함한 나머지 닫는 길은 셸이 스스로 처리하므로 여기 안 온다. */
+  const closing = BoardOverlay.useSelector((s) => s.context.detailClosing);
+  // 수정·삭제·제안이 이 위에 겹쳐 떴는가 — 그동안 뒤로가기가 이 화면을 닫으면 안 된다.
+  const covered = BoardOverlay.useSelector(
+    (s) =>
+      s.matches({ detail: "editing" }) ||
+      s.matches({ detail: "deleting" }) ||
+      s.matches({ detail: "suggesting" }),
+  );
+  // 렌더 조건(game-board.tsx 의 detailOpen)이 이미 detailGame !== null 을 보장한다.
+  if (!game) return null;
   return (
     <GameDialog
       title={game.categoryValue}
@@ -55,7 +56,7 @@ export function GameDetail({
          유예된다 — 그 판정을 셸이 하도록 covered 로 넘긴다(GameDialog 의 history·covered). */
       history
       covered={covered}
-      onClose={onClose}
+      onClose={() => actorRef.send({ type: "DETAIL_CLOSED" })}
     >
       <div className="detail__head">
         {game.posterImageUrl ? (
@@ -94,7 +95,7 @@ export function GameDetail({
               className="btn btn--primary composer__btn"
               type="button"
               data-od-id={"game-suggest-" + game.id}
-              onClick={onSuggest}
+              onClick={() => actorRef.send({ type: "SUGGEST_FROM_DETAIL" })}
             >
               수정 제안
             </button>
@@ -112,7 +113,7 @@ export function GameDetail({
               className="btn btn--primary composer__btn"
               type="button"
               data-od-id={"game-edit-" + game.id}
-              onClick={onEdit}
+              onClick={() => actorRef.send({ type: "EDIT_FROM_DETAIL" })}
             >
               수정
             </button>
@@ -125,7 +126,7 @@ export function GameDetail({
               className="btn btn--secondary composer__btn detail__del"
               type="button"
               data-od-id={"game-del-" + game.id}
-              onClick={onDelete}
+              onClick={() => actorRef.send({ type: "DELETE_FROM_DETAIL" })}
             >
               삭제
             </button>
