@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { BoardOverlay } from "./board-overlay-context";
 import { SuggestionInbox } from "./suggestion-inbox";
 import { makeGameCard } from "./test-fixtures";
 
@@ -23,13 +24,9 @@ describe("제안함 목록 로드 실패", () => {
     vi.mocked(trpc.suggestions.list.query).mockRejectedValue(new Error("network"));
 
     render(
-      <SuggestionInbox
-        games={[makeGameCard()]}
-        pending={1}
-        onApply={() => {}}
-        onResolved={() => {}}
-        onClose={() => {}}
-      />,
+      <BoardOverlay.Provider options={{ input: { games: [makeGameCard()], pending: 1 } }}>
+        <SuggestionInbox />
+      </BoardOverlay.Provider>,
     );
 
     expect(

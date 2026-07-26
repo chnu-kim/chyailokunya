@@ -4,8 +4,8 @@ import { useMachine } from "@xstate/react";
 import { useState } from "react";
 import { deleteErrorMessage } from "@/core/error-message";
 import { createSubmitMachine } from "@/core/submit.machine";
-import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
+import { BoardOverlay } from "./board-overlay-context";
 import { GameDialog } from "./game-dialog";
 
 // 값이 없다(대상은 game prop 이 정한다) — TValues 를 undefined 로 둔다.
@@ -19,24 +19,20 @@ const removeMachine = createSubmitMachine<undefined, { deleted: boolean }>();
    인계 규약은 컴포저·수정과 같다 — 성공은 신호(closing)만 세우고 실제 인계는 브라우저가
    dialog 를 닫은 뒤 오는 onClose 에서 한다(GameDialog 의 busy 주석). 실패 문구는 모달 안에
    남긴다: 바깥은 inert 라 페이지 하단 라이브 영역이 안 읽힌다. */
-export function GameDeleteConfirm({
-  game,
-  stacked,
-  onRemoved,
-  onClose,
-}: {
-  game: GameCard;
+/* 이 컴포넌트는 board-overlay 머신이 `detail.deleting` 상태일 때만 마운트된다(game-board.tsx)
+   — 그 상태는 `detail` 없이는 못 뜨므로 stacked 는 사실상 늘 참이지만, 다른 모달과 같은
+   방식으로 selector 에서 유도해 특례를 안 만든다. */
+export function GameDeleteConfirm() {
+  const actorRef = BoardOverlay.useActorRef();
+  const game = BoardOverlay.useSelector((s) => s.context.detailGame);
   // 카드 상세 위에 겹쳐 떴는가 — 그렇다면 스크림을 한 겹 더 깔지 않는다.
-  stacked: boolean;
-  onRemoved: (row: GameCard) => void;
-  onClose: () => void;
-}) {
+  const stacked = BoardOverlay.useSelector((s) => s.context.detailGame !== null);
   const [manualClosing, setManualClosing] = useState(false);
   /* run 은 마운트 시점에 얼어붙는다(submit.machine.ts 주석) — game 은 이 모달이 열려 있는 동안
-     안 바뀌는 prop(모달은 게임마다 다시 마운트된다)이라 클로저로 붙잡아도 안전하다. */
+     안 바뀌는 값(모달은 게임마다 다시 마운트된다)이라 클로저로 붙잡아도 안전하다. */
   const [state, send] = useMachine(removeMachine, {
     input: {
-      run: (_values, signal) => trpc.games.remove.mutate({ id: game.id }, { signal }),
+      run: (_values, signal) => trpc.games.remove.mutate({ id: game!.id }, { signal }),
       // 삭제판 문구다 — writeErrorMessage 는 "저장됐을 수도" 처럼 저장 어휘라 여기선 거짓말이 된다.
       mapError: deleteErrorMessage,
     },
@@ -48,6 +44,10 @@ export function GameDeleteConfirm({
   function onConfirm() {
     send({ type: "submit", values: undefined });
   }
+
+  // 위 훅 전부를 부른 뒤에만 놓는다(react-hooks/rules-of-hooks) — 실제로는 부모가
+  // detailGame !== null 일 때만 마운트하므로 이 분기는 안 밟힌다.
+  if (!game) return null;
 
   return (
     <GameDialog
@@ -68,7 +68,17 @@ export function GameDeleteConfirm({
          건드릴 일이 없다. 순서가 곧 낭독 순서다(무엇 → 결과). */
       describedBy="game-delete-name game-delete-hint"
       alert
-      onClose={() => (removed ? onRemoved(game) : onClose())}
+      onClose={() => {
+        if (removed) {
+          actorRef.send({
+            type: "GAME_REMOVED",
+            row: game,
+            announcement: game.categoryValue + " 삭제됨",
+          });
+          return;
+        }
+        actorRef.send({ type: "CANCEL_DELETE" });
+      }}
     >
       <div className="composer__chosen" data-od-id="game-delete-game">
         {game.posterImageUrl ? (

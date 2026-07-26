@@ -10,6 +10,7 @@ import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { INBOX_LIMIT, type SuggestionListItem } from "@/features/suggestions/service";
 import { trpc } from "@/features/trpc/client";
+import { BoardOverlay } from "./board-overlay-context";
 import { GameDialog } from "./game-dialog";
 
 /* 항목마다 **독립된** 액터를 하나씩 둔다(InboxItem 이 useMachine 을 직접 부른다) — 인박스
@@ -34,26 +35,20 @@ const rejectMachine = createSubmitMachine<
    routes.ts(nav·푸터·로그인 복귀 허용목록의 공동 정본)까지 딸려 온다 — 관리자에게만 보이는
    페이지를 그 구조에 어떻게 담을지가 새 결정이 되는데, 지금 그 값을 치를 이유가 없다.
 
-   대상 게임의 현재 값은 **보드가 이미 든 목록에서 찾는다**(games prop). 서버가 조인해 실어
-   보내지 않는 이유는 그래야 제안함이 그리는 "현재 값"이 바로 뒤 보드가 그리는 값과 확실히
-   같아지기 때문이다. */
-export function SuggestionInbox({
-  games,
-  pending,
-  onApply,
-  onResolved,
-  onClose,
-}: {
-  games: GameCard[];
+   대상 게임의 현재 값은 **보드가 이미 든 목록에서 찾는다**(머신 context.games). 서버가 조인해
+   실어 보내지 않는 이유는 그래야 제안함이 그리는 "현재 값"이 바로 뒤 보드가 그리는 값과
+   확실히 같아지기 때문이다.
+
+   이 컴포넌트는 board-overlay 머신이 `inbox` 상태일 때만 마운트된다(game-board.tsx). 「반영
+   하기」의 종류별 분기(추가 요청 vs 수정 제안 vs 그 게임이 이미 지워짐)는 게임 목록에 접근할
+   수 있는 이 파일이 판정해 셋 중 하나의 이벤트로 보낸다 — 머신은 오버레이 모양만 안다
+   (board-overlay.machine.ts). */
+export function SuggestionInbox() {
+  const actorRef = BoardOverlay.useActorRef();
+  const games = BoardOverlay.useSelector((s) => s.context.games);
   /* 미처리 제안 **전체** 수(배지가 쓰는 그 값). 목록은 상한이 있어(INBOX_LIMIT) 이 수보다
      짧을 수 있는데, 그 사실을 화면이 말하지 않으면 관리자가 "제안은 이게 전부"로 오해한다. */
-  pending: number;
-  // 「반영하기」 — 부모가 제안함을 닫고 제안 값을 채운 폼을 연다.
-  onApply: (item: SuggestionListItem) => void;
-  // 거절로 목록이 줄었다 — 부모의 배지 수를 맞춘다.
-  onResolved: () => void;
-  onClose: () => void;
-}) {
+  const pending = BoardOverlay.useSelector((s) => s.context.pending);
   const [items, setItems] = useState<SuggestionListItem[] | null>(null);
   // 목록 최초 로드 실패 + 넘친 큐 이어 받기 실패. 거절 자체의 실패·타임아웃은 각 줄이 자기
   // 액터의 context.error 를 인라인으로 그린다(항목마다 독립 액터라 — 위 rejectMachine 주석).
@@ -127,7 +122,7 @@ export function SuggestionInbox({
     /* **배지는 우리가 실제로 처리했을 때만 줄인다.** 서버는 미처리인 것만 고치므로(CAS)
        다른 관리자가 먼저 처리했으면 false 가 오는데, 그때도 줄이면 이미 남이 줄인 수에서
        한 번 더 빠져 배지가 실제 미처리 수보다 작아진다. */
-    if (result.resolved) onResolved();
+    if (result.resolved) actorRef.send({ type: "SUGGESTION_RESOLVED" });
     // 넘친 큐를 여기서 이어 받는다. 안 넘쳤으면 왕복을 아낀다(대부분의 실사용이 그쪽이다).
     // 이 읽기가 실패해도 거절은 이미 성공했다 — "거절 실패"로 말하면 거짓이 되므로 별도
     // 문구를 쓴다(화면은 한 줄 줄어든 채 남고, 다시 열면 채워진다).
@@ -151,6 +146,36 @@ export function SuggestionInbox({
     }
   }
 
+  /* 「반영하기」 — 제안함을 닫고 **기존 폼**을 제안 값으로 채워 연다(머신의 composing 또는
+     applyingEditSuggestion 으로 전이). 여기서 게임을 직접 쓰지 않는 게 이 설계의 핵심이다
+     (결정 2): 저장은 평소의 add/update 경로가 하고, 이 함수는 그 폼의 출발점만 정한다. */
+  function onApply(item: SuggestionListItem) {
+    const values = {
+      playedDate: item.proposed.playedDate ?? "",
+      cleared: item.proposed.cleared,
+      clearedDate: item.proposed.clearedDate ?? "",
+    };
+    if (item.kind === "add") {
+      // 자유 이름을 검색어로 넣는다 — 정본 카테고리·표지는 관리자가 그 결과에서 고른다.
+      actorRef.send({
+        type: "APPLY_SUGGESTION_ADD",
+        suggestion: item,
+        composerInitial: { query: item.proposedTitle ?? "", ...values },
+      });
+      return;
+    }
+    const game = games.find((g) => g.id === item.gameId);
+    if (!game) {
+      // 제안함을 열어 둔 사이 그 게임이 지워졌다 — 열 폼이 없으므로 정직하게 말하고 멈춘다.
+      actorRef.send({
+        type: "APPLY_SUGGESTION_NOT_FOUND",
+        announcement: "그 게임이 보드에 없습니다 — 새로고침해 주십시오",
+      });
+      return;
+    }
+    actorRef.send({ type: "APPLY_SUGGESTION_EDIT", suggestion: item, game });
+  }
+
   return (
     <GameDialog
       title="들어온 제안"
@@ -161,7 +186,7 @@ export function SuggestionInbox({
       // 본문에 「닫기」가 있으므로 모서리 X 를 끈다 — 같은 일을 하는 손잡이 둘이 한 화면에
       // 있으면 사용자가 차이를 찾느라 멈춘다(GameDialog 의 closeButton 규약).
       closeButton={false}
-      onClose={onClose}
+      onClose={() => actorRef.send({ type: "CLOSE_INBOX" })}
     >
       {items === null && !error && <p className="composer__hint">불러오는 중입니다…</p>}
 
