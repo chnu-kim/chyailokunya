@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { abandonEntry, claimEntry, releaseEntry } from "./dialog-history";
+import { useMachine } from "@xstate/react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { dialogShellMachine } from "@/core/dialog-shell.machine";
+import { abandonEntry, claimEntry, releaseEntry } from "./dialog-history.actor";
 
 /* 네이티브 dialog 셸 — 컴포저(추가)와 클리어 수정이 둘 다 쓴다. 두 번째 호출자가 생기면서
-   드러난 seam 이라 여기로 뺐다(ADR-0010 의 JIT 추상화). 히스토리 엔트리 배선은
-   dialog-history.ts 로, 클리어 상태 입력·표시 부품(PlayedDateField·ClearedFields·GameFacts)은
-   game-fields.tsx 로 갈라졌다 — 이 파일은 셸(GameDialog)과 그 미저장 확인(DiscardConfirm)만
-   남는다. 실패 문구는 core/error-message.ts 로 나갔다 — 이 파일이 React 를 끌어와 단위
-   테스트가 안 붙었고, 그래서 "400 에 네트워크 탓 문구가 뜨는" 결함이 테스트 없이 프로덕션까지
-   갔다.
+   드러난 seam 이라 여기로 뺐다(ADR-0010 의 JIT 추상화). 닫기 판정은 `dialog-shell.machine.ts`
+   (에픽 #77 이슈 #82), 히스토리 엔트리 수명주기는 `dialog-history.machine.ts` + 그 부수효과
+   계층 `dialog-history.actor.ts` 로, 클리어 상태 입력·표시 부품(PlayedDateField·ClearedFields·
+   GameFacts)은 game-fields.tsx 로 갈라졌다 — 이 파일은 셸(GameDialog)과 그 미저장 확인
+   (DiscardConfirm)만 남는다. 실패 문구는 core/error-message.ts 로 나갔다 — 이 파일이 React 를
+   끌어와 단위 테스트가 안 붙었고, 그래서 "400 에 네트워크 탓 문구가 뜨는" 결함이 테스트 없이
+   프로덕션까지 갔다.
 
    표면이 .paper 인 이유: .polaroid 는 --border-strong 을 안 되돌려 다크에서 입력 테두리가
    크림 위 1.01:1 로 사라진다. .paper 위에선 14.3:1 이라 폼은 반드시 이쪽에 올린다. */
@@ -87,7 +90,7 @@ export function GameDialog({
      것 자체가, 수정 모달은 열 때 읽은 값과의 차이가 기준이다) 셸은 children 안을 못 본다. */
   dirty?: boolean;
   /* 이 다이얼로그가 브라우저 히스토리 엔트리를 하나 차지하는가 — 켜면 뒤로가기가 페이지가
-     아니라 이 모달을 닫는다(dialog-history.ts 주석).
+     아니라 이 모달을 닫는다(dialog-history.machine.ts 주석).
 
      켜는 건 **상세와 컴포저 둘뿐이다.** 수정·삭제·미저장 확인은 안 켠다: 겹친 모달까지
      각자 엔트리를 얹으면 뒤로가기 한 번이 몇 겹 중 어디를 닫는지 화면만 봐선 알 수 없어진다.
@@ -109,9 +112,13 @@ export function GameDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = odId + "-title";
+  /* 셸의 닫기 판정(dialog-shell.machine.ts) — X·배경 클릭·Esc·뒤로가기 네 곳이 REQUEST_CLOSE
+     하나로 모인다. 머신엔 context 가 없다 — busy·dirty·covered 는 렌더마다 바뀌므로 이벤트
+     페이로드로 매번 싣는다(아래 latest 주석이 그 이유를 잇는다). */
+  const [shellState, sendShell, shellActorRef] = useMachine(dialogShellMachine);
   /* 미저장 확인이 떠 있는가. 이 상태에서도 부모 dialog 는 열린 채다 — 사용자가 무엇을 잃는지
      보이는 자리에 두고 묻는다. */
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const confirmingDiscard = shellState.matches("confirmingDiscard");
 
   /* 뒤로가기 판정이 읽을 최신 값. **effect 의존성에 실으면 안 된다** — busy·dirty·covered 는
      조작마다 바뀌는데 그때마다 아래 claim effect 가 다시 돌면 엔트리를 놓았다 쌓았다 하며
@@ -128,31 +135,23 @@ export function GameDialog({
     latest.current = { busy, dirty, covered };
   });
 
-  /* 우리 엔트리에 뒤로가기가 왔다. 셋 중 하나라도 걸리면 **닫지 않는다**(컨트롤러가 엔트리를
-     다시 쌓는다) — 뒤로가기 하나가 셸의 잠금을 우회하면 그 잠금은 있으나 마나다.
+  /* 우리 엔트리에 뒤로가기가 왔다. 판정(busy·covered 면 무시, dirty 면 확인, 아니면 닫기)은
+     dialog-shell 머신이 진다 — game-dialog.tsx 가 손으로 셋을 다시 짜지 않는다.
 
-       covered — 위에 겹친 모달이 있다. 아래만 닫으면 위가 포커스를 돌려줄 자리를 잃고, 위까지
-         닫으면 제스처 하나가 아래 잠금 둘을 통째로 무른다. 그래서 이 순간의 뒤로가기는 Esc 와
-         같은 대접을 받는다 — 위를 닫으면 다음 뒤로가기가 정상으로 돈다(덫이 아니라 유예다).
-       busy — 서버 쓰기가 날아가는 중이다(busy prop 의 인계 경쟁).
-       dirty — 미저장 입력이 있다. 셸의 다른 닫기 셋과 **같은 확인**을 띄운다. 확인이 뜬 채
-         다시 와도 뒤 폼이 inert 라 값이 못 바뀌어 dirty 가 그대로고, 그래서 같은 가지로
-         떨어져 확인이 유지된다 — covered 에 확인 모달을 따로 셀 필요가 없는 이유다.
-
-     이 함수는 컨트롤러가 **주인을 식별하는 키**이기도 하다. 의존성 없는 useCallback 이라
-     인스턴스마다 하나뿐이고 렌더가 바뀌어도 같다(refs·setState 만 읽으므로 성립한다). */
+     이 함수는 dialog-history 쪽이 **주인을 식별하는 키**이기도 하다. 의존성 없는 useCallback
+     이라 인스턴스마다 하나뿐이고 렌더가 바뀌어도 같다(`shellActorRef`·`sendShell` 은
+     useMachine 이 마운트 내내 안정적으로 주므로 성립한다). `getSnapshot()` 을 쓰는 이유는
+     이 컴포넌트 렌더에 묶인 `shellState` 는 send 직후에도 한 박자 낡아 있어서다 — 지금 막
+     처리한 전이의 결과를 동기로 알아야 한다(dialog-history.machine.ts 의 재진입 순서와 같은
+     이유). */
   const onHistoryPop = useCallback(() => {
-    const now = latest.current;
-    if (now.covered || now.busy) return false;
-    if (now.dirty) {
-      setConfirmingDiscard(true);
-      return false;
-    }
+    sendShell({ type: "REQUEST_CLOSE", ...latest.current });
+    if (!shellActorRef.getSnapshot().matches("closing")) return false;
     /* 되돌리기는 브라우저가 이미 했다 — close() 만 태워 포커스를 트리거로 되돌린다.
        곧장 언마운트하면 dialog 가 열린 채 DOM 에서 빠져 포커스가 body 로 떨어진다. */
     dialogRef.current?.close();
     return true;
-  }, []);
+  }, [sendShell, shellActorRef]);
 
   useEffect(() => {
     if (!history) return;
@@ -196,13 +195,9 @@ export function GameDialog({
      closing 신호는 이 잠금을 거치지 않는다(성공해서 닫는 길이라 경쟁이 없다).
      dirty 면 닫는 대신 확인을 띄운다(dirty prop 주석). */
   const close = useCallback(() => {
-    if (busy) return;
-    if (dirty) {
-      setConfirmingDiscard(true);
-      return;
-    }
-    dialogRef.current?.close();
-  }, [busy, dirty]);
+    sendShell({ type: "REQUEST_CLOSE", busy, dirty, covered });
+    if (shellActorRef.getSnapshot().matches("closing")) dialogRef.current?.close();
+  }, [busy, dirty, covered, sendShell, shellActorRef]);
 
   return (
     <>
@@ -235,14 +230,10 @@ export function GameDialog({
         /* Esc 는 close() 를 거치지 않고 UA 가 직접 닫는다 — cancel 을 막아야 잠금이 성립한다.
            dirty 가드도 여기서 한 번 더 건다(같은 이유로 close() 를 안 거친다). */
         onCancel={(e) => {
-          if (busy) {
-            e.preventDefault();
-            return;
-          }
-          if (dirty) {
-            e.preventDefault();
-            setConfirmingDiscard(true);
-          }
+          sendShell({ type: "REQUEST_CLOSE", busy, dirty, covered });
+          // 닫아도 되면(closing) 아무것도 안 해 브라우저의 기본 취소가 이어지게 둔다 — 직접
+          // close() 를 부르는 다른 세 경로와 다르다(dialog-shell.machine.ts 의 Esc 주석).
+          if (!shellActorRef.getSnapshot().matches("closing")) e.preventDefault();
         }}
         onMouseDown={(e) => {
           pressedOutside.current = isOutside(e);
@@ -282,9 +273,9 @@ export function GameDialog({
       {confirmingDiscard && (
         <DiscardConfirm
           odId={odId}
-          onKeep={() => setConfirmingDiscard(false)}
+          onKeep={() => sendShell({ type: "KEEP" })}
           onDiscard={() => {
-            setConfirmingDiscard(false);
+            sendShell({ type: "DISCARD" });
             dialogRef.current?.close();
           }}
         />
