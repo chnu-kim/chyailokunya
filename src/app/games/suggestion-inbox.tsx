@@ -138,6 +138,9 @@ export function SuggestionInbox({
           const found = await fetchPending();
           if (latestFetchSeq.current === seq) {
             setItems(found.filter((i) => !resolvedIds.current.has(i.id)));
+            // 이 재조회가 실패해 남긴 낡은 문구가 있다면 지운다 — 방금 성공했으므로 화면이
+            // 여전히 "불러오지 못했다"고 말하면 이미 거짓이다(review 4라운드가 잡은 자리).
+            setError("");
           }
         } catch {
           if (latestFetchSeq.current === seq) {

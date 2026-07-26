@@ -216,6 +216,52 @@ describe("제안 거절 진행 중 표시", () => {
     expect(screen.queryByTestId("suggestion-2")).not.toBeInTheDocument();
   });
 
+  /* 4라운드 review 가 잡은 자리 — 넘친 큐 재조회가 실패하면 "다음 제안을 불러오지 못했다" 배너를
+     띄우는데, 그 뒤 다른 줄의 거절이 다시 캡에 걸려 재조회를 던지고 이번엔 성공해도 배너를 안
+     지웠다. 목록은 이미 최신인데 화면만 "못 불러왔다"고 계속 말하는 거짓 상태가 남는다. */
+  it("넘친 큐 재조회가 실패했다가 나중에 성공하면 낡은 오류 문구가 사라진다", async () => {
+    const items = Array.from({ length: INBOX_LIMIT + 1 }, (_, i) => makeSuggestion({ id: i + 1 }));
+
+    let resolveReject1!: (v: { resolved: boolean }) => void;
+    let resolveReject2!: (v: { resolved: boolean }) => void;
+    vi.mocked(trpc.suggestions.resolve.mutate)
+      .mockImplementationOnce(() => new Promise((r) => (resolveReject1 = r)))
+      .mockImplementationOnce(() => new Promise((r) => (resolveReject2 = r)));
+
+    vi.mocked(trpc.suggestions.list.query)
+      .mockResolvedValueOnce(items) // 최초 로드 — 상한보다 하나 많아 item1·item2 둘 다 wasCapped
+      .mockRejectedValueOnce(new Error("network")) // item1 의 재조회는 실패
+      .mockResolvedValueOnce(items.slice(2)); // item2 의 재조회는 성공
+
+    render(
+      <SuggestionInbox
+        games={[]}
+        pending={INBOX_LIMIT + 1}
+        onApply={() => {}}
+        onResolved={() => {}}
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
+    await act(async () => {
+      resolveReject1({ resolved: true });
+    });
+
+    expect(
+      await screen.findByText("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("suggestion-reject-2"));
+    await act(async () => {
+      resolveReject2({ resolved: true });
+    });
+
+    expect(
+      screen.queryByText("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다."),
+    ).not.toBeInTheDocument();
+  });
+
   /* advisor 점검 — busy 는 effect 로만 꺼진다(켜질 때만 onReject 안에서 동기로 앞당긴다, 위
      onReject 주석). 실패 경로가 실제로 그 effect 를 타 busyIds 를 비우는지 못 박는다 — 안
      그러면 실패한 거절이 「닫기」를 영구히 잠근 채 남는다. */
