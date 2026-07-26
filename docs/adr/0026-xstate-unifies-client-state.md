@@ -50,23 +50,21 @@
 위반이 아니다 — 머신이 순수해야 workerd 단위 테스트가 그대로 산다. 부수효과(실제 DOM 호출
 `history.pushState`/`popstate`)는 core 밖 `src/app/**/*.actor.ts` 가 맡는다.
 
-**선 밖에 두는 것** — 최종적으로 AGENTS.md 에 규칙으로 못박을 문장이다:
+**선 밖에 두는 것** — AGENTS.md 「코드 컨벤션」에 이미 규칙으로 실었다(이 PR 이 함께
+넣는다 — ADR 은 근거, AGENTS.md 는 규칙이라는 ADR-0013 의 분리를 지킨다):
 
 > 둘 이상이 함께 바뀌거나 / 불가능한 조합이 표현되거나 / 비동기가 끼면 →
 > `core/*.machine.ts`. 그 밖은 `useState`·`useRef`·`useSyncExternalStore` 그대로다.
-
-**이 문장은 아직 AGENTS.md 에 없다.** 에픽 #77 은 이 확정을 마지막 단계(하위 이슈 #78~#85
-전부 완료 후의 PR 19)로 미룬다 — 머신 8종이 실제로 배선되기 전에 판정 규칙만 먼저 박으면
-적용 사례 없이 예외만 쌓인다(`use-theme`·DOM `useRef` 처럼 규칙 밖에 남는 것들이 오히려
-규칙보다 먼저 확정돼 버린다). 그 전까지 이 규칙의 정본은 이 ADR 이고, AGENTS.md 는 아직
-이 규칙을 모른다 — 지금 새 클라이언트 상태를 손으로 짜는 사람은 AGENTS.md 만 봐선 이 경계를
-알 수 없다는 뜻이다.
 
 폼 값(`playedDate`·`title`·`WeekDraft`·`query`)은 혼자 바뀌고 불가능한 조합이 없어 대상이
 아니다. DOM 핸들 `useRef` 는 직렬화·SSR 불가라 머신 context 에 못 넣는다 — 이건 무혼용이
 불가능해 규칙으로 지킨다. `use-theme`(`useSyncExternalStore`)은 정본이 첫 페인트 전 인라인
 스크립트가 심는 `data-theme` 속성이라 머신을 두면 정본이 둘이 된다(맞추려 effect 를 쓰면
 `set-state-in-effect` 지뢰가 재발한다).
+
+**규칙은 지금부터 유효하고, 기존 코드는 아직 안 따른다** — 머신 8종은 #79~#85 에 걸쳐
+하나씩 배선된다. 에픽이 끝나면(PR 19) 실제로 짠 8종을 반영해 AGENTS.md 문단의 표현을
+다듬는다(예: 지금은 없는 실제 파일 경로·예외 사례 추가).
 
 ## 검증 스파이크 — happy-dom 이 이 결정을 지탱하는가
 
