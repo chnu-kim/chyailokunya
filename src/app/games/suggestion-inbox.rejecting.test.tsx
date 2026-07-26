@@ -163,4 +163,68 @@ describe("제안 거절 진행 중 표시", () => {
     // 낡은 응답(#1)이 나중에 와도 item2 가 되살아나면 안 된다.
     expect(screen.queryByTestId("suggestion-2")).not.toBeInTheDocument();
   });
+
+  /* 3차 재리뷰가 잡은 자리 — seq 토큰은 "재조회끼리"만 순서를 매긴다. item1(캡됨)의 재조회가
+     나가 있는 동안 item2 가 **캡 안 걸린 채**(item1 이 막 빠져나가 items.length 가 상한
+     아래로 내려간 상태) 거절되면 item2 는 새 재조회를 안 던지므로 seq 로는 못 막는다 — item1
+     의 재조회가 서버를 item2 의 거절보다 먼저 조회했다면 그 응답에 item2 가 아직 남아 있어,
+     seq 검사는 통과(가장 최근 요청이 맞으므로)한 채로 item2 를 되살릴 수 있다. resolvedIds
+     집합으로 걸러야 한다. */
+  it("캡된 재조회가 나가 있는 동안 캡 안 걸린 다른 줄이 거절돼도 되살아나지 않는다", async () => {
+    const items = Array.from({ length: INBOX_LIMIT }, (_, i) => makeSuggestion({ id: i + 1 }));
+
+    let resolveReject1!: (v: { resolved: boolean }) => void;
+    let resolveReject2!: (v: { resolved: boolean }) => void;
+    vi.mocked(trpc.suggestions.resolve.mutate)
+      .mockImplementationOnce(() => new Promise((r) => (resolveReject1 = r)))
+      .mockImplementationOnce(() => new Promise((r) => (resolveReject2 = r)));
+
+    let resolveFetch1!: (v: ReturnType<typeof makeSuggestion>[]) => void;
+    vi.mocked(trpc.suggestions.list.query)
+      .mockResolvedValueOnce(items) // 최초 로드 — 정확히 상한만큼이라 item1 은 wasCapped=true
+      .mockImplementationOnce(() => new Promise((r) => (resolveFetch1 = r))); // item1 의 재조회
+
+    render(
+      <SuggestionInbox
+        games={[]}
+        pending={INBOX_LIMIT}
+        onApply={() => {}}
+        onResolved={() => {}}
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
+    await act(async () => {
+      resolveReject1({ resolved: true }); // wasCapped=true → 재조회를 던지지만 아직 안 끝남
+    });
+
+    // 이제 목록이 상한보다 짧다 — item2 를 거절하면 wasCapped=false 라 재조회를 안 던진다.
+    fireEvent.click(screen.getByTestId("suggestion-reject-2"));
+    await act(async () => {
+      resolveReject2({ resolved: true });
+    });
+    // list.query 가 세 번째로 불리지 않았다 — item2 의 거절은 재조회를 안 던진다는 전제 확인.
+    expect(trpc.suggestions.list.query).toHaveBeenCalledTimes(2);
+
+    // item1 의 재조회가 이제야 도착한다 — item2 의 거절이 서버에 반영되기 **전에** 조회한
+    // 스냅샷이라 item2 가 아직 들어 있다.
+    await act(async () => {
+      resolveFetch1(items.slice(1));
+    });
+
+    expect(screen.queryByTestId("suggestion-2")).not.toBeInTheDocument();
+  });
 });
+
+/* 3차 재리뷰(review)가 잡은 자리 하나는 여기 테스트로 못박지 않는다 — busy 보고가 effect(렌더
+   커밋 뒤 비동기)로만 이뤄지면 클릭과 부모의 anyRejecting 반영 사이에 실제 브라우저에서는 창이
+   생긴다(그 사이 「닫기」를 누르면 막 보낸 거절의 액터가 인계 전에 사라진다). suggestion-inbox.tsx
+   의 onReject 를 원본의 setRejectingId(item.id)와 같은 이유로 동기 onBusyChange 호출로 고쳤다.
+
+   **왜 여기 테스트가 없나**: `@testing-library/react`의 fireEvent 는 act() 로 감싸는데, act() 는
+   테스트 환경에서 effect 를 동기로 미리 비운다 — 그래서 onReject 안의 동기 호출을 지워도
+   `fireEvent.click` 직후 disabled 를 확인하는 테스트는 여전히 통과한다(실측: 지워 보고 확인함).
+   act() 가 실제 브라우저의 커밋→페인트→passive effect 순서를 뭉개기 때문에, 이 레이스는 이
+   러너로는 검출력 있는 테스트를 못 만든다 — 검출력 0인 테스트를 만드느니 여기 그 사실과 수정
+   자체(코드 주석)만 남긴다. */

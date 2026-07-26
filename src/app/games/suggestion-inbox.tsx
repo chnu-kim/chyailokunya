@@ -109,10 +109,19 @@ export function SuggestionInbox({
      가장 최근에 던진 요청의 번호만 기억해 두고, 응답이 왔을 때 그 번호가 아니면 버린다 —
      늦게 온 검색 응답을 버리는 core/games-composer 의 searchSucceeded 판정과 같은 이유다. */
   const latestFetchSeq = useRef(0);
+  /* seq 만으론 부족하다(재리뷰가 잡은 자리) — 재조회 A(캡됨)가 나가 있는 동안 다른 줄 C 가
+     **캡 안 걸린** 채(A 가 방금 빠져 나가 items.length 가 상한 밑으로 내려간 상태) 거절되면,
+     C 의 거절은 새 재조회를 안 던지므로 seq 로 못 막는다 — A 의 재조회가 서버를 C 의 거절보다
+     먼저 조회했다면 그 응답에 C 가 아직 들어 있어, 도착했을 때(seq 는 아직 최신이라 통과) C 를
+     되살릴 수 있다. 그래서 **거절이 성공한 id 는 wasCapped 여부와 무관하게 전부** 기억해 두고,
+     재조회 응답을 반영할 때 그 집합에 있는 id 를 걸러낸다 — 어느 스냅샷이 오든 우리가 이미
+     확실히 아는 사실(그 id 는 처리됐다)을 덮어쓰지 못하게 한다. */
+  const resolvedIds = useRef<Set<number>>(new Set());
 
   /* 거절 성공의 후처리(목록에서 빼기·배지 갱신·넘친 큐 이어 받기) — 어느 항목이든 이 하나로
      받는다(InboxItem 이 자기 액터의 done 을 여기로 인계한다). */
   function onItemRejected(result: { id: number; resolved: boolean; wasCapped: boolean }) {
+    resolvedIds.current.add(result.id);
     // 목록에서는 어느 쪽이든 뺀다 — 이미 처리된 줄도 여기 남을 이유가 없다.
     setItems((prev) => (prev ?? []).filter((i) => i.id !== result.id));
     /* **배지는 우리가 실제로 처리했을 때만 줄인다.** 서버는 미처리인 것만 고치므로(CAS)
@@ -127,7 +136,9 @@ export function SuggestionInbox({
       void (async () => {
         try {
           const found = await fetchPending();
-          if (latestFetchSeq.current === seq) setItems(found);
+          if (latestFetchSeq.current === seq) {
+            setItems(found.filter((i) => !resolvedIds.current.has(i.id)));
+          }
         } catch {
           if (latestFetchSeq.current === seq) {
             setError("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다.");
@@ -265,6 +276,13 @@ function InboxItem({
   }, [doneResult]);
 
   function onReject() {
+    /* busy 를 effect(위)가 알리는 것만 기다리면 클릭과 부모의 anyRejecting 반영 사이에 창이
+       생긴다 — 그 사이 「닫기」·Esc·배경을 누르면 모달의 close 가드가 아직 false 인 anyRejecting
+       을 읽어 그대로 닫히고, 막 보낸 거절의 액터가 인계 전에 사라진다(review 가 잡은 자리).
+       원본의 setRejectingId(item.id)가 클릭 핸들러 맨 앞에서 동기로 불렸던 것과 같은 이유로
+       여기서도 동기로 먼저 알린다 — effect 의 보고는 그대로 두되(false 로 되돌리는 쪽은
+       effect 가 맡는다), 같은 값을 두 번 보고해도 setBusyIds 의 동일값 무시가 멱등하게 흡수한다. */
+    onBusyChange(item.id, true);
     sendReject({ type: "submit", values: { id: item.id, wasCapped } });
   }
   const changes =
