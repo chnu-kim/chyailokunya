@@ -26,9 +26,9 @@ ADR 이 그 맥락을 붙박는다. 규칙(불변식·경계·플레이북)의 �
 | [0005](./0005-tailwind-v4-theme-tokens.md)                   | 스타일 = Tailwind v4 @theme + 기존 토큰 승격                         | Accepted                                                   |
 | [0006](./0006-chzzk-oauth-jwt-session.md)                    | 인증 = 치지직 커스텀 OAuth → 자체 JWT 세션                           | Accepted                                                   |
 | [0007](./0007-single-app-enforced-boundaries.md)             | 구조 = 단일 앱 + 기계 강제 레이어 경계                               | Accepted                                                   |
-| [0008](./0008-vitest-workers-playwright.md)                  | 테스트 = Vitest(Workers pool) + Playwright                           | Accepted                                                   |
+| [0008](./0008-vitest-workers-playwright.md)                  | 테스트 = Vitest(Workers pool) + Playwright                           | Accepted (DOM 프로젝트 확장은 0026)                        |
 | [0009](./0009-actions-gate-workers-builds.md)                | CI 게이트 = GitHub Actions (배포는 0016 이 대체)                     | Accepted (게이트만)                                        |
-| [0010](./0010-verification-first-jit-abstraction.md)         | 원칙 = 검증 가능성 우선 · JIT 추상화(YAGNI)                          | Accepted                                                   |
+| [0010](./0010-verification-first-jit-abstraction.md)         | 원칙 = 검증 가능성 우선 · JIT 추상화(YAGNI)                          | Accepted (결정 2 는 0026 이 정교화)                        |
 | [0011](./0011-keep-index-and-landing-separate.md)            | IA = index/landing 분리 유지 (병합 기각)                             | Accepted                                                   |
 | [0012](./0012-role-based-writes-allowlist.md)                | 권한 = allowlist channelId 역할 기반 쓰기                            | Accepted                                                   |
 | [0013](./0013-docs-adr-and-agents.md)                        | 문서 = ADR(왜) + AGENTS.md(플레이북)                                 | Accepted                                                   |
@@ -44,3 +44,4 @@ ADR 이 그 맥락을 붙박는다. 규칙(불변식·경계·플레이북)의 �
 | [0023](./0023-game-card-detail-dialog.md)                    | 게임 보드 = 훑는 격자 + 카드 상세 다이얼로그 (카드 액션 폐기)        | Accepted                                                   |
 | [0024](./0024-week-state-two-axes.md)                        | 주 상태 = draft × published 두 축 (부재를 상태로 안 쓴다)            | Accepted                                                   |
 | [0025](./0025-fan-suggestions.md)                            | 팬 제안 = 로그인의 첫 대가 (반영은 기존 쓰기 경로가 한다)            | Accepted                                                   |
+| [0026](./0026-xstate-unifies-client-state.md)                | 클라이언트 상태 = XState 단일 표현 (Zustand·Jotai·Query 기각)        | Accepted                                                   |
