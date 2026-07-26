@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { REQUEST_TIMEOUT_MS } from "@/core/error-message";
 import { ANGLE, axis, PATTERNS, ROT, sortGameCards } from "@/core/games";
 import type { GameCard } from "@/features/games/service";
 import type { SuggestionListItem } from "@/features/suggestions/service";
@@ -9,7 +10,6 @@ import { GameComposer } from "./game-composer";
 import { GameDeleteConfirm } from "./game-delete-confirm";
 import { GameDetail } from "./game-detail";
 import { GameEditor } from "./game-editor";
-import { REQUEST_TIMEOUT_MS } from "./error-message";
 import { SuggestDialog } from "./suggest-dialog";
 import { SuggestionInbox } from "./suggestion-inbox";
 

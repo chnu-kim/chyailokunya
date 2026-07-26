@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteErrorMessage, REQUEST_TIMEOUT_MS } from "./error-message";
+import { deleteErrorMessage, REQUEST_TIMEOUT_MS } from "@/core/error-message";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameDialog } from "./game-dialog";

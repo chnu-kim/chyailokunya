@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { dateOfInstantKST } from "@/core/calendar";
+import { readErrorMessage, REQUEST_TIMEOUT_MS, resolveErrorMessage } from "@/core/error-message";
 import { formatDate } from "@/core/games";
 import { diffSuggestion, type SuggestionChange } from "@/core/suggestions";
 import type { GameCard } from "@/features/games/service";
 import { INBOX_LIMIT, type SuggestionListItem } from "@/features/suggestions/service";
 import { trpc } from "@/features/trpc/client";
-import { readErrorMessage, REQUEST_TIMEOUT_MS, resolveErrorMessage } from "./error-message";
 import { GameDialog } from "./game-dialog";
 
 /* 관리자 제안함(ADR-0025). 팬이 보낸 미처리 제안을 모아 보고, 여기서 **반영을 시작한다** —
