@@ -2,9 +2,9 @@
    재사용한다 — 공개 읽기(RSC)는 tRPC HTTP 를 왕복하지 않고 listGames 를 직접 부른다. */
 
 import { asc, desc, eq, getTableColumns, sql } from "drizzle-orm";
-import { toIsoDate, weekStartOf } from "@/core/calendar";
 import { isPlayDateEditable } from "@/core/games";
 import { games, scheduleEntries, scheduleWeeks, type Db, type GameRow } from "@/db";
+import { claimWeek } from "@/features/schedule/service";
 import type { AddGameInput, UpdateGameInput } from "./schema";
 
 /* 보드가 그리는 한 장. games 행 + 유도된 lastPlayed 다 — 플레이 날짜의 정본이 이제 게임
@@ -130,40 +130,6 @@ export function playEntriesOf(db: Db, gameId: number) {
     .from(scheduleEntries)
     .where(eq(scheduleEntries.gameId, gameId))
     .orderBy(asc(scheduleEntries.scheduledDate));
-}
-
-/* 게임 폼이 일정 항목을 건드린 주를 **청구(claim)한다** — revision(last_updated_at)을 확보하는
-   것이 전부다. 메타가 있으면 단조 증가시키고, 없으면 기본 상태(draft=0·미발행)로 행을 만든다.
-
-   왜 청구하나: saveWeek 은 그 주를 통째로 교체하면서 revision CAS 로 "그 사이 바뀌었으면 거절"을
-   보장한다. 게임 폼이 그 계약 밖에서 항목을 쓰면 열어 둔 편집기가 stale 인 채 CAS 를 통과해
-   방금 만든 항목을 **조용히 지운다**(적대적 리뷰 3·8라운드). 메타가 없으면 올릴 revision 자체가
-   없으므로, 행을 만들어 두는 게 그 구멍을 닫는 유일한 길이다 — 편집기의 null 청구가
-   onConflictDoNothing 으로 0행이 돼 CONFLICT 로 걸린다.
-
-   ── 청구가 도메인 상태를 안 건드린다(이슈 #64 가 연 자리) ─────────────────────────
-   한때 이 함수는 메타 없는 주를 **발행된 채로** 만들었다. "행 없음"이 보드엔 표시로, 공개
-   /schedule 엔 비공개로 읽히던 시절이라 행을 만드는 순간 둘 중 하나가 깨졌고, 날짜가 사라지는
-   쪽보다 한 화면 더 보이는 쪽이 가볍다고 봤다. 그 저울질이 **해제 경로에서 뒤집혔다**: 연결이
-   풀리는 순간 그 항목은 어느 게임에도 안 붙어 보드에서 사라지는데, 바로 그 항목이 시각·자유
-   제목까지 달고 /schedule 에 공개됐다. 관리자가 한 행동은 "이 게임을 그날 한 게 아니다"뿐인데.
-
-   draft 컬럼이 그 저울질 자체를 없앤다(schema.ts 주석). 기본값 0 이 "행 없음"과 같은 뜻이라
-   청구가 만드는 행은 보드에도 공개에도 **아무 변화를 안 준다** — 넣기든 옮기기든 해제든 결과가
-   같아서 연산별로 계약을 쪼갤 필요도 없다. 초안 주(draft=1)는 UPDATE 경로라 그대로 초안이고,
-   발행된 주도 published_at 을 안 건드려 그대로 발행이다(결정 13 은 여기서도 유지된다).
-
-   revision 은 nextRevision 과 같은 규칙으로 단조 증가시킨다 — 같은 ms 안에 두 번 쓰면
-   now 가 기존 값과 같아 revision 이 안 바뀌고, 그럼 CAS 가 통과해 보호가 도로 뚫린다. */
-function claimWeek(db: Db, date: string, now: number) {
-  const weekStart = weekStartOf(toIsoDate(date));
-  return db
-    .insert(scheduleWeeks)
-    .values({ weekStartDate: weekStart, draft: false, publishedAt: null, lastUpdatedAt: now })
-    .onConflictDoUpdate({
-      target: scheduleWeeks.weekStartDate,
-      set: { lastUpdatedAt: sql`max(${scheduleWeeks.lastUpdatedAt} + 1, ${now})` },
-    });
 }
 
 /* 추가 — category 스냅샷을 denormalize 저장하고, 날짜를 받았으면 그 날의 일정 항목까지

@@ -2,7 +2,7 @@
    컴포넌트가 재사용한다. 쓰기는 주 단위 일괄 저장 하나 — 한 주를 통째로 교체한다. */
 
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
-import { toIsoDate, weekDates } from "@/core/calendar";
+import { toIsoDate, weekDates, weekStartOf } from "@/core/calendar";
 import { games, scheduleEntries, scheduleWeeks, type Db, type ScheduleEntry } from "@/db";
 import type { SaveWeekInput } from "./schema";
 
@@ -104,6 +104,46 @@ export class ReferencedGameMissing extends Error {
    때마다 값이 반드시 바뀌게 한다(시계가 뒤로 가도 성립). 순수 함수라 단위 테스트가 못박는다. */
 export function nextRevision(oldRevision: number, now: number): number {
   return now > oldRevision ? now : oldRevision + 1;
+}
+
+/* 게임 폼이 일정 항목을 건드린 주를 **청구(claim)한다** — revision(last_updated_at)을 확보하는
+   것이 전부다. 메타가 있으면 단조 증가시키고, 없으면 기본 상태(draft=0·미발행)로 행을 만든다.
+   소유는 이 파일이 지지만 호출은 `features/games`(addGame·updateGame)가 자기 batch 에 조립해서
+   한다 — D1 은 대화형 트랜잭션이 없어 게임 쓰기와 이 청구가 **한 batch**로 원자화돼야 하기
+   때문이다(features/games/service.ts 의 addGame·updateGame 주석).
+
+   왜 청구하나: saveWeek 은 그 주를 통째로 교체하면서 revision CAS 로 "그 사이 바뀌었으면 거절"을
+   보장한다. 게임 폼이 그 계약 밖에서 항목을 쓰면 열어 둔 편집기가 stale 인 채 CAS 를 통과해
+   방금 만든 항목을 **조용히 지운다**(적대적 리뷰 3·8라운드). 메타가 없으면 올릴 revision 자체가
+   없으므로, 행을 만들어 두는 게 그 구멍을 닫는 유일한 길이다 — 편집기의 null 청구가
+   onConflictDoNothing 으로 0행이 돼 CONFLICT 로 걸린다.
+
+   ── 청구가 도메인 상태를 안 건드린다(이슈 #64 가 연 자리) ─────────────────────────
+   한때 이 함수는 메타 없는 주를 **발행된 채로** 만들었다. "행 없음"이 보드엔 표시로, 공개
+   /schedule 엔 비공개로 읽히던 시절이라 행을 만드는 순간 둘 중 하나가 깨졌고, 날짜가 사라지는
+   쪽보다 한 화면 더 보이는 쪽이 가볍다고 봤다. 그 저울질이 **해제 경로에서 뒤집혔다**: 연결이
+   풀리는 순간 그 항목은 어느 게임에도 안 붙어 보드에서 사라지는데, 바로 그 항목이 시각·자유
+   제목까지 달고 /schedule 에 공개됐다. 관리자가 한 행동은 "이 게임을 그날 한 게 아니다"뿐인데.
+
+   draft 컬럼이 그 저울질 자체를 없앤다(schema.ts 주석). 기본값 0 이 "행 없음"과 같은 뜻이라
+   청구가 만드는 행은 보드에도 공개에도 **아무 변화를 안 준다** — 넣기든 옮기기든 해제든 결과가
+   같아서 연산별로 계약을 쪼갤 필요도 없다. 초안 주(draft=1)는 UPDATE 경로라 그대로 초안이고,
+   발행된 주도 published_at 을 안 건드려 그대로 발행이다(결정 13 은 여기서도 유지된다).
+
+   revision 은 nextRevision 과 같은 규칙으로 단조 증가시킨다 — 같은 ms 안에 두 번 쓰면
+   now 가 기존 값과 같아 revision 이 안 바뀌고, 그럼 CAS 가 통과해 보호가 도로 뚫린다.
+
+   async 가 아니다 — 쿼리 빌더를 그대로 돌려줘야 호출자가 이걸 **자기 batch 에 넣어** 원자성을
+   만든다(async 면 Promise 라 batch 가 못 받는다). 빌더는 thenable 이라 그냥 await 해도 된다. */
+export function claimWeek(db: Db, date: string, now: number) {
+  const weekStart = weekStartOf(toIsoDate(date));
+  return db
+    .insert(scheduleWeeks)
+    .values({ weekStartDate: weekStart, draft: false, publishedAt: null, lastUpdatedAt: now })
+    .onConflictDoUpdate({
+      target: scheduleWeeks.weekStartDate,
+      set: { lastUpdatedAt: sql`max(${scheduleWeeks.lastUpdatedAt} + 1, ${now})` },
+    });
 }
 
 /* 주 단위 일괄 저장 = 그 주 전체 교체(결정 14). 그 주 날짜 범위의 항목을 전부 지운 뒤 보낸 항목을
