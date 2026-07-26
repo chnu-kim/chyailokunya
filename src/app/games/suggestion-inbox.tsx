@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { dateOfInstantKST } from "@/core/calendar";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, resolveErrorMessage } from "@/core/error-message";
 import { formatDate } from "@/core/games";
+import { createInboxLoadMachine } from "@/core/inbox-load.machine";
 import { diffSuggestion, type SuggestionChange } from "@/core/suggestions";
 import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
@@ -25,6 +26,10 @@ const rejectMachine = createSubmitMachine<
   { id: number; wasCapped: boolean },
   { id: number; resolved: boolean; wasCapped: boolean }
 >();
+
+// 목록 로드(#84 — inbox-load 머신). resolvedIds(처리된 항목 집합)를 머신이 직접 소유한다 —
+// inbox-load.machine.ts 주석 참고.
+const inboxLoadMachine = createInboxLoadMachine<SuggestionListItem>();
 
 /* 관리자 제안함(ADR-0025). 팬이 보낸 미처리 제안을 모아 보고, 여기서 **반영을 시작한다** —
    시작만 한다: 「반영하기」는 제안 값을 채운 기존 폼(수정 제안 → GameEditor, 추가 요청 →
@@ -49,10 +54,26 @@ export function SuggestionInbox() {
   /* 미처리 제안 **전체** 수(배지가 쓰는 그 값). 목록은 상한이 있어(INBOX_LIMIT) 이 수보다
      짧을 수 있는데, 그 사실을 화면이 말하지 않으면 관리자가 "제안은 이게 전부"로 오해한다. */
   const pending = BoardOverlay.useSelector((s) => s.context.pending);
-  const [items, setItems] = useState<SuggestionListItem[] | null>(null);
-  // 목록 최초 로드 실패 + 넘친 큐 이어 받기 실패. 거절 자체의 실패·타임아웃은 각 줄이 자기
+  /* 최초 조회는 머신이 마운트 때 자동으로 한다(inbox-load.machine.ts) — 넘친 큐를 이어 받는
+     재조회(아래 onItemRejected)만 이 함수를 다시 쓴다. 규칙을 하나로 묶는 이유는 원본과 같다 —
+     목록을 채우는 규칙이 두 벌이면 한쪽만 고쳐진 채 남는다. signal 을 인자로 받는 건 머신의
+     `run` 계약(호출자가 만들지 않는다, submit.machine.ts 와 같다)과 재조회의 자체 타임아웃
+     둘 다를 이 함수 하나로 만족시키기 위해서다. */
+  const fetchPending = useCallback(
+    (signal: AbortSignal) => trpc.suggestions.list.query(undefined, { signal }),
+    [],
+  );
+
+  const [loadState, sendLoad] = useMachine(inboxLoadMachine, {
+    input: { run: fetchPending, mapError: readErrorMessage },
+  });
+  /* null = 아직 불러오는 중이거나 최초 조회가 실패했다 — 이 하나의 파생값이 loading·failed
+     둘 다에서 null 이라 "목록이 비었다"·"더 있다" 문구가 실패 배너 옆에 함께 뜨는 결함이
+     생기지 않는다(loadState.matches("loaded") 를 매 렌더 조건마다 따로 적을 필요가 없다). */
+  const items = loadState.matches("loaded") ? loadState.context.items : null;
+  // 최초 로드 실패 + 넘친 큐 이어 받기 실패 공용. 거절 자체의 실패·타임아웃은 각 줄이 자기
   // 액터의 context.error 를 인라인으로 그린다(항목마다 독립 액터라 — 위 rejectMachine 주석).
-  const [error, setError] = useState("");
+  const error = loadState.context.error;
   const [closing, setClosing] = useState(false);
   /* 어느 줄이든 거절이 진행 중인가 — 모달 잠금(busy)과 「닫기」에 쓴다. 항목마다 독립 액터라
      여기서 직접 못 보고, 각 InboxItem 이 자기 busy 변화를 보고한 걸 모은다. */
@@ -68,57 +89,24 @@ export function SuggestionInbox() {
     });
   }, []);
 
-  /* 열릴 때 한 번 불러온다. setState 가 await 뒤에서만 일어나므로 effect 안 **동기** setState 를
-     막는 규칙(set-state-in-effect)에 안 걸린다. 처리 뒤 다시 읽는 경로도 이 함수를 쓴다 —
-     목록을 채우는 규칙이 두 벌이면 한쪽만 고쳐진 채 남는다. */
-  /* **읽기만 하고 상태는 안 건드린다.** setState 까지 여기서 하면 effect 가 그걸 동기로 부르는
-     모양이 돼 set-state-in-effect(Next 16 의 error)에 걸린다 — 호출자가 await 뒤에 넣어야 한다. */
-  const fetchPending = useCallback(
-    () =>
-      trpc.suggestions.list.query(undefined, {
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      }),
-    [],
-  );
-
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        const found = await fetchPending();
-        if (alive) setItems(found);
-      } catch (e) {
-        if (alive) setError(readErrorMessage(e));
-      }
-    })();
-    // 응답이 늦게 와도 언마운트 뒤엔 상태를 안 건드린다.
-    return () => {
-      alive = false;
-    };
-  }, [fetchPending]);
-
   /* 넘친 큐를 이어 받는 재조회가 두 번 이상 동시에 나갈 수 있다(항목마다 독립 액터라 여러 줄이
      동시에 wasCapped 로 거절될 수 있어서다 — 적대적 리뷰가 잡은 자리). 응답 도착 순서가 호출
-     순서와 같으리란 보장이 없어 "마지막에 실행된 setItems 가 이긴다"로 두면 **먼저 던졌지만
-     늦게 온** 응답이 나중에 던진(따라서 더 최신인) 응답을 덮어써 방금 처리한 제안이 되살아난다.
-     가장 최근에 던진 요청의 번호만 기억해 두고, 응답이 왔을 때 그 번호가 아니면 버린다 —
-     늦게 온 검색 응답을 버리는 core/games-composer 의 searchSucceeded 판정과 같은 이유다. */
+     순서와 같으리란 보장이 없어 "마지막에 던진 요청의 응답만 반영한다"로 안 걸러내면 **먼저
+     던졌지만 늦게 온** 응답이 나중에 던진(따라서 더 최신인) 응답을 덮어써 방금 처리한 제안이
+     되살아날 수 있다 — 가장 최근에 던진 요청의 번호만 기억해 두고, 응답이 왔을 때 그 번호가
+     아니면 버린다(늦게 온 검색 응답을 버리는 core/games-composer 의 searchSucceeded 판정과
+     같은 이유). **resolvedIds(이미 처리된 항목 집합)는 이 seq 와 별개로 inbox-load 머신이
+     소유한다** — "캡된 재조회가 나가 있는 동안 캡 안 걸린 다른 줄이 거절돼도 되살아나지
+     않는다"(3차 재리뷰가 잡은 자리)는 seq 하나로는 못 막던 결함이라, itemsReplaced 가 그
+     집합으로 걸러 넣는다(inbox-load.machine.ts). */
   const latestFetchSeq = useRef(0);
-  /* seq 만으론 부족하다(재리뷰가 잡은 자리) — 재조회 A(캡됨)가 나가 있는 동안 다른 줄 C 가
-     **캡 안 걸린** 채(A 가 방금 빠져 나가 items.length 가 상한 밑으로 내려간 상태) 거절되면,
-     C 의 거절은 새 재조회를 안 던지므로 seq 로 못 막는다 — A 의 재조회가 서버를 C 의 거절보다
-     먼저 조회했다면 그 응답에 C 가 아직 들어 있어, 도착했을 때(seq 는 아직 최신이라 통과) C 를
-     되살릴 수 있다. 그래서 **거절이 성공한 id 는 wasCapped 여부와 무관하게 전부** 기억해 두고,
-     재조회 응답을 반영할 때 그 집합에 있는 id 를 걸러낸다 — 어느 스냅샷이 오든 우리가 이미
-     확실히 아는 사실(그 id 는 처리됐다)을 덮어쓰지 못하게 한다. */
-  const resolvedIds = useRef<Set<number>>(new Set());
 
   /* 거절 성공의 후처리(목록에서 빼기·배지 갱신·넘친 큐 이어 받기) — 어느 항목이든 이 하나로
      받는다(InboxItem 이 자기 액터의 done 을 여기로 인계한다). */
   function onItemRejected(result: { id: number; resolved: boolean; wasCapped: boolean }) {
-    resolvedIds.current.add(result.id);
-    // 목록에서는 어느 쪽이든 뺀다 — 이미 처리된 줄도 여기 남을 이유가 없다.
-    setItems((prev) => (prev ?? []).filter((i) => i.id !== result.id));
+    // 목록에서는 어느 쪽이든 뺀다 — 이미 처리된 줄도 여기 남을 이유가 없다. resolvedIds 에
+    // 넣는 것도 이 이벤트 하나가 원자적으로 한다(inbox-load.machine.ts 의 itemRemoved).
+    sendLoad({ type: "itemRemoved", id: result.id });
     /* **배지는 우리가 실제로 처리했을 때만 줄인다.** 서버는 미처리인 것만 고치므로(CAS)
        다른 관리자가 먼저 처리했으면 false 가 오는데, 그때도 줄이면 이미 남이 줄인 수에서
        한 번 더 빠져 배지가 실제 미처리 수보다 작아진다. */
@@ -130,16 +118,15 @@ export function SuggestionInbox() {
       const seq = ++latestFetchSeq.current;
       void (async () => {
         try {
-          const found = await fetchPending();
-          if (latestFetchSeq.current === seq) {
-            setItems(found.filter((i) => !resolvedIds.current.has(i.id)));
-            // 이 재조회가 실패해 남긴 낡은 문구가 있다면 지운다 — 방금 성공했으므로 화면이
-            // 여전히 "불러오지 못했다"고 말하면 이미 거짓이다(review 4라운드가 잡은 자리).
-            setError("");
-          }
+          const found = await fetchPending(AbortSignal.timeout(REQUEST_TIMEOUT_MS));
+          // resolvedIds 로 걸러 넣는 건 머신이 한다(itemsReplaced) — 여기서 다시 거르지 않는다.
+          if (latestFetchSeq.current === seq) sendLoad({ type: "itemsReplaced", items: found });
         } catch {
           if (latestFetchSeq.current === seq) {
-            setError("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다.");
+            sendLoad({
+              type: "itemError",
+              message: "다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다.",
+            });
           }
         }
       })();

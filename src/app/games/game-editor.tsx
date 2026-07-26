@@ -1,9 +1,10 @@
 "use client";
 
 import { useMachine } from "@xstate/react";
-import { useEffect, useState } from "react";
-import { REQUEST_TIMEOUT_MS, updateErrorMessage } from "@/core/error-message";
+import { useState } from "react";
+import { updateErrorMessage } from "@/core/error-message";
 import { isPlayDateEditable } from "@/core/games";
+import { playDatesLoadMachine } from "@/core/play-dates-load.machine";
 import { initialPlayDateFor, isPlayDateApplied } from "@/core/suggestions";
 import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
@@ -70,15 +71,10 @@ export function GameEditor() {
     cleared: initial?.cleared ?? game?.cleared ?? false,
     clearedDate: initial?.clearedDate ?? game?.clearedDate ?? "",
   });
-  /* 이 게임의 일정 날짜. null = 아직 불러오는 중(그동안 날짜 입력은 잠긴다 — PlayedDateField
-     주석의 "빈 칸을 날짜 없음으로 오해해 지우는" 자리). */
-  const [dates, setDates] = useState<string[] | null>(null);
   const [playedDate, setPlayedDate] = useState("");
-  /* 열릴 때 읽은 날짜. 두 곳에 쓴다: (1) 사용자가 실제로 고쳤는지 판별해 안 고쳤으면 저장에
-     안 싣고, (2) 실을 땐 precondition 으로 함께 보내 그 사이 딴 데서 바뀌었으면 서버가
-     CONFLICT 를 낸다(schema.playedDateWas). */
-  const [loadedDate, setLoadedDate] = useState("");
-  const [loadFailed, setLoadFailed] = useState(false);
+  // 아래 "렌더 중 setState" 프라이밍 가드가 참조하는 "이미 프라이밍한 dates" — dates 자체를
+  // 셋 이상으로 나누지 않고 이 하나로 "새 로드가 왔는가"를 판정한다.
+  const [primedDates, setPrimedDates] = useState<string[] | null>(null);
   // 닫기 신호. 컴포저와 같은 이유로 성공 즉시 GAME_UPDATED 를 보내지 않는다 — 머신이 같은
   // 커밋에서 이 컴포넌트를 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
   const [manualClosing, setManualClosing] = useState(false);
@@ -105,45 +101,41 @@ export function GameEditor() {
      loadedDate 가 빈 값이라 정상 반영까지 미완으로 떨어진다. */
   const shownDate = game?.lastPlayed ?? "";
 
-  /* 열릴 때 한 번 조회한다. setState 가 await 뒤에서만 일어나므로 effect 안 **동기** setState 를
-     막는 규칙(set-state-in-effect)에 걸리지 않는다. 모달은 editing 이 null 을 거쳐 매번 리마운트
-     되므로 게임이 바뀌면 이 effect 도 다시 돈다 — 의존성에 game.id 를 두는 건 그 사실의 표시다.
+  /* 일정 날짜 조회(#84 — play-dates-load 머신). 마운트 시 자동으로 loading→loaded|failed 로
+     전이한다(더 이상 수동 effect 가 없다 — 언마운트 시 액터가 알아서 멎으므로 원본의 alive
+     플래그도 필요 없다). game 이 null 인 렌더는 실제로 없다(부모가 editingGame !== null 일 때만
+     이 컴포넌트를 마운트한다) — run 이 game!.id 를 읽어도 안전하다(훅은 조건 없이 불러야 하므로
+     가드는 이 안에 둔다). */
+  const [loadState] = useMachine(playDatesLoadMachine, {
+    input: { run: (signal) => trpc.games.playDates.query({ id: game!.id }, { signal }) },
+  });
+  // null = 아직 불러오는 중(그동안 날짜 입력은 잠긴다 — PlayedDateField 주석의 "빈 칸을 날짜
+  // 없음으로 오해해 지우는" 자리).
+  const dates = loadState.matches("loaded") ? loadState.context.dates : null;
+  const loadFailed = loadState.matches("failed");
+  /* 항목이 하나면 그 날짜가 곧 편집 대상이다. 여럿이면 잠기고 저장에 안 실린다(onSave). 두 곳에
+     쓴다: (1) 사용자가 실제로 고쳤는지 판별해 안 고쳤으면 저장에 안 싣고, (2) 실을 땐
+     precondition 으로 함께 보내 그 사이 딴 데서 바뀌었으면 서버가 CONFLICT 를 낸다
+     (schema.playedDateWas). */
+  const loadedDate = dates !== null && dates.length === 1 ? dates[0]! : "";
 
-     game 이 null 인 렌더는 실제로 없다(부모가 editingGame !== null 일 때만 이 컴포넌트를
-     마운트한다) — 훅은 조건 없이 불러야 하므로 가드는 안(내부)에 둔다. */
-  useEffect(() => {
-    if (!game) return;
-    let alive = true;
-    void (async () => {
-      try {
-        const found = await trpc.games.playDates.query(
-          { id: game.id },
-          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
-        );
-        if (!alive) return;
-        setDates(found);
-        // 항목이 하나면 그 날짜가 곧 편집 대상이다. 여럿이면 잠기고 저장에 안 실린다(onSave).
-        const loaded = found.length === 1 ? found[0]! : "";
-        /* **precondition 은 언제나 서버가 준 값이다** — 제안 값으로 덮으면 낙관적 동시성이
-           통째로 무력화된다(서버는 "폼이 열릴 때 본 날짜"로 알고 대조하는데, 실제로는 팬이
-           며칠 전에 적어 낸 값이라 그 사이의 일정 변경을 조용히 되돌린다). 제안이 채우는 건
-           **입력값**뿐이고, 그래서 그 값이 지금 값과 다르면 정상적으로 dateEdited 가 선다. */
-        setLoadedDate(loaded);
-        /* 팬이 **실제로 고친** 날짜만 싣는다 — 제안 스냅샷을 그대로 넣으면 초안 주의 항목처럼
-           팬이 못 본 날짜를 지우라는 지시가 된다(core.initialPlayDateFor). */
-        setPlayedDate(initialPlayDateFor(initialPlayedDate, shownDate, loaded));
-      } catch {
-        if (!alive) return;
-        setLoadFailed(true);
-      }
-    })();
-    // 응답이 늦게 와도 언마운트 뒤엔 상태를 안 건드린다.
-    return () => {
-      alive = false;
-    };
-    /* shownDate 도 싣는다 — 프리필 판정이 이걸 읽으므로 빠지면 낡은 값으로 채운다. game 이 바뀌면
-       game.id 와 함께 바뀌므로 실질적으로 재조회를 늘리지 않는다(모달은 매번 리마운트된다). */
-  }, [game, initialPlayedDate, shownDate]);
+  /* dates 가 처음 채워질 때(참조가 바뀐 순간) 한 번만 playedDate 를 프라이밍한다 — **렌더 중
+     setState** 패턴이다(react.dev "Adjusting state when a prop changes"). useEffect 로 하면
+     setState 가 effect 안에서 동기로 불려 set-state-in-effect(Next 16 error)에 걸린다 — 이
+     패턴은 커밋 뒤 별도 effect 가 아니라 같은 렌더 안에서 갱신을 끝내므로 그 규칙이 안 걸린다.
+     dates 참조는 loading→loaded 전이 때 딱 한 번 바뀌고 이후 재렌더로는 안 바뀌므로, 아래 비교가
+     그 한 번만 통과시킨다 — 가드 없이 매 렌더 돌면 사용자가 그새 고친 값을 되돌린다.
+
+     **precondition 은 언제나 서버가 준 값이다** — 제안 값으로 덮으면 낙관적 동시성이 통째로
+     무력화된다(서버는 "폼이 열릴 때 본 날짜"로 알고 대조하는데, 실제로는 팬이 며칠 전에 적어
+     낸 값이라 그 사이의 일정 변경을 조용히 되돌린다). 제안이 채우는 건 **입력값**(아래
+     initialPlayDateFor)뿐이고, 그래서 그 값이 지금 값과 다르면 정상적으로 dateEdited 가 선다. */
+  if (dates !== null && dates !== primedDates) {
+    setPrimedDates(dates);
+    /* 팬이 **실제로 고친** 날짜만 싣는다 — 제안 스냅샷을 그대로 넣으면 초안 주의 항목처럼
+       팬이 못 본 날짜를 지우라는 지시가 된다(core.initialPlayDateFor). */
+    setPlayedDate(initialPlayDateFor(initialPlayedDate, shownDate, loadedDate));
+  }
 
   // 위 훅 전부를 부른 뒤에만 놓는다(react-hooks/rules-of-hooks) — 실제로는 부모가 editingGame
   // !== null 일 때만 마운트하므로 이 분기는 안 밟힌다.
