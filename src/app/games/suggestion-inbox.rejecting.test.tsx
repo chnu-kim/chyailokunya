@@ -56,4 +56,52 @@ describe("제안 거절 진행 중 표시", () => {
 
     expect(screen.queryByTestId("suggestion-1")).not.toBeInTheDocument();
   });
+
+  /* #80(submit 머신 배선) 리뷰가 잡은 회귀 — 항목마다 독립 액터가 아니라 인박스 전체가 공유하는
+     액터 하나였을 때, 한 줄이 제출 중이면 다른(잠기지 않은) 줄의 거절 클릭이 조용히 무시됐다
+     (XState 가 submitting 상태의 submit 이벤트를 버린다). 버튼이 안 잠긴 채 눌러도 아무 일이
+     안 나는 결함이라 disabled 단언만으로는 못 잡는다 — 실제로 두 번째 뮤테이션이 나가는지까지
+     본다. */
+  it("한 줄이 거절되는 동안 다른 줄을 거절해도 두 요청 모두 나간다", async () => {
+    const items = [makeSuggestion({ id: 1, gameId: 1 }), makeSuggestion({ id: 2, gameId: 1 })];
+    vi.mocked(trpc.suggestions.list.query).mockResolvedValue(items);
+
+    let resolve1!: (v: { resolved: boolean }) => void;
+    let resolve2!: (v: { resolved: boolean }) => void;
+    vi.mocked(trpc.suggestions.resolve.mutate)
+      .mockImplementationOnce(() => new Promise((r) => (resolve1 = r)))
+      .mockImplementationOnce(() => new Promise((r) => (resolve2 = r)));
+
+    render(
+      <SuggestionInbox
+        games={[makeGameCard({ id: 1 })]}
+        pending={2}
+        onApply={() => {}}
+        onResolved={() => {}}
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
+    fireEvent.click(screen.getByTestId("suggestion-reject-2"));
+
+    expect(trpc.suggestions.resolve.mutate).toHaveBeenCalledTimes(2);
+    expect(trpc.suggestions.resolve.mutate).toHaveBeenNthCalledWith(
+      2,
+      { id: 2, resolution: "rejected" },
+      expect.anything(),
+    );
+
+    // 나중에 누른 줄이 먼저 끝나도(응답 순서는 클릭 순서와 무관하다) 독립적으로 처리된다.
+    await act(async () => {
+      resolve2({ resolved: true });
+    });
+    expect(screen.queryByTestId("suggestion-2")).not.toBeInTheDocument();
+    expect(screen.getByTestId("suggestion-reject-1")).toBeDisabled();
+
+    await act(async () => {
+      resolve1({ resolved: true });
+    });
+    expect(screen.queryByTestId("suggestion-1")).not.toBeInTheDocument();
+  });
 });
