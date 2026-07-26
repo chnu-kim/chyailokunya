@@ -1,10 +1,15 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { deleteErrorMessage, REQUEST_TIMEOUT_MS } from "@/core/error-message";
+import { useMachine } from "@xstate/react";
+import { useState } from "react";
+import { deleteErrorMessage } from "@/core/error-message";
+import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameDialog } from "./game-dialog";
+
+// 값이 없다(대상은 game prop 이 정한다) — TValues 를 undefined 로 둔다.
+const removeMachine = createSubmitMachine<undefined, { deleted: boolean }>();
 
 /* 삭제 확인 모달(ADR-0020). 되돌릴 수 없는 행동이라 확인을 **파괴 앞**에 세운다 — 눌러 놓고
    무르는 창을 주는 대신, 누르기 전에 무엇이 사라지는지 보여준다. 포스터·제목을 싣는 건 상세가
@@ -26,27 +31,22 @@ export function GameDeleteConfirm({
   onRemoved: (row: GameCard) => void;
   onClose: () => void;
 }) {
-  const [error, setError] = useState("");
-  const [closing, setClosing] = useState(false);
-  const [removed, setRemoved] = useState(false);
-  const [removing, startRemove] = useTransition();
+  const [manualClosing, setManualClosing] = useState(false);
+  /* run 은 마운트 시점에 얼어붙는다(submit.machine.ts 주석) — game 은 이 모달이 열려 있는 동안
+     안 바뀌는 prop(모달은 게임마다 다시 마운트된다)이라 클로저로 붙잡아도 안전하다. */
+  const [state, send] = useMachine(removeMachine, {
+    input: {
+      run: (_values, signal) => trpc.games.remove.mutate({ id: game.id }, { signal }),
+      // 삭제판 문구다 — writeErrorMessage 는 "저장됐을 수도" 처럼 저장 어휘라 여기선 거짓말이 된다.
+      mapError: deleteErrorMessage,
+    },
+  });
+  const removing = state.matches("submitting");
+  const removed = state.matches("done");
+  const closing = manualClosing || removed;
 
   function onConfirm() {
-    startRemove(async () => {
-      setError("");
-      try {
-        // 상한이 없으면 removing 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
-        await trpc.games.remove.mutate(
-          { id: game.id },
-          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
-        );
-        setRemoved(true);
-        setClosing(true);
-      } catch (e) {
-        // 삭제판 문구다 — writeErrorMessage 는 "저장됐을 수도" 처럼 저장 어휘라 여기선 거짓말이 된다.
-        setError(deleteErrorMessage(e));
-      }
-    });
+    send({ type: "submit", values: undefined });
   }
 
   return (
@@ -93,9 +93,9 @@ export function GameDeleteConfirm({
         삭제하면 되돌릴 수 없습니다. 다시 추가하려면 검색부터 다시 하셔야 합니다.
       </p>
 
-      {error && (
+      {state.context.error && (
         <p className="err" role="alert">
-          {error}
+          {state.context.error}
         </p>
       )}
 
@@ -106,7 +106,7 @@ export function GameDeleteConfirm({
           data-od-id="game-delete-cancel"
           // 삭제가 날아가는 동안은 취소도 막는다 — 닫기와 같은 인계 경쟁이다(GameDialog 주석).
           disabled={removing}
-          onClick={() => setClosing(true)}
+          onClick={() => setManualClosing(true)}
         >
           취소
         </button>

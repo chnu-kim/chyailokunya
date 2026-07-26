@@ -1,13 +1,26 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useMachine } from "@xstate/react";
+import { useEffect, useState } from "react";
 import { REQUEST_TIMEOUT_MS, updateErrorMessage } from "@/core/error-message";
 import { isPlayDateEditable } from "@/core/games";
 import { initialPlayDateFor, isPlayDateApplied } from "@/core/suggestions";
+import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameDialog } from "./game-dialog";
 import { ClearedFields, PlayedDateField, useClearedDraft } from "./game-fields";
+
+/* dateApplied 는 **run 이 계산하지 않는다**(submit.machine.ts 의 stale-run 규칙). run 은
+   마운트 시점에 얼어붙는데, dateApplied 가 읽는 locked 는 비동기로 조회되는 dates 에 의존해
+   마운트 순간엔 늘 dates===null → locked===false 로 계산된다 — ADR-0025 의 "클리어만 반영됐는데
+   제안은 처리됨으로 사라진다" 가드가 조용히 깨진다. 그래서 dateApplied 는 렌더마다 새로 만들어지는
+   onSave 안에서 최신 locked 로 계산해 submit 이벤트의 values 에 실어 보내고, run 은 그 값을
+   그대로 통과시키기만 한다. */
+const editMachine = createSubmitMachine<
+  { payload: Parameters<typeof trpc.games.update.mutate>[0]; dateApplied: boolean },
+  { row: GameCard; dateApplied: boolean }
+>();
 
 /* 게임 수정 모달. 고치는 건 클리어 상태와 플레이 날짜 둘이다 — 제목·포스터는 "무엇을 고치는지"
    확인용으로만 싣는다(게임 자체를 바꾸려면 떼고 다시 붙인다 — categoryId 가 정본 키라 갈아끼우면
@@ -44,7 +57,6 @@ export function GameEditor({
     cleared: initial?.cleared ?? game.cleared,
     clearedDate: initial?.clearedDate ?? game.clearedDate ?? "",
   });
-  const [error, setError] = useState("");
   /* 이 게임의 일정 날짜. null = 아직 불러오는 중(그동안 날짜 입력은 잠긴다 — PlayedDateField
      주석의 "빈 칸을 날짜 없음으로 오해해 지우는" 자리). */
   const [dates, setDates] = useState<string[] | null>(null);
@@ -54,11 +66,22 @@ export function GameEditor({
      CONFLICT 를 낸다(schema.playedDateWas). */
   const [loadedDate, setLoadedDate] = useState("");
   const [loadFailed, setLoadFailed] = useState(false);
-  // 닫기 신호와 인계할 행. 컴포저와 같은 이유로 성공 즉시 onUpdated 를 부르지 않는다 —
-  // 부모가 같은 커밋에서 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
-  const [closing, setClosing] = useState(false);
-  const [saved, setSaved] = useState<{ row: GameCard; dateApplied: boolean } | null>(null);
-  const [saving, startSave] = useTransition();
+  // 닫기 신호. 컴포저와 같은 이유로 성공 즉시 onUpdated 를 부르지 않는다 — 부모가 같은 커밋에서
+  // 언마운트하면 dialog 가 열린 채 빠져 포커스가 body 로 떨어진다.
+  const [manualClosing, setManualClosing] = useState(false);
+  const [state, send] = useMachine(editMachine, {
+    input: {
+      run: (values, signal) =>
+        trpc.games.update.mutate(values.payload, { signal }).then((row) => ({
+          row,
+          dateApplied: values.dateApplied,
+        })),
+      // 수정 전용 문구다 — 이 경로의 CONFLICT 는 중복 게임이 아니라 낡은 플레이 날짜다.
+      mapError: updateErrorMessage,
+    },
+  });
+  const saving = state.matches("submitting");
+  const saved = state.matches("done") ? state.context.result : null;
 
   /* 제안이 채우는 날짜. 객체가 아니라 원시값을 뽑아 두는 건 아래 effect 의존성에 싣기 위해서다 —
      initial 객체는 매 렌더 새로 만들어지므로 그대로 실으면 조회가 무한히 다시 돈다. */
@@ -113,46 +136,35 @@ export function GameEditor({
 
   function onSave(e: React.FormEvent) {
     e.preventDefault();
-    startSave(async () => {
-      setError("");
-      try {
-        /* playedDate 를 **싣지 않는 경우가 둘**이고, 둘 다 "일정을 안 건드린다"는 뜻이다
-           (서버 playDateInput 규약 — 필드 부재).
+    /* playedDate 를 **싣지 않는 경우가 둘**이고, 둘 다 "일정을 안 건드린다"는 뜻이다
+       (서버 playDateInput 규약 — 필드 부재).
 
-           1. 여러 날 편성이라 입력이 잠겼다. 한때 잠금 상태에서 빈 문자열을 실었는데 그게
-              null 로 접혀 "여러 날을 지우려 한다"로 거절돼 **저장이 통째로 막혔다**.
-           2. 사용자가 날짜 칸을 **안 건드렸다.** 안 실어야 하는 이유가 둘이다: 같은 값을
-              되보내면 주 revision 이 올라 열어 둔 편집기가 원인 없는 CONFLICT 를 받고, 더
-              나쁘게는 폼이 열린 뒤 딴 데서 그 항목이 옮겨졌을 때 **stale 한 값이 남의 일정
-              작업을 되돌려 놓는다**(적대적 리뷰 5·6라운드 — 서버도 precondition 으로 막는다).
+       1. 여러 날 편성이라 입력이 잠겼다. 한때 잠금 상태에서 빈 문자열을 실었는데 그게
+          null 로 접혀 "여러 날을 지우려 한다"로 거절돼 **저장이 통째로 막혔다**.
+       2. 사용자가 날짜 칸을 **안 건드렸다.** 안 실어야 하는 이유가 둘이다: 같은 값을
+          되보내면 주 revision 이 올라 열어 둔 편집기가 원인 없는 CONFLICT 를 받고, 더
+          나쁘게는 폼이 열린 뒤 딴 데서 그 항목이 옮겨졌을 때 **stale 한 값이 남의 일정
+          작업을 되돌려 놓는다**(적대적 리뷰 5·6라운드 — 서버도 precondition 으로 막는다).
 
-           날짜를 실제로 고쳤으면 playedDateWas 를 함께 보낸다 — 열었을 때의 값이라 서버가
-           그 사이 바뀌었는지 판정할 수 있다.
-           빈 문자열 → null 전처리의 정본은 서버 updateGameInput(Zod)이다 — 여기서 다시 하지 않는다. */
-        const row = await trpc.games.update.mutate(
-          {
-            id: game.id,
-            cleared: draft.cleared,
-            clearedDate: draft.clearedDate,
-            ...(dateEdited ? { playedDate, playedDateWas: loadedDate } : {}),
-          },
-          // 상한이 없으면 saving 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
-          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
-        );
-        /* 잠금 때문에 날짜를 못 실었는지 여기서 판정해 인계한다 — 부모는 폼의 잠금 상태를
-           못 보고, 저장 결과(row.lastPlayed)만으로는 초안 주 항목이 섞여 판단이 안 선다.
+       날짜를 실제로 고쳤으면 playedDateWas 를 함께 보낸다 — 열었을 때의 값이라 서버가
+       그 사이 바뀌었는지 판정할 수 있다.
+       빈 문자열 → null 전처리의 정본은 서버 updateGameInput(Zod)이다 — 여기서 다시 하지 않는다.
 
-           기준은 **보드가 그리는 날짜**(shownDate)다. loadedDate 로 재면 여러 날 편성일 때 그
-           값이 빈 문자열이라, 클리어만 고치는 정상 반영까지 "날짜를 못 실었다"로 떨어진다. */
-        setSaved({
-          row,
-          dateApplied: isPlayDateApplied(initial?.playedDate ?? shownDate, shownDate, locked),
-        });
-        setClosing(true);
-      } catch (e) {
-        // 수정 전용 문구다 — 이 경로의 CONFLICT 는 중복 게임이 아니라 낡은 플레이 날짜다.
-        setError(updateErrorMessage(e));
-      }
+       dateApplied 도 여기서(렌더마다 새로 만들어지는 이 함수 안에서) 최신 locked 로 계산해
+       함께 보낸다 — run 은 이 값을 받아 그대로 통과시키기만 한다(위 stale-run 주석). 기준은
+       **보드가 그리는 날짜**(shownDate)다. loadedDate 로 재면 여러 날 편성일 때 그 값이 빈
+       문자열이라, 클리어만 고치는 정상 반영까지 "날짜를 못 실었다"로 떨어진다. */
+    send({
+      type: "submit",
+      values: {
+        payload: {
+          id: game.id,
+          cleared: draft.cleared,
+          clearedDate: draft.clearedDate,
+          ...(dateEdited ? { playedDate, playedDateWas: loadedDate } : {}),
+        },
+        dateApplied: isPlayDateApplied(initial?.playedDate ?? shownDate, shownDate, locked),
+      },
     });
   }
 
@@ -169,7 +181,7 @@ export function GameEditor({
       title="게임 수정"
       odId="game-editor"
       className={stacked ? "composer--stacked" : undefined}
-      closing={closing}
+      closing={manualClosing || saved !== null}
       busy={saving}
       dirty={dirty}
       // 삭제 확인과 같은 이유로 X 를 끈다 — 본문에 "취소"가 있다(GameDialog 의 closeButton).
@@ -219,9 +231,9 @@ export function GameEditor({
           </p>
         )}
 
-        {error && (
+        {state.context.error && (
           <p className="err" role="alert">
-            {error}
+            {state.context.error}
           </p>
         )}
 
@@ -232,7 +244,7 @@ export function GameEditor({
             data-od-id="game-editor-cancel"
             // 저장이 날아가는 동안은 취소도 막는다 — 닫기와 같은 인계 경쟁이다(GameDialog 주석).
             disabled={saving}
-            onClick={() => setClosing(true)}
+            onClick={() => setManualClosing(true)}
           >
             취소
           </button>

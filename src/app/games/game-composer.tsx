@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState, useTransition } from "react";
+import { useMachine } from "@xstate/react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "@/core/error-message";
 import type { ChzzkCategory } from "@/core/games";
 import {
@@ -15,10 +16,13 @@ import {
   showsDirectEntry,
   type ComposerActiveMove,
 } from "@/core/games-composer";
+import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameDialog } from "./game-dialog";
 import { ClearedFields, PlayedDateField, useClearedDraft } from "./game-fields";
+
+const addMachine = createSubmitMachine<Parameters<typeof trpc.games.add.mutate>[0], GameCard>();
 
 /* 게임 추가 컴포저(ADR-0015·0017). 두 단계다:
 
@@ -113,9 +117,6 @@ export function GameComposer({
     initial?.query ?? "",
     composerStateWithQuery,
   );
-  /* 상세 단계의 서버 쓰기 에러만 여기 든다. 검색 에러(state.searchError)는 리듀서 소관이다 —
-     응답이 늦게 도착할 때 어느 단계에 속한 문구인지 판단하는 건 전이 규칙이라서. */
-  const [addError, setAddError] = useState("");
   /* 플레이 날짜·클리어(둘 다 선택). 리듀서가 아니라 여기 사는 이유: 단계 전이 규칙이 아니라
      폼 값이라서다. 대신 단계를 옮기는 두 핸들러(뒤로·다른 게임 선택)가 이 값을 직접 비운다 —
      effect 로 step 을 보고 비우면 effect 안 동기 setState 라 set-state-in-effect(Next 16
@@ -125,13 +126,24 @@ export function GameComposer({
     cleared: initial?.cleared ?? false,
     clearedDate: initial?.clearedDate ?? "",
   });
-  /* 닫기 신호와, 닫힌 뒤에 부모에게 넘길 행. 추가 성공 즉시 onAdded 를 부르면 부모가 같은
-     커밋에서 컴포저를 언마운트해 닫기 effect 가 아예 안 돌고, 열린 채로 DOM 에서 빠져 포커스가
-     body 로 떨어진다. 그래서 성공은 행을 쥐고 신호만 세우고, 실제 인계는 브라우저가 dialog 를
-     닫은 뒤 오는 onClose 이벤트에서 한다. */
-  const [closing, setClosing] = useState(false);
-  const [added, setAdded] = useState<GameCard | null>(null);
-  const [adding, startAdd] = useTransition();
+  /* 닫기 신호. 추가 성공 즉시 onAdded 를 부르면 부모가 같은 커밋에서 컴포저를 언마운트해 닫기
+     effect 가 아예 안 돌고, 열린 채로 DOM 에서 빠져 포커스가 body 로 떨어진다. 그래서 성공은
+     addState.matches("done") 신호만 세우고(context.result 가 곧 인계할 행이다), 실제 인계는
+     브라우저가 dialog 를 닫은 뒤 오는 onClose 이벤트에서 한다. */
+  const [manualClosing, setManualClosing] = useState(false);
+  const [addState, sendAdd] = useMachine(addMachine, {
+    input: {
+      run: (values, signal) => trpc.games.add.mutate(values, { signal }),
+      mapError: writeErrorMessage,
+    },
+  });
+  const adding = addState.matches("submitting");
+  const added = addState.matches("done") ? addState.context.result : null;
+  /* "뒤로"·다른 게임 선택으로 폼을 되돌리면(resetDraft) 옛 실패 문구를 억제한다 — 머신
+     자체는 다음 submit 전까지 error 를 들고 있는데, 그대로 두면 실패했던 게임에서 물러나
+     **다른** 게임을 골랐을 때 그 게임 탓이 아닌 옛 에러가 다시 뜬다. 새 submit 이 시작되면
+     푼다(onAdd). */
+  const [dismissedError, setDismissedError] = useState(false);
 
   const { selected } = state;
   const step = composerStep(state);
@@ -292,29 +304,21 @@ export function GameComposer({
   function onAdd(e: React.FormEvent) {
     e.preventDefault();
     if (!selected) return;
-    startAdd(async () => {
-      setAddError("");
-      try {
-        // 필드를 그대로 옮길 뿐 여기서 trim·empty→null 을 다시 하지 않는다 — 그 정규화의
-        // 정본은 games.add 뮤테이션의 addGameInput(Zod) 하나다(중복 정규화 금지).
-        const row = await trpc.games.add.mutate(
-          {
-            categoryId: selected.categoryId,
-            categoryType: "GAME",
-            categoryValue: selected.categoryValue,
-            posterImageUrl: selected.posterImageUrl,
-            playedDate,
-            cleared: draft.cleared,
-            clearedDate: draft.clearedDate,
-          },
-          // 상한이 없으면 busy 가 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
-          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
-        );
-        setAdded(row);
-        setClosing(true);
-      } catch (e) {
-        setAddError(writeErrorMessage(e));
-      }
+    // 새 시도가 시작됐다 — 다른 게임을 고른 뒤 남아 있던 옛 에러 억제를 푼다(아래 dismissedError).
+    setDismissedError(false);
+    // 필드를 그대로 옮길 뿐 여기서 trim·empty→null 을 다시 하지 않는다 — 그 정규화의 정본은
+    // games.add 뮤테이션의 addGameInput(Zod) 하나다(중복 정규화 금지).
+    sendAdd({
+      type: "submit",
+      values: {
+        categoryId: selected.categoryId,
+        categoryType: "GAME",
+        categoryValue: selected.categoryValue,
+        posterImageUrl: selected.posterImageUrl,
+        playedDate,
+        cleared: draft.cleared,
+        clearedDate: draft.clearedDate,
+      },
     });
   }
 
@@ -330,14 +334,14 @@ export function GameComposer({
   function resetDraft() {
     setPlayedDate(initial?.playedDate ?? "");
     setDraft({ cleared: initial?.cleared ?? false, clearedDate: initial?.clearedDate ?? "" });
-    setAddError("");
+    setDismissedError(true);
   }
 
   return (
     <GameDialog
       title="게임 추가"
       odId="composer"
-      closing={closing}
+      closing={manualClosing || added !== null}
       busy={adding}
       /* 뒤로가기도 이 셋을 태운다. **여기가 보드에서 유일하게 미저장 입력을 든 화면이라**
          빠지면 안 되는 자리다 — 상세만 히스토리에 얹었던 앞 판에선 검색해서 고른 뒤의
@@ -388,9 +392,9 @@ export function GameComposer({
             disabled={adding}
           />
 
-          {addError && (
+          {!dismissedError && addState.context.error && (
             <p className="err" role="alert">
-              {addError}
+              {addState.context.error}
             </p>
           )}
 

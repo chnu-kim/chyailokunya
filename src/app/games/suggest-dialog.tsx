@@ -1,11 +1,21 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { REQUEST_TIMEOUT_MS, suggestErrorMessage } from "@/core/error-message";
+import { useMachine } from "@xstate/react";
+import { useState } from "react";
+import { suggestErrorMessage } from "@/core/error-message";
+import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { GameDialog } from "./game-dialog";
 import { ClearedFields, GameFacts, useClearedDraft } from "./game-fields";
+
+/* TValues 는 trpc 뮤테이션의 **입력**(파싱 전) 타입을 그대로 뽑아 쓴다 — Zod 스키마의
+   z.infer(출력, dateInput 이 브랜딩·nullable 로 바꾼 뒤)가 아니라 폼이 실제로 들고 있는
+   raw string 셋과 일치해야 한다. */
+const suggestMachine = createSubmitMachine<
+  Parameters<typeof trpc.suggestions.create.mutate>[0],
+  void
+>();
 
 /* 팬이 보내는 제안 폼(ADR-0025). 한 컴포넌트가 두 종류를 그린다 — 대상 게임이 있으면 수정 제안,
    없으면 추가 요청이다. 나누지 않는 이유는 폼 로직(값 셋·한마디·제출·미저장 가드)이 같아서고,
@@ -42,30 +52,30 @@ export function SuggestDialog({
     clearedDate: game?.clearedDate ?? "",
   });
   const [note, setNote] = useState("");
-  const [error, setError] = useState("");
-  /* 닫기 신호와 "보냈다" 표시. 성공 즉시 onSent 를 부르지 않는 건 컴포저·수정과 같은 규약이다 —
-     부모가 같은 커밋에서 언마운트하면 dialog 가 열린 채 DOM 에서 빠져 포커스가 body 로 떨어진다. */
-  const [closing, setClosing] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [sending, startSend] = useTransition();
+  /* 닫기 신호. 성공 즉시 onSent 를 부르지 않는 건 컴포저·수정과 같은 규약이다 — 부모가 같은
+     커밋에서 언마운트하면 dialog 가 열린 채 DOM 에서 빠져 포커스가 body 로 떨어진다. "보냈다"
+     표시는 state.matches("done") 이 대신한다(성공해도 닫지 않고 화면만 바꾸므로 별도 신호가
+     아니라 머신 상태 그 자체가 정본이다). */
+  const [manualClosing, setManualClosing] = useState(false);
+  const [state, send] = useMachine(suggestMachine, {
+    input: {
+      run: (values, signal) => trpc.suggestions.create.mutate(values, { signal }).then(() => {}),
+      mapError: suggestErrorMessage,
+    },
+  });
+  const sending = state.matches("submitting");
+  const sent = state.matches("done");
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    startSend(async () => {
-      setError("");
-      try {
-        /* 값 셋은 늘 함께 싣는다 — 제안은 목표 상태 스냅샷이라 "안 보냄"과 "지움"을 가를 필요가
-           없다(core/suggestions 주석). 빈 문자열 → null 전처리의 정본은 서버 Zod 다. */
-        const values = { cleared: draft.cleared, clearedDate: draft.clearedDate, playedDate, note };
-        await trpc.suggestions.create.mutate(
-          game ? { kind: "edit", gameId: game.id, ...values } : { kind: "add", title, ...values },
-          // 상한이 없으면 sending 이 안 풀려 닫기 잠금에 갇힌다(REQUEST_TIMEOUT_MS 주석).
-          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
-        );
-        setSent(true);
-      } catch (e) {
-        setError(suggestErrorMessage(e));
-      }
+    /* 값 셋은 늘 함께 싣는다 — 제안은 목표 상태 스냅샷이라 "안 보냄"과 "지움"을 가를 필요가
+       없다(core/suggestions 주석). 빈 문자열 → null 전처리의 정본은 서버 Zod 다. */
+    const values = { cleared: draft.cleared, clearedDate: draft.clearedDate, playedDate, note };
+    send({
+      type: "submit",
+      values: game
+        ? { kind: "edit", gameId: game.id, ...values }
+        : { kind: "add", title, ...values },
     });
   }
 
@@ -88,7 +98,8 @@ export function SuggestDialog({
       title={game ? "수정 제안" : "게임 추가 요청"}
       odId="game-suggest"
       className={stacked ? "composer--stacked" : undefined}
-      closing={closing}
+      // done 이어도 자동으로 안 닫는다 — 성공은 화면을 sent 로 바꿀 뿐, 닫기는 사용자의 「닫기」뿐이다.
+      closing={manualClosing}
       busy={sending}
       dirty={dirty}
       /* **최상위로 뜰 때만 히스토리를 차지한다**(= 보드의 「게임 추가 요청」). 이 폼은 미저장
@@ -132,7 +143,7 @@ export function SuggestDialog({
               className="btn btn--primary composer__btn"
               type="button"
               data-od-id="suggest-done"
-              onClick={() => setClosing(true)}
+              onClick={() => setManualClosing(true)}
             >
               닫기
             </button>
@@ -256,9 +267,9 @@ export function SuggestDialog({
             </p>
           </div>
 
-          {error && (
+          {state.context.error && (
             <p className="err" role="alert">
-              {error}
+              {state.context.error}
             </p>
           )}
 
@@ -269,7 +280,7 @@ export function SuggestDialog({
               data-od-id="suggest-cancel"
               // 보내는 동안은 취소도 막는다 — 닫기와 같은 인계 경쟁이다(GameDialog 주석).
               disabled={sending}
-              onClick={() => setClosing(true)}
+              onClick={() => setManualClosing(true)}
             >
               취소
             </button>
