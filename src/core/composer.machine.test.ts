@@ -90,6 +90,24 @@ describe("단계 전이", () => {
     expect(run(...searched("젤다", [zelda])).value).toEqual({ search: "hasResults" });
     expect(run(...searched("젤다", [zelda]), pick(zelda)).value).toBe("detail");
   });
+
+  /* 적대적 리뷰가 잡은 자리 — target 을 자식 지정 없이 "search"로 두면 XState 가 항상 초기
+     자식(beforeResults)으로 들어가, 결과를 남긴 채 돌아온 화면인데도 계층 상태값은
+     "검색 전"이라고 말한다. state.matches({search:"hasResults"}) 로 목록을 그리는 호출자가
+     생기면 이 어긋남이 곧장 "결과가 있는데 빈 화면"으로 번진다. */
+  it("결과를 남긴 채 뒤로 가면 계층 상태값도 hasResults 로 돌아간다 — beforeResults 로 떨어지면 안 된다", () => {
+    const s = run(...searched("젤다", [zelda, mario]), pick(zelda), { type: "back" });
+    expect(s.value).toEqual({ search: "hasResults" });
+  });
+
+  it("검색 결론이 안 난 채(searched=false) 상세로 간 뒤 뒤로 가면 beforeResults 로 돌아간다", () => {
+    // searchSucceeded 를 한 번도 안 거쳐 searched 가 그대로 false 인 경로 — 실제 화면에선
+    // 결과를 클릭해야만 picked 가 나가지만, 리듀서 자체엔 그 순서를 강제하는 가드가 없다
+    // (원본 games-composer.ts 도 같았다). back 이 이 값 하나로 갈 곳을 정하는지가 관심사다.
+    const s = run({ type: "queryChanged", query: "젤다" }, pick(zelda), { type: "back" });
+    expect(s.value).toEqual({ search: "beforeResults" });
+    expect(s.context.searched).toBe(false);
+  });
 });
 
 /* 언제 요청을 내보내는가. 화면의 debounce effect 가 이 판정 하나만 보고 쏘므로 여기가 정본이다.

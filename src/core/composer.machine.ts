@@ -273,11 +273,25 @@ export const composerMachine = setup({
       on: {
         /* results 는 그대로 두어야 잘못 고른 뒤 다시 검색어를 치지 않고 목록에서 옆 항목을
            고를 수 있다. searchError·activeIndex 는 picked 가 이미 비웠지만, "검색 단계로
-           돌아온 화면에 옛 값이 없다"를 이 전이 하나로도 보장해 둔다. */
-        back: {
-          target: "search",
-          actions: assign({ selected: null, searchError: "", activeIndex: -1 }),
-        },
+           돌아온 화면에 옛 값이 없다"를 이 전이 하나로도 보장해 둔다.
+
+           **target 을 "search"(자식 지정 없음)로 두면 안 된다.** XState 는 그러면 항상
+           초기 자식 beforeResults 로 들어가는데, 결과를 남긴 채(searched=true·results 채움)
+           돌아오는 흔한 경로(고르고 → 뒤로)에서 계층 상태값(beforeResults)과 context(결과
+           있음)가 서로 다른 말을 한다 — 적대적 리뷰가 실측으로 잡은 자리(searchSucceeded →
+           picked → back 이 `{search:"beforeResults"}`를 내는데 results.length 는 1). 지금
+           context.searched 를 그대로 물어 그 값이 가리키는 자식으로 돌아간다. */
+        back: [
+          {
+            guard: ({ context }) => context.searched,
+            target: "search.hasResults",
+            actions: assign({ selected: null, searchError: "", activeIndex: -1 }),
+          },
+          {
+            target: "search.beforeResults",
+            actions: assign({ selected: null, searchError: "", activeIndex: -1 }),
+          },
+        ],
       },
     },
   },
