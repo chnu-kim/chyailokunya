@@ -215,6 +215,41 @@ describe("제안 거절 진행 중 표시", () => {
 
     expect(screen.queryByTestId("suggestion-2")).not.toBeInTheDocument();
   });
+
+  /* advisor 점검 — busy 는 effect 로만 꺼진다(켜질 때만 onReject 안에서 동기로 앞당긴다, 위
+     onReject 주석). 실패 경로가 실제로 그 effect 를 타 busyIds 를 비우는지 못 박는다 — 안
+     그러면 실패한 거절이 「닫기」를 영구히 잠근 채 남는다. */
+  it("거절이 실패해도 잠금이 풀려 「닫기」를 다시 누를 수 있다", async () => {
+    const items = [makeSuggestion({ id: 1, gameId: 1 })];
+    vi.mocked(trpc.suggestions.list.query).mockResolvedValue(items);
+
+    let rejectMutate!: (e: unknown) => void;
+    vi.mocked(trpc.suggestions.resolve.mutate).mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectMutate = reject;
+      }),
+    );
+
+    render(
+      <SuggestionInbox
+        games={[makeGameCard({ id: 1 })]}
+        pending={1}
+        onApply={() => {}}
+        onResolved={() => {}}
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
+    expect(screen.getByTestId("inbox-close")).toBeDisabled();
+
+    await act(async () => {
+      rejectMutate(new Error("network"));
+    });
+
+    expect(screen.getByTestId("suggestion-reject-1")).not.toBeDisabled();
+    expect(screen.getByTestId("inbox-close")).not.toBeDisabled();
+  });
 });
 
 /* 3차 재리뷰(review)가 잡은 자리 하나는 여기 테스트로 못박지 않는다 — busy 보고가 effect(렌더
