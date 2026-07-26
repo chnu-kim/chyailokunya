@@ -1,21 +1,20 @@
 "use client";
 
 import { useMachine } from "@xstate/react";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "@/core/error-message";
 import type { ChzzkCategory } from "@/core/games";
 import {
   composerActiveOption,
+  composerMachine,
   composerNeedsSearch,
   composerOptionCount,
-  composerReducer,
   composerResultIndex,
-  composerStateWithQuery,
   composerStep,
   DIRECT_ENTRY_INDEX,
   showsDirectEntry,
   type ComposerActiveMove,
-} from "@/core/games-composer";
+} from "@/core/composer.machine";
 import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
@@ -44,9 +43,9 @@ const addMachine = createSubmitMachine<Parameters<typeof trpc.games.add.mutate>[
    검색은 **타이핑이 멈추면 자동으로** 나간다(SEARCH_DEBOUNCE_MS). 「검색」 버튼이 있던 앞 판은
    조작이 한 단계 더 있었고, 그 단계가 안 보여서 사용자는 입력만 하고 결과를 기다렸다.
 
-   단계 사이의 전이 규칙(선택·뒤로·직접 입력)은 전부 core/games-composer 의 순수 리듀서가
-   쥔다 — 이 파일은 그리기와 통신만 한다. 그래야 "뒤로 갔다 다른 게임을 고르면 결과 목록이
-   남는가" 같은 전이 버그를 DOM 없이 단위 테스트가 잡는다. */
+   단계 사이의 전이 규칙(선택·뒤로·직접 입력)은 전부 core/composer.machine 의 상태차트가
+   쥔다(에픽 #77 이슈 #83) — 이 파일은 그리기와 통신만 한다. 그래야 "뒤로 갔다 다른 게임을
+   고르면 결과 목록이 남는가" 같은 전이 버그를 DOM 없이 단위 테스트가 잡는다. */
 
 /* 타이핑이 멈춘 걸로 치는 시간. 한글은 조합 중에도 input 이 발화해 자모 단위로 요청이 나갈
    수 있어(‘ㅁ’→‘마’→‘마ㅇ’…) 너무 짧으면 쓸모없는 검색이 쌓이고, 길면 결과가 굼떠 보인다.
@@ -60,7 +59,7 @@ const SEARCH_DEBOUNCE_MS = 350;
    항목 id 를 치지직이 준 categoryId 가 아니라 **인덱스**로 짓는 이유: 그 값은 외부 API 가
    주는 문자열이라 공백·따옴표가 섞이면 IDREF 가 깨지는데, aria-activedescendant 는 IDREF 라
    깨져도 예외 하나 없이 낭독만 조용해진다. 인덱스가 뜻을 바꾸는 순간은 결과가 갈릴 때뿐이고
-   그때 리듀서가 커서를 접는다. 컴포저는 화면에 하나뿐이라(보드가 한 번만 렌더한다) 접두사
+   그때 머신이 커서를 접는다. 컴포저는 화면에 하나뿐이라(보드가 한 번만 렌더한다) 접두사
    충돌도 없다 — 이미 입력 id 가 같은 규약으로 고정돼 있다. */
 const RESULTS_ID = "composer-results";
 const INPUT_HINT_ID = "composer-input-hint";
@@ -111,13 +110,14 @@ export function GameComposer() {
   const searchRef = useRef<HTMLInputElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
   /* 검색어만 채우면 debounce effect 가 평소 경로 그대로 검색을 발사한다(core 의
-     composerStateWithQuery 주석) — "열자마자 한 번 쏘기" 같은 별도 배선을 안 만드는 이유다. */
-  const [state, dispatch] = useReducer(
-    composerReducer,
-    initial?.query ?? "",
-    composerStateWithQuery,
-  );
-  /* 플레이 날짜·클리어(둘 다 선택). 리듀서가 아니라 여기 사는 이유: 단계 전이 규칙이 아니라
+     composer.machine 의 ComposerInput 주석) — "열자마자 한 번 쏘기" 같은 별도 배선이
+     필요 없다. useMachine 의 input 은 마운트 시점에 한 번만 읽힌다(렌더마다 바뀌어도
+     무시된다, submit.machine.ts 의 "run 은 얼어붙는다" 계약과 같다) — 이 컴포넌트는
+     board-overlay 의 composing 상태일 때만 새로 마운트되므로 그 한 번이 곧 여는 순간이다. */
+  const [state, send] = useMachine(composerMachine, {
+    input: { query: initial?.query ?? "" },
+  });
+  /* 플레이 날짜·클리어(둘 다 선택). 머신이 아니라 여기 사는 이유: 단계 전이 규칙이 아니라
      폼 값이라서다. 대신 단계를 옮기는 두 핸들러(뒤로·다른 게임 선택)가 이 값을 직접 비운다 —
      effect 로 step 을 보고 비우면 effect 안 동기 setState 라 set-state-in-effect(Next 16
      error)에 걸린다. */
@@ -145,13 +145,13 @@ export function GameComposer() {
      푼다(onAdd). */
   const [dismissedError, setDismissedError] = useState(false);
 
-  const { selected } = state;
-  const step = composerStep(state);
-  const query = state.query.trim();
-  /* 목록에 그려지는 항목 수와 지금 활성인 항목. 둘 다 리듀서 쪽 셀렉터를 쓴다 — 여기서 다시
+  const { selected } = state.context;
+  const step = composerStep(state.context);
+  const query = state.context.query.trim();
+  /* 목록에 그려지는 항목 수와 지금 활성인 항목. 둘 다 머신 쪽 셀렉터를 쓴다 — 여기서 다시
      세면 화면과 커서가 서로 다른 목록을 보게 된다. */
-  const optionCount = composerOptionCount(state);
-  const activeOption = composerActiveOption(state);
+  const optionCount = composerOptionCount(state.context);
+  const activeOption = composerActiveOption(state.context);
 
   /* 단계가 바뀌면 포커스를 그 단계의 첫 조작점으로 옮긴다. 단계를 여는 버튼(결과 항목·뒤로·
      직접 입력)은 전부 **자기 자신을 언마운트**하므로, 안 옮기면 포커스가 dialog 로 떨어져
@@ -167,12 +167,12 @@ export function GameComposer() {
   }, [step]);
 
   /* 검색 발사. 응답에 실어 보낼 검색어는 **제출 순간의 입력값 그대로**(trim 전)여야 한다 —
-     리듀서가 state.query 와 문자열 동등으로 비교해 늦게 온 응답을 버리기 때문이다. 서버로
+     머신이 context.query 와 문자열 동등으로 비교해 늦게 온 응답을 버리기 때문이다. 서버로
      나갈 때만 trim 한다. */
   async function runSearch(submitted: string) {
     const q = submitted.trim();
     if (!q) return;
-    dispatch({ type: "searchStarted" });
+    send({ type: "searchStarted" });
     try {
       /* 상한이 없으면 응답이 영영 안 와도 화면이 '찾는 중…' 에 굳는다 — 실패로 떨어져야
          사용자가 검색어를 고쳐 다시 시도할 수 있다. */
@@ -180,14 +180,14 @@ export function GameComposer() {
         { query: q, size: 12 },
         { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
       );
-      dispatch({ type: "searchSucceeded", query: submitted, results: found });
+      send({ type: "searchSucceeded", query: submitted, results: found });
     } catch (e) {
-      dispatch({ type: "searchFailed", query: submitted, message: readErrorMessage(e) });
+      send({ type: "searchFailed", query: submitted, message: readErrorMessage(e) });
     }
   }
 
-  /* 타이핑이 멈추면 자동으로 검색한다. 의존성이 state.query 라 한 글자마다 타이머가 새로
-     걸리고 앞 타이머는 cleanup 이 지운다 — 그게 debounce 다.
+  /* 타이핑이 멈추면 자동으로 검색한다. 의존성이 state.context.query 라 한 글자마다 타이머가
+     새로 걸리고 앞 타이머는 cleanup 이 지운다 — 그게 debounce 다.
 
      effect 안에서 **동기로** 상태를 건드리지 않는다(setTimeout 콜백 안이라 Next 16 의
      set-state-in-effect 에 안 걸린다).
@@ -198,33 +198,35 @@ export function GameComposer() {
      실제로 그렇게 새어 있었다(그 실측은 core 의 searchSucceeded 주석). searched 를 그 판정에
      넣었으니 **의존성 배열에도 함께 싣는다** — 안 실으면 결론이 난 뒤에도 옛 판정이 남는다. */
   useEffect(() => {
-    if (!composerNeedsSearch(state)) return;
-    const timer = setTimeout(() => void runSearch(state.query), SEARCH_DEBOUNCE_MS);
+    if (!composerNeedsSearch(state.context)) return;
+    const timer = setTimeout(() => void runSearch(state.context.query), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
     /* state 전체가 아니라 판정이 읽는 세 값만 싣는다. runSearch 는 안 싣는다 — 매 렌더 새로
        만들어지지만 읽는 건 인자로 들어오는 검색어뿐이고, 실으면 타이머가 매 렌더 새로 걸려
        debounce 가 통째로 죽는다. */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.query, state.searched, selected]);
+  }, [state.context.query, state.context.searched, selected]);
 
   /* 활성 항목이 스크롤 밖이면 끌어온다. 목록은 카드 본문(.composer__body)이 스크롤하는데
      scroll-behavior:smooth 는 html 에만 걸려 있어 여기선 즉시 이동이다 — 새 애니메이션이
      아니라 감축 가드가 따로 필요 없다. block:"nearest" 라 이미 보이는 항목은 화면을 안 흔든다.
      effect 안에서 상태를 안 건드리므로 set-state-in-effect 에도 안 걸린다. */
   useEffect(() => {
-    if (state.activeIndex < 0) return;
-    document.getElementById(optionId(state.activeIndex))?.scrollIntoView({ block: "nearest" });
-  }, [state.activeIndex]);
+    if (state.context.activeIndex < 0) return;
+    document
+      .getElementById(optionId(state.context.activeIndex))
+      ?.scrollIntoView({ block: "nearest" });
+  }, [state.context.activeIndex]);
 
   /* 항목을 고른다. **Enter 와 클릭이 같은 함수를 탄다** — 갈라 두면 한쪽만 고쳐진 채로 오래
      간다(키보드 경로는 눈에 안 띄니 늘 그쪽이 남는다). */
   function choose(option: ChzzkCategory | "direct") {
     resetDraft();
     if (option === "direct") {
-      dispatch({ type: "manualPicked" });
+      send({ type: "manualPicked" });
       return;
     }
-    dispatch({
+    send({
       type: "picked",
       selection: {
         categoryId: option.categoryId,
@@ -253,9 +255,9 @@ export function GameComposer() {
          흘려보낸 Esc 를 곧장 dialog 가 받는 건 아니다: type=search 라 검색어가 남아 있으면
          UA 가 먼저 값을 비우고, 그러고도 남는 Esc 가 모달을 닫는다(실측). 우리 규칙이 아니라
          UA 동작이라 그대로 두고, 순서는 e2e 가 못박는다. */
-      if (state.activeIndex < 0) return;
+      if (state.context.activeIndex < 0) return;
       e.preventDefault();
-      dispatch({ type: "activeMoved", to: "none" });
+      send({ type: "activeMoved", to: "none" });
       return;
     }
 
@@ -274,7 +276,7 @@ export function GameComposer() {
          깨진다. */
       if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
       // 캐럿은 UA 기본 동작에 맡긴다(preventDefault 안 한다) — 활성 옵션이 있으면 그것만 접는다.
-      if (state.activeIndex >= 0) dispatch({ type: "activeMoved", to: "none" });
+      if (state.context.activeIndex >= 0) send({ type: "activeMoved", to: "none" });
       return;
     }
 
@@ -282,23 +284,23 @@ export function GameComposer() {
     const to = ARROW_MOVES[e.key];
     if (!to) return;
     e.preventDefault();
-    dispatch({ type: "activeMoved", to });
+    send({ type: "activeMoved", to });
   }
 
   /* 아직 답을 못 받은 검색이 있는가 — **debounce 대기와 요청 중을 하나로 묶는다.** 사용자에겐
      둘이 같은 사건("치고 기다리는 중")이고, 가르면 타이핑이 멈춘 350ms 동안 목록도 안내도 없는
      빈 화면이 스친다. searched·searchError 둘 다 아직 없다는 건 이 검색어의 결론이 안 났다는
      뜻이다(queryChanged 가 둘을 함께 비운다). */
-  const finding = query !== "" && !state.searched && state.searchError === "";
+  const finding = query !== "" && !state.context.searched && state.context.searchError === "";
 
   /* 아래 라이브 리전이 읽을 문구. 검색 실패는 여기서 말하지 않는다 — 그건 role="alert" 문단이
      삽입되며 이미 알린다(같은 사실을 두 번 말하는 게 더 나쁘다). 상세 단계에선 비운다:
      화면에 없는 목록을 계속 말하고 있으면 뒤로 돌아왔을 때 다시 알려 줄 변화가 없다. */
   const searchStatus =
-    selected || !state.searched
+    selected || !state.context.searched
       ? ""
-      : state.results.length > 0
-        ? `‘${query}’ 검색 결과 ${state.results.length}건입니다.`
+      : state.context.results.length > 0
+        ? `‘${query}’ 검색 결과 ${state.context.results.length}건입니다.`
         : `‘${query}’ 검색 결과가 없습니다. 목록 맨 위에서 직접 추가할 수 있습니다.`;
 
   function onAdd(e: React.FormEvent) {
@@ -419,7 +421,7 @@ export function GameComposer() {
               // 쓰기가 날아가는 동안은 뒤로도 막는다 — 닫기와 같은 인계 경쟁이다(GameDialog 주석).
               disabled={adding}
               onClick={() => {
-                dispatch({ type: "back" });
+                send({ type: "back" });
                 resetDraft();
               }}
             >
@@ -450,7 +452,7 @@ export function GameComposer() {
               type="search"
               id="composer-input"
               placeholder="예) 마인크래프트"
-              value={state.query}
+              value={state.context.query}
               ref={searchRef}
               autoComplete="off"
               role="combobox"
@@ -462,10 +464,10 @@ export function GameComposer() {
               /* 가리키는 항목이 없으면 **속성 자체를 뺀다.** 빈 문자열이나 없는 id 를 남기면
                  AT 는 "가리키는 항목이 있다"고 믿고 그걸 찾다가 입력 낭독까지 조용해진다. */
               aria-activedescendant={
-                state.activeIndex >= 0 ? optionId(state.activeIndex) : undefined
+                state.context.activeIndex >= 0 ? optionId(state.context.activeIndex) : undefined
               }
               aria-describedby={INPUT_HINT_ID}
-              onChange={(e) => dispatch({ type: "queryChanged", query: e.target.value })}
+              onChange={(e) => send({ type: "queryChanged", query: e.target.value })}
               onKeyDown={onSearchKeyDown}
               data-od-id="composer-input"
             />
@@ -478,9 +480,9 @@ export function GameComposer() {
             </p>
           </form>
 
-          {state.searchError && (
+          {state.context.searchError && (
             <p className="err" role="alert">
-              {state.searchError}
+              {state.context.searchError}
             </p>
           )}
 
@@ -538,18 +540,19 @@ export function GameComposer() {
 
                 앞에 !finding 가드가 하나 더 있었다. showsDirectEntry 는 searched 를 요구하고
                 finding 은 !searched 를 요구하니 둘은 같은 시점에 참일 수 없어 늘 통과하던
-                조건이었고, 남겨 두면 "이 줄이 그려지는가"의 답이 두 군데가 되어 리듀서가 세는
+                조건이었고, 남겨 두면 "이 줄이 그려지는가"의 답이 두 군데가 되어 머신이 세는
                 항목 수와 어긋날 여지가 생긴다. */}
-            {showsDirectEntry(state) && (
+            {showsDirectEntry(state.context) && (
               <li
                 className={
-                  optionClass(state.activeIndex === DIRECT_ENTRY_INDEX) + " composer__pick--direct"
+                  optionClass(state.context.activeIndex === DIRECT_ENTRY_INDEX) +
+                  " composer__pick--direct"
                 }
                 id={optionId(DIRECT_ENTRY_INDEX)}
                 role="option"
-                aria-selected={state.activeIndex === DIRECT_ENTRY_INDEX}
+                aria-selected={state.context.activeIndex === DIRECT_ENTRY_INDEX}
                 data-od-id="composer-direct"
-                onMouseMove={() => dispatch({ type: "activeSet", index: DIRECT_ENTRY_INDEX })}
+                onMouseMove={() => send({ type: "activeSet", index: DIRECT_ENTRY_INDEX })}
                 onClick={() => choose("direct")}
               >
                 <span className="composer__directmark" aria-hidden="true">
@@ -561,16 +564,16 @@ export function GameComposer() {
               </li>
             )}
 
-            {state.results.map((c, i) => {
-              const idx = composerResultIndex(state, i);
+            {state.context.results.map((c, i) => {
+              const idx = composerResultIndex(state.context, i);
               return (
                 <li
-                  className={optionClass(state.activeIndex === idx)}
+                  className={optionClass(state.context.activeIndex === idx)}
                   key={c.categoryId}
                   id={optionId(idx)}
                   role="option"
-                  aria-selected={state.activeIndex === idx}
-                  onMouseMove={() => dispatch({ type: "activeSet", index: idx })}
+                  aria-selected={state.context.activeIndex === idx}
+                  onMouseMove={() => send({ type: "activeSet", index: idx })}
                   onClick={() => choose(c)}
                 >
                   {c.posterImageUrl ? (
