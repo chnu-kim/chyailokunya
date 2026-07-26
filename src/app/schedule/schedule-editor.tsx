@@ -1,19 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useMachine } from "@xstate/react";
+import { useEffect } from "react";
 import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
-import { isAborted, REQUEST_TIMEOUT_MS } from "@/core/error-message";
+import { isAborted } from "@/core/error-message";
 import {
-  addEntry,
-  draftEntryInputs,
   entriesForDate,
   isWeekDirty,
-  makeDraftEntry,
-  newEntryKey,
-  removeEntry,
-  updateEntry,
+  type DraftEntry,
   type WeekDraft,
 } from "@/core/schedule-editor";
+import { scheduleSaveMachine } from "@/core/schedule-save.machine";
 import type { GameOption } from "@/features/games/service";
 import type { WeekView } from "@/features/schedule/service";
 import { trpc } from "@/features/trpc/client";
@@ -24,10 +21,12 @@ import { formatMD, WeekNav } from "./schedule-shared";
    그 항목이 게임 보드의 플레이 날짜를 유도한다(발행하면, ADR-0022). 이 화면이 saveWeek 라우터의
    프로덕션 소비자라, 머지 시점에 테스트만 보증하는 API 가 남지 않는다(ADR-0010).
 
-   상태 전이(더하기·빼기·고치기·정렬·dirty)의 정본은 core/schedule-editor 의 순수 함수다 —
-   이 파일은 그리기와 통신만 한다(games-composer/게임 보드와 같은 결). 모달이 아니라 인라인
-   스프레드시트형인 이유: "한 주를 통으로 기획"하는 행위라 7일이 한눈에 보이고 바로 고쳐지는
-   편이 맞고, 게임 보드의 모달 CSS 에 기대지 않아 그 페이지와 회귀가 격리된다.
+   상태 전이(더하기·빼기·고치기·정렬·dirty)의 정본은 core/schedule-editor 의 순수 함수다.
+   draft·baseline·revision·error·announcement·저장 중 여부는 그 함수들을 자식 submit 액터와
+   함께 감싼 core/schedule-save.machine(에픽 #77 이슈 #85)이 쥔다 — 이 파일은 그리기와 이벤트
+   전달만 한다(games-composer/게임 보드와 같은 결). 모달이 아니라 인라인 스프레드시트형인 이유:
+   "한 주를 통으로 기획"하는 행위라 7일이 한눈에 보이고 바로 고쳐지는 편이 맞고, 게임 보드의
+   모달 CSS 에 기대지 않아 그 페이지와 회귀가 격리된다.
 
    게임 연결은 **보드에 이미 있는 게임 중에서** 고른다(항목의 game_id 는 games.id FK). 치지직
    검색으로 새 게임을 편집기 안에서 바로 추가하는 길(결정 11)은 이 PR 범위 밖이다 — 새 게임은
@@ -87,19 +86,24 @@ export function ScheduleEditor({
   games: GameOption[];
   currentWeek: string;
 }) {
-  const [draft, setDraft] = useState<WeekDraft>(() => weekToDraft(initialWeek));
-  // 마지막으로 저장된 기준선. dirty 판정과 "이탈 경고"가 이걸 draft 와 견준다.
-  const [baseline, setBaseline] = useState<WeekDraft>(() => weekToDraft(initialWeek));
-  /* 불러온 시점의 주 revision. 저장에 되돌려 보내 그 사이 누가 저장했는지 서버가 판정한다
-     (service.saveWeek). draft 가 아니라 여기 따로 두는 이유: 편집 내용이 아니라 서버가 준
-     동시성 토큰이라 core 의 WeekDraft 에 섞으면 dirty 비교에 끼어든다. 저장이 성공하면 서버가
-     준 새 값으로 갈아 끼워야 연속 저장이 이어진다(안 갈면 두 번째 저장이 자기 자신과 충돌한다). */
-  const [revision, setRevision] = useState(initialWeek.revision);
-  const [error, setError] = useState("");
-  const [announcement, setAnnouncement] = useState("");
-  const [saving, startSave] = useTransition();
-  // 새 항목 키의 단조 카운터 — core 는 순수라 상태를 못 들어 여기서 센다.
-  const seqRef = useRef(0);
+  /* schedule-save 머신이 draft·baseline·revision·error·announcement·저장 중 여부를 전부 쥔다
+     (core/schedule-save.machine.ts). run·mapError·initialDraft·initialRevision 은 마운트
+     시점에 얼어붙는다(submit 머신의 계약과 같다) — 이 컴포넌트는 주가 바뀔 때마다 `key` 로
+     리마운트되므로(page.tsx) 그걸로 충분하다. */
+  const [state, send] = useMachine(scheduleSaveMachine, {
+    input: {
+      weekStartDate,
+      initialDraft: weekToDraft(initialWeek),
+      initialRevision: initialWeek.revision,
+      run: async (values, signal) => {
+        const saved = await trpc.schedule.saveWeek.mutate(values, { signal });
+        return { draft: weekToDraft(saved), revision: saved.revision };
+      },
+      mapError: saveErrorMessage,
+    },
+  });
+  const { draft, baseline, error, announcement } = state.context;
+  const saving = state.matches("saving");
   const gamesById = new Map(games.map((g) => [g.id, g]));
   const days = weekDates(toIsoDate(weekStartDate));
   const dirty = isWeekDirty(draft, baseline);
@@ -146,41 +150,16 @@ export function ScheduleEditor({
   }, [dirty]);
 
   function addForDay(date: string) {
-    const entry = makeDraftEntry(newEntryKey(seqRef.current++), date);
-    setDraft((d) => addEntry(d, entry));
+    send({ type: "ENTRY_ADDED", date });
   }
   function remove(key: string) {
-    setDraft((d) => removeEntry(d, key));
+    send({ type: "ENTRY_REMOVED", key });
   }
-  function patch(key: string, p: Parameters<typeof updateEntry>[2]) {
-    setDraft((d) => updateEntry(d, key, p));
+  function patch(key: string, p: Partial<Omit<DraftEntry, "key">>) {
+    send({ type: "ENTRY_PATCHED", key, patch: p });
   }
-
   function onSave() {
-    startSave(async () => {
-      setError("");
-      try {
-        const saved = await trpc.schedule.saveWeek.mutate(
-          {
-            weekStartDate,
-            revision,
-            note: draft.note,
-            published: draft.published,
-            entries: draftEntryInputs(draft),
-          },
-          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
-        );
-        const next = weekToDraft(saved);
-        setDraft(next);
-        setBaseline(next);
-        setRevision(saved.revision);
-        setAnnouncement(
-          draft.published ? "일정을 저장하고 발행했습니다" : "일정을 저장했습니다(초안)",
-        );
-      } catch (e) {
-        setError(saveErrorMessage(e));
-      }
-    });
+    send({ type: "SAVE" });
   }
 
   return (
@@ -210,7 +189,7 @@ export function ScheduleEditor({
             placeholder="예: 이번 주는 젤다 위주로 달립니다"
             value={draft.note}
             data-od-id="schedule-note-input"
-            onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
+            onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
           />
         </label>
 
@@ -325,7 +304,7 @@ export function ScheduleEditor({
               type="checkbox"
               checked={draft.published}
               data-od-id="schedule-publish"
-              onChange={(e) => setDraft((d) => ({ ...d, published: e.target.checked }))}
+              onChange={(e) => send({ type: "PUBLISHED_CHANGED", published: e.target.checked })}
             />
             <span className="sched-publish__label">
               발행{" "}
