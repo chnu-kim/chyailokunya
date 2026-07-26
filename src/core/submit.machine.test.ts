@@ -95,6 +95,32 @@ describe("submitMachine", () => {
     expect(actor.getSnapshot().context.result).toBe("r2");
   });
 
+  /* 적대적 리뷰가 잡은 자리 — done 을 재사용하는 호출자(suggestion-inbox)가 첫 성공 뒤 다음
+     제출에서 실패하면, context.result 가 옛 성공값을 그대로 들고 있어선 안 된다. s.matches("done")
+     검사를 빼먹은 자리에서 그 값을 "지금 제출의 결과"로 오독하게 되기 때문이다. */
+  it("done 뒤 다음 제출이 실패하면 이전 성공의 result 가 남지 않는다", async () => {
+    let attempt = 0;
+    const actor = start<number, string>(
+      async (v) => {
+        attempt += 1;
+        if (attempt === 1) return "first ok";
+        throw new Error("second fails");
+      },
+      () => "실패",
+    );
+    actor.send({ type: "submit", values: 1 });
+    await waitFor(actor, (s) => s.matches("done"));
+    expect(actor.getSnapshot().context.result).toBe("first ok");
+
+    actor.send({ type: "submit", values: 2 });
+    // 실패로 정착하기 전, submitting 진입 시점에 이미 지워져 있어야 한다.
+    expect(actor.getSnapshot().context.result).toBeUndefined();
+
+    await waitFor(actor, (s) => s.matches("idle") && s.context.error !== "");
+    expect(actor.getSnapshot().context.result).toBeUndefined();
+    expect(actor.getSnapshot().context.error).toBe("실패");
+  });
+
   it("run 이 받는 signal 은 REQUEST_TIMEOUT_MS 로 만든 AbortSignal 이다 — 호출자가 만들지 않는다", async () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     let seenSignal: AbortSignal | undefined;

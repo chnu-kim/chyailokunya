@@ -56,7 +56,10 @@ export function createSubmitMachine<TValues, TResult>() {
         on: {
           submit: {
             target: "submitting",
-            actions: assign({ error: "", values: ({ event }) => event.values }),
+            /* result 도 지운다 — 안 지우면 done 을 재사용하는 호출자(suggestion-inbox)가 실패
+               뒤에도 이전 성공의 결과를 context 에 들고 있어, s.matches("done") 검사를 빼먹은
+               자리에서 옛 성공을 새 제출의 결과로 오독할 수 있다(적대적 리뷰가 잡은 자리). */
+            actions: assign({ error: "", result: undefined, values: ({ event }) => event.values }),
           },
         },
       },
@@ -75,12 +78,13 @@ export function createSubmitMachine<TValues, TResult>() {
           },
         },
       },
-      // idle 과 같은 전이를 그대로 반복한다 — 위 "done 은 final 이 아니다" 참고.
+      // idle 과 같은 전이를 그대로 반복한다(result 를 지우는 이유도 같다) — 위 "done 은 final 이
+      // 아니다" 참고.
       done: {
         on: {
           submit: {
             target: "submitting",
-            actions: assign({ error: "", values: ({ event }) => event.values }),
+            actions: assign({ error: "", result: undefined, values: ({ event }) => event.values }),
           },
         },
       },
