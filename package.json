@@ -30,12 +30,14 @@
     "@opennextjs/cloudflare": "^1.20.1",
     "@trpc/client": "^11.18.0",
     "@trpc/server": "^11.18.0",
+    "@xstate/react": "^6.1.0",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.3",
     "next": "^16.2.10",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "temporal-polyfill": "^1.0.1",
+    "xstate": "^5.32.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
