@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
 import { REQUEST_TIMEOUT_MS, suggestErrorMessage } from "./error-message";
-import { ClearedFields, GameDialog, GameFacts, useClearedDraft } from "./game-dialog";
+import { GameDialog } from "./game-dialog";
+import { ClearedFields, GameFacts, useClearedDraft } from "./game-fields";
 
 /* 팬이 보내는 제안 폼(ADR-0025). 한 컴포넌트가 두 종류를 그린다 — 대상 게임이 있으면 수정 제안,
    없으면 추가 요청이다. 나누지 않는 이유는 폼 로직(값 셋·한마디·제출·미저장 가드)이 같아서고,
