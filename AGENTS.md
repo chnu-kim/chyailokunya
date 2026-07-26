@@ -43,7 +43,7 @@
 ```bash
 npm run dev            # 로컬 개발 (http://localhost:3000)
 npm run build          # next build (컴파일 + 타입체크 + 정적 생성)
-npm test               # Vitest — workerd 안에서 단위 테스트
+npm test               # Vitest — workerd(서버·도메인·머신) + dom(클라이언트 컴포넌트) 두 프로젝트
 npm run typecheck      # tsc --noEmit (strict)
 npm run lint           # eslint (flat config)
 npm run boundaries     # dependency-cruiser 레이어 경계
@@ -131,7 +131,8 @@ inline`). 그 위 스크랩북 크롬·페이지 CSS 는 손으로 튜닝한 값
    Zod 경계를 반드시 통과시킨다. 쓰기라면 서버에서 역할 인가
    ([ADR-0012](./docs/adr/0012-role-based-writes-allowlist.md)).
 4. **UI 는 `src/components/ui`·`src/app`.** 프리미티브는 features 를 쓰되 db/core 를 직접
-   건드리지 않는다.
+   건드리지 않는다. 배선(상태 전이·이벤트 반응)을 못박고 싶으면 `src/app/**/*.test.tsx` —
+   dom 프로젝트(happy-dom + `@testing-library/react`, ADR-0008)가 돈다.
 5. **검증.** `npm run typecheck && npm run lint && npm run boundaries && npm test && npm run build`.
    시각 변경이면 Playwright 스냅샷.
 6. 굵직한 아키텍처 결정을 했으면 **ADR 을 추가**한다(`docs/adr/template.md` 복사).
