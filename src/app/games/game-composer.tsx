@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useReducer, useRef, useState, useTransition } from "react";
+import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "@/core/error-message";
+import type { ChzzkCategory } from "@/core/games";
 import {
   composerActiveOption,
   composerNeedsSearch,
@@ -13,10 +15,8 @@ import {
   showsDirectEntry,
   type ComposerActiveMove,
 } from "@/core/games-composer";
-import type { ChzzkCategory } from "@/core/games";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
-import { readErrorMessage, REQUEST_TIMEOUT_MS, writeErrorMessage } from "./error-message";
 import { GameDialog } from "./game-dialog";
 import { ClearedFields, PlayedDateField, useClearedDraft } from "./game-fields";
 

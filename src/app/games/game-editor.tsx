@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { REQUEST_TIMEOUT_MS, updateErrorMessage } from "@/core/error-message";
 import { isPlayDateEditable } from "@/core/games";
 import { initialPlayDateFor, isPlayDateApplied } from "@/core/suggestions";
 import type { GameCard } from "@/features/games/service";
 import { trpc } from "@/features/trpc/client";
-import { REQUEST_TIMEOUT_MS, updateErrorMessage } from "./error-message";
 import { GameDialog } from "./game-dialog";
 import { ClearedFields, PlayedDateField, useClearedDraft } from "./game-fields";
 

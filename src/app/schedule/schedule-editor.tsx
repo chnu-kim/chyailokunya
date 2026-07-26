@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
+import { isAborted, REQUEST_TIMEOUT_MS } from "@/core/error-message";
 import {
   addEntry,
   draftEntryInputs,
@@ -16,7 +17,6 @@ import {
 import type { GameOption } from "@/features/games/service";
 import type { WeekView } from "@/features/schedule/service";
 import { trpc } from "@/features/trpc/client";
-import { isAborted, REQUEST_TIMEOUT_MS } from "../games/error-message";
 import { formatMD, WeekNav } from "./schedule-shared";
 
 /* 주간 일괄 편집기(이슈 #56 작업순서 6, 결정 12·14). PR #59 가 games.played_at 을 드롭하며 없앤
