@@ -1,5 +1,5 @@
 import { afterEach } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 /* 이 저장소는 test.globals 를 안 켠다(다른 설정과 같은 명시성 원칙) — 그래서
@@ -9,3 +9,7 @@ import "@testing-library/jest-dom/vitest";
 afterEach(() => {
   cleanup();
 });
+
+// e2e 가 이미 쓰는 손잡이(data-od-id)를 dom 테스트도 그대로 쓴다 — 셀렉터 규약이 두 러너에서
+// 갈리지 않는다.
+configure({ testIdAttribute: "data-od-id" });
