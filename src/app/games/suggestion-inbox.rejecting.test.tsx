@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import { SuggestionInbox } from "./suggestion-inbox";
 import { makeGameCard, makeSuggestion } from "./test-fixtures";
+import { INBOX_LIMIT } from "@/features/suggestions/service";
 
 /* 특성화 8(#78) — 제안함 거절 진행 중 표시(rejectingId). 버튼 하나만 잠가야 한다 — 전체를
    잠그면 다른 줄도 못 읽는다(suggestion-inbox.tsx 주석). */
@@ -103,5 +104,63 @@ describe("제안 거절 진행 중 표시", () => {
       resolve1({ resolved: true });
     });
     expect(screen.queryByTestId("suggestion-1")).not.toBeInTheDocument();
+  });
+
+  /* PR #94 재리뷰가 잡은 회귀 — 항목마다 독립 액터를 두어 동시 거절을 허용하게 되면서, 상한
+     (INBOX_LIMIT)을 넘겨 두 줄이 동시에 거절되면 각자 던진 재조회(fetchPending) 응답이 도착
+     순서대로 그냥 덮어써졌다. 나중에 던진(더 최신인) 재조회의 응답이 먼저 온 뒤 먼저 던진(더
+     낡은) 응답이 늦게 오면, 그 낡은 응답이 최신 목록을 덮어써 방금 거절한 항목이 되살아난다 —
+     seq 토큰으로 가장 최근에 던진 요청만 반영하게 고쳤다. */
+  it("상한을 넘겨 동시에 거절해도 늦게 도착한 낡은 재조회가 최신 상태를 덮지 않는다", async () => {
+    const items = Array.from({ length: INBOX_LIMIT }, (_, i) => makeSuggestion({ id: i + 1 }));
+
+    let resolveReject1!: (v: { resolved: boolean }) => void;
+    let resolveReject2!: (v: { resolved: boolean }) => void;
+    vi.mocked(trpc.suggestions.resolve.mutate)
+      .mockImplementationOnce(() => new Promise((r) => (resolveReject1 = r)))
+      .mockImplementationOnce(() => new Promise((r) => (resolveReject2 = r)));
+
+    let resolveFetch1!: (v: ReturnType<typeof makeSuggestion>[]) => void;
+    let resolveFetch2!: (v: ReturnType<typeof makeSuggestion>[]) => void;
+    vi.mocked(trpc.suggestions.list.query)
+      .mockResolvedValueOnce(items) // 최초 로드
+      .mockImplementationOnce(() => new Promise((r) => (resolveFetch1 = r))) // item1 이 던지는 재조회
+      .mockImplementationOnce(() => new Promise((r) => (resolveFetch2 = r))); // item2 가 던지는 재조회
+
+    render(
+      <SuggestionInbox
+        games={[]}
+        pending={INBOX_LIMIT}
+        onApply={() => {}}
+        onResolved={() => {}}
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("suggestion-reject-1"));
+    fireEvent.click(screen.getByTestId("suggestion-reject-2"));
+
+    // item1 이 먼저 정착해 재조회 #1(더 낡음)을 던진다.
+    await act(async () => {
+      resolveReject1({ resolved: true });
+    });
+    // item2 가 뒤이어 정착해 재조회 #2(더 최신)를 던진다.
+    await act(async () => {
+      resolveReject2({ resolved: true });
+    });
+
+    // 응답은 던진 순서와 반대로 도착한다 — 더 최신인 #2 가 먼저, 더 낡은 #1 이 나중에.
+    const freshSnapshot = items.slice(2); // 1·2 둘 다 이미 없는 최신 서버 상태
+    const staleSnapshot = [...items.slice(2), makeSuggestion({ id: 2 })]; // #1 을 던질 때는 item2 가 아직 안 지워졌었다
+
+    await act(async () => {
+      resolveFetch2(freshSnapshot);
+    });
+    await act(async () => {
+      resolveFetch1(staleSnapshot);
+    });
+
+    // 낡은 응답(#1)이 나중에 와도 item2 가 되살아나면 안 된다.
+    expect(screen.queryByTestId("suggestion-2")).not.toBeInTheDocument();
   });
 });

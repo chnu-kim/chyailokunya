@@ -1,7 +1,7 @@
 "use client";
 
 import { useMachine } from "@xstate/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { dateOfInstantKST } from "@/core/calendar";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, resolveErrorMessage } from "@/core/error-message";
 import { formatDate } from "@/core/games";
@@ -102,6 +102,14 @@ export function SuggestionInbox({
     };
   }, [fetchPending]);
 
+  /* 넘친 큐를 이어 받는 재조회가 두 번 이상 동시에 나갈 수 있다(항목마다 독립 액터라 여러 줄이
+     동시에 wasCapped 로 거절될 수 있어서다 — 적대적 리뷰가 잡은 자리). 응답 도착 순서가 호출
+     순서와 같으리란 보장이 없어 "마지막에 실행된 setItems 가 이긴다"로 두면 **먼저 던졌지만
+     늦게 온** 응답이 나중에 던진(따라서 더 최신인) 응답을 덮어써 방금 처리한 제안이 되살아난다.
+     가장 최근에 던진 요청의 번호만 기억해 두고, 응답이 왔을 때 그 번호가 아니면 버린다 —
+     늦게 온 검색 응답을 버리는 core/games-composer 의 searchSucceeded 판정과 같은 이유다. */
+  const latestFetchSeq = useRef(0);
+
   /* 거절 성공의 후처리(목록에서 빼기·배지 갱신·넘친 큐 이어 받기) — 어느 항목이든 이 하나로
      받는다(InboxItem 이 자기 액터의 done 을 여기로 인계한다). */
   function onItemRejected(result: { id: number; resolved: boolean; wasCapped: boolean }) {
@@ -115,11 +123,15 @@ export function SuggestionInbox({
     // 이 읽기가 실패해도 거절은 이미 성공했다 — "거절 실패"로 말하면 거짓이 되므로 별도
     // 문구를 쓴다(화면은 한 줄 줄어든 채 남고, 다시 열면 채워진다).
     if (result.wasCapped) {
+      const seq = ++latestFetchSeq.current;
       void (async () => {
         try {
-          setItems(await fetchPending());
+          const found = await fetchPending();
+          if (latestFetchSeq.current === seq) setItems(found);
         } catch {
-          setError("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다.");
+          if (latestFetchSeq.current === seq) {
+            setError("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다.");
+          }
         }
       })();
     }
