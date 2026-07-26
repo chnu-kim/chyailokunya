@@ -490,11 +490,23 @@ Phase 4(인증)에서 밟은 것:
   `done`+`useTransition`+타임아웃 세트가 6곳에 복붙됐다(에픽 #77 실측). 상태차트는 그
   조합·원자성을 가드로 강제한다.
 
-  **진행 중이다**(에픽 #77, 하위 #78~#85). **`xstate` 의존성과 DOM 테스트 프로젝트가 아직
-  없다** — 이 판정은 그 둘이 들어가는 #78 PR 2 가 머지된 뒤부터 적용된다. 그 전까지 새
-  클라이언트 상태는 지금 방식(`useState`/`useRef`)을 그대로 쓴다 — 규칙을 미리 적어 두는
-  이유는 PR 2 가 들어오는 순간부터 예외 없이 적용하기 위해서다. 에픽이 끝나면(PR 19) 실제로
-  짠 8종 머신을 반영해 이 문단의 표현을 다듬는다.
+  **완료됐다**(에픽 #77, 하위 #78~#85, 2026-07-27). 실제로 짠 머신은 여덟이고, 새 클라이언트
+  상태를 짤 땐 아래에서 수명·공유 범위가 비슷한 자리를 찾아 그대로 따라간다:
+
+  | 머신              | 파일                              | 수명                                                  | 대체한 것                                                            |
+  | ----------------- | --------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------- |
+  | `board-overlay`   | `core/board-overlay.machine.ts`   | 화면 공유(`createActorContext`)                       | 모달 스택 `useState` 6 + `ref` 1                                     |
+  | `submit`          | `core/submit.machine.ts`          | 폼 지역(`useMachine`) × 6곳                           | `error`+`closing`+`done`+`useTransition`+타임아웃 복붙               |
+  | `dialog-shell`    | `core/dialog-shell.machine.ts`    | 폼 지역(`useMachine`)                                 | `confirmingDiscard` + `latest` ref + 가드                            |
+  | `dialog-history`  | `core/dialog-history.machine.ts`  | **앱 전역 액터**(`app/games/dialog-history.actor.ts`) | 모듈 싱글턴 히스토리 컨트롤러                                        |
+  | `composer`        | `core/composer.machine.ts`        | 폼 지역(`useMachine`)                                 | 게임 검색 콤보박스 순수 리듀서(액션 9종) 이관                        |
+  | `play-dates-load` | `core/play-dates-load.machine.ts` | 폼 지역(`useMachine`)                                 | 편집기 날짜 로드(`dates`/`loadedDate`/`loadFailed`)                  |
+  | `inbox-load`      | `core/inbox-load.machine.ts`      | 폼 지역(`useMachine`)                                 | 제안함 목록 로드 + 항목별 거절 상태                                  |
+  | `schedule-save`   | `core/schedule-save.machine.ts`   | 화면 공유(`useMachine`)                               | 주간 일정 CAS 저장(`revision`·`seqRef`), `submit` 을 자식으로 invoke |
+
+  전부 `src/core/<name>.machine.ts`(순수, workerd 단위 테스트) + 배선은 `src/app/**`
+  (`@xstate/react`, dom 프로젝트)로 나뉜다. 부수효과(`history.pushState`/`popstate`)는 머신 밖
+  `*.actor.ts` 가 맡는다 — `dialog-history` 가 그 유일한 사례다.
 
 - **날짜·시각 컬럼은 개념이 이름과 타입을 함께 정한다.** 세 종류가 있고 섞지 않는다:
 
