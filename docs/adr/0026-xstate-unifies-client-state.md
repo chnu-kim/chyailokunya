@@ -141,7 +141,9 @@ activeElement` 관측(모달 닫힘 후 트리거 포커스 복원 포함), `ine
 - (+) `submit` 류 복붙 6곳이 머신 하나로 줄어든다.
 - (+) DOM 프로젝트가 클라이언트 배선을 초 단위로 잡는다 — 지금은 e2e 뿐이라 D1 픽스처 공유
   간섭(`fullyParallel`)까지 겹쳐 있었다.
-- (−) 번들 크기가 늘어난다(`xstate`+`@xstate/react`) — 실측치는 #80(첫 머신 배선) PR 에
-  적는다.
+- (−) 번들 크기가 늘어난다(`xstate`+`@xstate/react`) — 실측(#80, `submit` 머신 5곳 배선):
+  `.next/static/chunks/*.js` 총합이 914,751 → 956,746 bytes, **+41,995 bytes(약 41KB)**.
+  머신 도입 자체(사용처 0)는 tree-shaking으로 델타가 0이었다 — 늘어난 건 실제로 5곳이
+  `xstate`/`@xstate/react`를 import 해 번들에 들어간 시점부터다.
 - (−) 부수효과를 core 밖 `*.actor.ts` 로 빼는 규약이 하나 늘어난다 — 안 지키면 core 가
   순수를 잃어 workerd 단위 테스트가 죽는다.

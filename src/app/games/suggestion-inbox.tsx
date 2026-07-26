@@ -1,14 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useMachine } from "@xstate/react";
+import { useCallback, useEffect, useState } from "react";
 import { dateOfInstantKST } from "@/core/calendar";
 import { readErrorMessage, REQUEST_TIMEOUT_MS, resolveErrorMessage } from "@/core/error-message";
 import { formatDate } from "@/core/games";
 import { diffSuggestion, type SuggestionChange } from "@/core/suggestions";
+import { createSubmitMachine } from "@/core/submit.machine";
 import type { GameCard } from "@/features/games/service";
 import { INBOX_LIMIT, type SuggestionListItem } from "@/features/suggestions/service";
 import { trpc } from "@/features/trpc/client";
 import { GameDialog } from "./game-dialog";
+
+/* 제안함은 열려 있는 동안 항목마다 여러 번 거절을 보낸다 — 이 머신 인스턴스 하나를
+   재사용한다(submit.machine.ts 의 "done 은 final 이 아니다" 참고). values 에 wasCapped 를 함께
+   싣는 이유는 stale-run 규칙 때문이다: run 은 마운트 시점에 얼어붙어 그때의 items.length 를
+   못 읽으므로, 클릭 시점에 계산한 값을 실어 보낸다(game-editor 의 dateApplied 와 같은 패턴). */
+const rejectMachine = createSubmitMachine<
+  { id: number; wasCapped: boolean },
+  { id: number; resolved: boolean; wasCapped: boolean }
+>();
 
 /* 관리자 제안함(ADR-0025). 팬이 보낸 미처리 제안을 모아 보고, 여기서 **반영을 시작한다** —
    시작만 한다: 「반영하기」는 제안 값을 채운 기존 폼(수정 제안 → GameEditor, 추가 요청 →
@@ -40,11 +51,25 @@ export function SuggestionInbox({
   onClose: () => void;
 }) {
   const [items, setItems] = useState<SuggestionListItem[] | null>(null);
+  // 목록 최초 로드 실패. 거절 자체의 실패·타임아웃은 rejectState.context.error 가 맡는다.
   const [error, setError] = useState("");
   const [closing, setClosing] = useState(false);
-  const [rejecting, startReject] = useTransition();
-  // 지금 거절 중인 줄. 버튼 하나만 잠그려면 id 가 필요하다(전체를 잠그면 다른 줄도 못 읽는다).
-  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [rejectState, sendReject] = useMachine(rejectMachine, {
+    input: {
+      run: (values, signal) =>
+        trpc.suggestions.resolve
+          .mutate({ id: values.id, resolution: "rejected" }, { signal })
+          .then(({ resolved }) => ({ id: values.id, resolved, wasCapped: values.wasCapped })),
+      mapError: resolveErrorMessage,
+    },
+  });
+  const rejecting = rejectState.matches("submitting");
+  // 지금 거절 중인 줄 — 버튼 하나만 잠그려면 id 가 필요하다(전체를 잠그면 다른 줄도 못 읽는다).
+  // submitting 진입 전엔 values 가 없을 수 있어(idle/done) rejecting 으로 먼저 가드한다.
+  const rejectingId = rejecting ? (rejectState.context.values?.id ?? null) : null;
+  // 넘친 큐를 이어 받다 실패했을 때만 쓰는 문구 — 거절 자체는 성공했으므로 rejectState.context.error
+  // 를 그대로 쓰면 "거절 실패"로 거짓말이 된다(원본 코드의 별도 catch와 같은 이유).
+  const [refetchError, setRefetchError] = useState("");
 
   /* 열릴 때 한 번 불러온다. setState 가 await 뒤에서만 일어나므로 effect 안 **동기** setState 를
      막는 규칙(set-state-in-effect)에 안 걸린다. 처리 뒤 다시 읽는 경로도 이 함수를 쓴다 —
@@ -75,42 +100,53 @@ export function SuggestionInbox({
     };
   }, [fetchPending]);
 
+  /* 거절 성공의 후처리(목록에서 빼기·배지 갱신·넘친 큐 이어 받기) — run 이 아니라 여기서 한다.
+     run 은 마운트 시점에 얼어붙어 onResolved 같은 최신 콜백을 못 붙잡지만(stale-run 규칙),
+     이 effect 는 렌더마다 새로 도니 늘 최신을 본다.
+
+     의존성은 **doneResult 하나뿐이다.** onResolved 는 game-board.tsx 가 인라인 함수로 넘겨
+     렌더마다 참조가 바뀐다 — 실으면 doneResult 가 그대로인(옛 성공을 아직 안 지운) 채로 부모가
+     아무 이유로나 리렌더될 때마다 배지를 또 줄인다. fetchPending 은 useCallback([]) 이라
+     안전하지만 같은 이유로 굳이 싣지 않는다(games-composer 의 debounce effect와 같은 판단). */
+  const doneResult = rejectState.matches("done") ? rejectState.context.result : undefined;
+  useEffect(() => {
+    if (!doneResult) return;
+    // 다른 effect(목록 최초 로드)와 같은 이유로 async IIFE 안에서 한다 — effect 본문 최상위의
+    // 동기 setState 는 set-state-in-effect(Next 16 error)에 걸린다.
+    void (async () => {
+      const { id, resolved, wasCapped } = doneResult;
+      // 목록에서는 어느 쪽이든 뺀다 — 이미 처리된 줄도 여기 남을 이유가 없다.
+      setItems((prev) => (prev ?? []).filter((i) => i.id !== id));
+      /* **배지는 우리가 실제로 처리했을 때만 줄인다.** 서버는 미처리인 것만 고치므로(CAS)
+         다른 관리자가 먼저 처리했으면 false 가 오는데, 그때도 줄이면 이미 남이 줄인 수에서
+         한 번 더 빠져 배지가 실제 미처리 수보다 작아진다. */
+      if (resolved) onResolved();
+      // 넘친 큐를 여기서 이어 받는다. 안 넘쳤으면 왕복을 아낀다(대부분의 실사용이 그쪽이다).
+      // 이 읽기가 실패해도 거절은 이미 성공했다 — rejectState.context.error 로 말하면 거짓이
+      // 되므로 별도 문구를 쓴다(화면은 한 줄 줄어든 채 남고, 다시 열면 채워진다).
+      if (wasCapped) {
+        try {
+          setItems(await fetchPending());
+        } catch {
+          setRefetchError("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다.");
+        }
+      }
+    })();
+    /* onResolved 는 game-board.tsx 가 인라인 함수로 넘겨 렌더마다 참조가 바뀐다 — 실으면
+       doneResult 가 그대로인(옛 성공을 아직 안 지운) 채로 부모가 아무 이유로나 리렌더될 때마다
+       배지를 또 줄인다. fetchPending 은 useCallback([]) 이라 안전하지만 같은 이유로 굳이 싣지
+       않는다(games-composer 의 debounce effect와 같은 판단). */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doneResult]);
+
   function onReject(item: SuggestionListItem) {
-    setRejectingId(item.id);
+    setRefetchError("");
     /* 지금 화면이 **상한에 걸려 있었나**(처리 전 기준). 걸려 있었다면 한 줄을 비운 자리에
        다음 제안이 올라와야 한다 — 안 그러면 화면이 "처리하면 다음 것이 올라와요"라고 적어
        놓고 실제로는 안 올리는 거짓말이 되고, 큐가 넘친 상황에서 관리자는 닫았다 여는 조작을
        반복해야 한다(적대적 리뷰 5라운드 — 상한을 넣은 4라운드 수정이 만든 자리다). */
     const wasCapped = (items?.length ?? 0) >= INBOX_LIMIT;
-    startReject(async () => {
-      setError("");
-      try {
-        const { resolved } = await trpc.suggestions.resolve.mutate(
-          { id: item.id, resolution: "rejected" },
-          { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
-        );
-        // 목록에서는 어느 쪽이든 뺀다 — 이미 처리된 줄도 여기 남을 이유가 없다.
-        setItems((prev) => (prev ?? []).filter((i) => i.id !== item.id));
-        /* **배지는 우리가 실제로 처리했을 때만 줄인다.** 서버는 미처리인 것만 고치므로(CAS)
-           다른 관리자가 먼저 처리했으면 false 가 오는데, 그때도 줄이면 이미 남이 줄인 수에서
-           한 번 더 빠져 배지가 실제 미처리 수보다 작아진다. */
-        if (resolved) onResolved();
-        // 넘친 큐를 여기서 이어 받는다. 안 넘쳤으면 왕복을 아낀다(대부분의 실사용이 그쪽이다).
-        // 이 읽기가 실패해도 거절은 이미 성공했다 — 아래 catch 가 삼켜 "거절 실패"로 말하면
-        // 거짓이 되므로 따로 잡는다(화면은 한 줄 줄어든 채 남고, 다시 열면 채워진다).
-        if (wasCapped) {
-          try {
-            setItems(await fetchPending());
-          } catch {
-            setError("다음 제안을 불러오지 못했습니다 — 닫았다 열면 이어서 보입니다.");
-          }
-        }
-      } catch (e) {
-        setError(resolveErrorMessage(e));
-      } finally {
-        setRejectingId(null);
-      }
-    });
+    sendReject({ type: "submit", values: { id: item.id, wasCapped } });
   }
 
   return (
@@ -162,9 +198,9 @@ export function SuggestionInbox({
         </p>
       )}
 
-      {error && (
+      {(error || rejectState.context.error || refetchError) && (
         <p className="err" role="alert">
-          {error}
+          {error || rejectState.context.error || refetchError}
         </p>
       )}
 
