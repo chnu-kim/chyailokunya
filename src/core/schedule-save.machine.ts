@@ -192,10 +192,16 @@ export const scheduleSaveMachine = setup({
       on: {
         SAVE: {
           target: "saving",
-          actions: sendTo("submit", ({ context }) => ({
-            type: "submit",
-            values: saveValues(context),
-          })),
+          /* error 를 먼저 지운다 — 안 지우면 실패 뒤 재시도가 (새 요청이 아직 안 끝났는데도)
+             옛 실패 문구를 그대로 보여준다(원본 onSave 의 `setError("")` 와 같다, 적대적 리뷰가
+             잡은 자리). */
+          actions: [
+            assign({ error: "" }),
+            sendTo("submit", ({ context }) => ({
+              type: "submit",
+              values: saveValues(context),
+            })),
+          ],
         },
       },
     },

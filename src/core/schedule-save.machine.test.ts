@@ -202,6 +202,30 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
     expect(s.context.announcement).toBe("");
   });
 
+  /* 적대적 리뷰가 잡은 자리 — SAVE 는 재시도 시작 즉시(정착 전) error 를 지워야 한다. 안 지우면
+     두 번째 요청이 아직 안 끝났는데도 화면이 "저장 중"과 "옛 실패 문구"를 동시에 보여준다
+     (원본 onSave 의 `setError("")` 가 await 전에 먼저 도는 것과 같은 계약). */
+  it("실패 뒤 재시도는 두 번째 요청이 끝나기 전에 곧바로 error 를 지운다", async () => {
+    const { promise } = deferred<SaveWeekResult>();
+    let attempt = 0;
+    const actor = start({
+      run: async () => {
+        attempt += 1;
+        if (attempt === 1) throw new Error("first fails");
+        return promise; // 두 번째 시도는 정착하지 않는다 — "정착 전" 을 관찰하려고.
+      },
+      mapError: () => "실패 문구",
+    });
+    actor.send({ type: "SAVE" });
+    await waitFor(actor, (s) => s.matches("ready") && s.context.error !== "");
+    expect(actor.getSnapshot().context.error).toBe("실패 문구");
+
+    actor.send({ type: "SAVE" });
+    expect(actor.getSnapshot().value).toBe("saving");
+    // 아직 두 번째 run 이 정착하지 않았는데도 옛 실패 문구가 이미 지워져 있어야 한다.
+    expect(actor.getSnapshot().context.error).toBe("");
+  });
+
   it("실패는 이전 성공의 announcement 를 지우지 않는다(원본이 실패 시 announcement 를 안 건드리던 것과 같다)", async () => {
     let attempt = 0;
     const savedOnce: WeekDraft = { note: "", published: false, entries: [] };
