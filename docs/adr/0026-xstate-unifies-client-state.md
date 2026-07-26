@@ -50,6 +50,14 @@
 위반이 아니다 — 머신이 순수해야 workerd 단위 테스트가 그대로 산다. 부수효과(실제 DOM 호출
 `history.pushState`/`popstate`)는 core 밖 `src/app/**/*.actor.ts` 가 맡는다.
 
+**"core 는 순수 도메인 로직" 규칙과 충돌하지 않는다 — 새 예외가 아니라 기존 패턴의 연장이다.**
+`core/games-composer.ts`(콤보박스 단계 전이·활성 인덱스)와 `core/schedule-editor.ts`(주간표
+편집 상태)가 이미 지금 `src/app/games/game-composer.tsx`·`src/app/schedule/schedule-editor.tsx`
+에 물려 라이브로 돈다 — 둘 다 "UI 상태"지만 core 에 사는 이유는 같다: **DOM/HTTP/React 를
+안 끌어오는 순수 전이**이기만 하면 되고, 그 전이가 다루는 개념이 "도메인"인지 "UI 오케스트레이션"
+인지는 경계 기준이 아니다. `board-overlay`·`dialog-history` 류 머신도 같은 조건(순수 전이,
+부수효과는 `*.actor.ts`)을 만족하므로 이 선례를 그대로 잇는다.
+
 **선 밖에 두는 것** — AGENTS.md 「코드 컨벤션」에 이미 규칙으로 실었다(이 PR 이 함께
 넣는다 — ADR 은 근거, AGENTS.md 는 규칙이라는 ADR-0013 의 분리를 지킨다):
 
