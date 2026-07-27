@@ -289,4 +289,38 @@ describe("WeekCardDownload", () => {
     within(node as HTMLElement).getByText("7.20 – 7.26");
     expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-20.png");
   });
+
+  it("주 A 가 시간 초과 후에도 배경에서 도는 동안 주 B 를 거쳐 다시 주 A 로 돌아와도 새로 캡처하지 않는다", async () => {
+    // 적대적 리뷰가 잡은 자리(라운드 6) — in-flight 항목을 하나만(가장 최근 카드) 들고 있으면,
+    // 주 A 캡처가 시간 초과로 화면만 풀린 채 배경에서 도는 동안 주 B 로 넘어가 캡처하면 그
+    // 하나짜리 항목이 B 로 덮어써진다 — 그 뒤 다시 주 A 로 돌아와 눌러도(내용은 처음과 같은
+    // A, 서버가 네비게이션마다 새로 내려주는 새 오브젝트) 배경에서 아직 도는 A 의 캡처를 더는
+    // 못 찾아 세 번째 물리적 캡처를 또 시작할 뻔했다. Map 이 여러 키를 동시에 들고 있어야
+    // WeekNav 로 앞뒤를 오가는 흔한 조작에서도 진행 중인 캡처를 되찾는다.
+    vi.mocked(toPng).mockImplementation(() => new Promise(() => {})); // 주 A 캡처 — 안 끝남
+    const { rerender } = render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
+    expect(toPng).toHaveBeenCalledTimes(1); // 주 A — 배경에서 여전히 도는 채.
+
+    // 주 B 로 넘어가 캡처 — 역시 안 끝남.
+    rerender(<WeekCardDownload card={NEXT_WEEK_CARD} weekStartDate="2026-07-27" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
+    expect(toPng).toHaveBeenCalledTimes(2); // 주 B — 역시 배경에서 도는 채.
+
+    // 다시 주 A 로 돌아온다 — 내용은 처음 주 A 와 완전히 같지만(서버가 네비게이션마다 새로
+    // 내려주는 것과 같은 모양) 새 오브젝트다.
+    const CARD_AGAIN: WeekCardData = JSON.parse(JSON.stringify(CARD)) as WeekCardData;
+    rerender(<WeekCardDownload card={CARD_AGAIN} weekStartDate="2026-07-20" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    expect(toPng).toHaveBeenCalledTimes(2); // 세 번째 캡처를 새로 시작하지 않고 주 A 의 것을 재사용했다.
+  });
 });

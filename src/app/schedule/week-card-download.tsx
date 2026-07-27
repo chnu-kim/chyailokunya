@@ -81,34 +81,45 @@ function snapshotCard(node: HTMLDivElement): HTMLDivElement {
   return clone;
 }
 
-type InFlightCapture = { card: WeekCardData; promise: Promise<string> };
+type InFlightMap = Map<string, Promise<string>>;
 
-/* 물리적으로 진행 중인 캡처를 카드(card)당 하나로 묶는다(적대적 리뷰 지적) — 위 Promise.race
-   는 화면을 제때 풀어 재시도할 수 있게 하지만, 진 쪽(html-to-image 내부 작업)을 취소하지는
-   않는다. 그 상태에서 재시도가 매번 새 toPng() 를 또 부르면, 폰트 임베드가 막힌 환경(느린
-   fetch 폴백 — 아래 capture 주석)에서 재시도할 때마다 1200×630 캔버스 작업 + cross-origin
-   요청이 쌓인다.
+/* 캐시 키는 오브젝트 참조가 아니라 "그 주 + 그 내용" 문자열이다(라운드 6 적대적 리뷰) — 참조로
+   가르면(라운드 5의 첫 시도) 같은 주·같은 내용을 다시 만나도 매번 새 오브젝트라(읽기 화면은
+   네비게이션마다 서버가 새로 내려주고, 편집기도 useMemo 는 baseline 이 그대로일 때만 참조를
+   지켜 주는 최적화일 뿐 이 캐시가 기대야 할 계약은 아니다) 캐시가 못 맞물린다. 문자열 키는
+   참조가 달라도 내용이 같으면 그대로 맞아떨어지므로, "같은 주에 내용이 바뀌면 새로 캡처한다"
+   (라운드 5)와 "같은 내용을 다시 만나면 진행 중인 캡처를 재사용한다"(이번 라운드) 양쪽을
+   내용 동일성이라는 하나의 규칙으로 만족시킨다. */
+function captureKey(weekStartDate: string, card: WeekCardData): string {
+  return `${weekStartDate}:${JSON.stringify(card)}`;
+}
 
-   **card 로 캐시를 가른다 — weekStartDate 로는 부족하다(라운드 5 적대적 리뷰).** 한때
-   weekStartDate 문자열로만 갈랐는데, 편집기는 같은 주를 저장해도 weekStartDate 가 그대로다 —
-   저장 전 캡처가 시간 초과로 화면만 풀린 채 아직 배경에서 돌던 중 admin 이 내용을 고쳐 저장하면
-   baseline 이 바뀌어 card 가 새로 만들어지지만(schedule-editor.tsx 의 useMemo, baseline 이
-   deps), weekStartDate 문자열은 그대로라 그 키로는 "같은 요청의 재시도"와 "저장으로 내용이
-   바뀐 새 요청"을 못 가른다 — 후자를 전자로 오판하면 저장 전 옛 그림이 저장 후 파일명으로
-   나간다. card 오브젝트 참조는 baseline 이 실제로 바뀔 때만(저장 성공 시) 새로 생기므로
-   (useMemo), 재시도(같은 렌더의 같은 card)와 내용 변경(다른 렌더의 다른 card)을 정확히 가른다.
-   읽기 화면(schedule-read.tsx)은 애초에 주마다 서버가 새 card 를 내려주므로 이 키가 자연히
-   주 경계와도 일치한다 — weekStartDate 를 따로 더 실을 필요가 없다.
+/* 물리적으로 진행 중인 캡처를 "그 주 + 그 내용" 키마다 여러 개 동시에 추적한다(Map, 라운드 6
+   적대적 리뷰) — 위 Promise.race 는 화면을 제때 풀어 재시도할 수 있게 하지만, 진 쪽
+   (html-to-image 내부 작업)을 취소하지는 않는다. 한때 항목을 하나만(가장 최근 카드) 들고
+   있었는데, 그러면 주 A 캡처가 시간 초과로 화면만 풀린 채 배경에서 도는 동안 주 B 로 넘어가
+   캡처하면 그 하나짜리 항목이 B 로 덮어써지고, 그 뒤 다시 A 로 돌아와 눌러도(내용은 그대로인
+   A) 배경에서 아직 도는 A 의 캡처를 더는 못 찾아 세 번째 물리적 캡처를 또 시작했다 — WeekNav
+   로 주를 오가는 흔한 조작 앞에서 "재시도를 하나로 묶는다"는 이 캐시의 목적 자체가 무의미해질
+   뻔했다. Map 은 키가 다른 여러 항목을 동시에 들고 있을 수 있어, A 든 B 든 나중에 같은 키로
+   다시 찾아오면 배경에서 아직 도는 바로 그 캡처를 돌려준다.
+
+   안 끝나는 캡처가 서로 다른 키로 계속 쌓이면(시간 초과 때마다 다른 주로 넘어가며 계속 누르면)
+   이 맵도 계속 자란다는 한계는 남는다 — 그러나 그러려면 실제로 매 시도가(느린 폰트 임베드
+   폴백처럼) 진짜로 안 끝나야 하고, 그 상태에서 사용자가 서로 다른 주를 계속 눌러야 한다. 완벽한
+   상한(LRU 등)을 두는 대신 이 정도의 극단적 반복 조작만 수용 경계 밖으로 남겨 둔다(AGENTS
+   "현실적 사고" 원칙과 같은 결).
 
    컴포넌트 인스턴스의 ref 에 두는 이유(모듈 스코프가 아니라): 리마운트되면(편집기의 key 교체)
-   새 ref 로 새로 시작하는 것도 맞다(언마운트된 옛 노드의 캡처를 기다릴 이유가 없다). */
+   새 맵으로 새로 시작하는 것도 맞다(언마운트된 옛 노드의 캡처를 기다릴 이유가 없다). */
 function startCapture(
   node: HTMLDivElement,
-  card: WeekCardData,
-  inFlightRef: RefObject<InFlightCapture | null>,
+  key: string,
+  inFlightRef: RefObject<InFlightMap | null>,
 ): Promise<string> {
-  const current = inFlightRef.current;
-  if (current && current.card === card) return current.promise;
+  const map = (inFlightRef.current ??= new Map());
+  const current = map.get(key);
+  if (current) return current;
 
   const snapshot = snapshotCard(node);
   const promise = (async () => {
@@ -119,10 +130,10 @@ function startCapture(
       snapshot.remove();
     }
   })();
-  const entry: InFlightCapture = { card, promise };
-  inFlightRef.current = entry;
-  /* 이 항목이 아직도 "그 진행 중인 캡처"일 때만 지운다 — 방금 위에서 card 가 다르면 이미 새
-     항목으로 갈아 끼웠으므로, 버려진 옛 항목이 나중에 정산돼도 새 항목을 지우지 않는다.
+  map.set(key, promise);
+  /* 이 키가 아직도 이 프라미스를 가리킬 때만 지운다 — 이론상 정산 시점 사이에 같은 키로 새
+     시도가 끼어들 여지를 막는다(단일 스레드 자바스크립트라 실제로는 거의 안 일어나지만, 이전
+     단일 항목 캐시에서도 같은 이유로 이 확인을 뒀다).
 
      `.finally()`는 새 프라미스를 반환하고 그 프라미스는 `promise`가 거절되면 같이 거절된다 —
      실패 자체는 이 함수가 반환하는 `promise`를 기다리는 쪽(race)이 이미 처리하지만, 여기서
@@ -130,7 +141,7 @@ function startCapture(
      실패 전파와 무관한 부수 효과일 뿐이라 조용히 삼킨다. */
   promise
     .finally(() => {
-      if (inFlightRef.current === entry) inFlightRef.current = null;
+      if (map.get(key) === promise) map.delete(key);
     })
     .catch(() => {});
   return promise;
@@ -162,10 +173,10 @@ async function capture(
   card: WeekCardData,
   weekStartDate: string,
   signal: AbortSignal,
-  inFlightRef: RefObject<InFlightCapture | null>,
+  inFlightRef: RefObject<InFlightMap | null>,
 ): Promise<void> {
   const dataUrl = await Promise.race([
-    startCapture(node, card, inFlightRef),
+    startCapture(node, captureKey(weekStartDate, card), inFlightRef),
     rejectOnAbort(signal),
   ]);
   const a = document.createElement("a");
@@ -189,7 +200,7 @@ export function WeekCardDownload({
   stale?: boolean;
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
-  const inFlightRef = useRef<InFlightCapture | null>(null);
+  const inFlightRef = useRef<InFlightMap | null>(null);
   const [scale, setScale] = useState(1);
 
   /* 미리보기를 컨테이너 폭에 맞춰 축소한다(1200px 는 안 넘김 — 확대는 안 한다). useEffect

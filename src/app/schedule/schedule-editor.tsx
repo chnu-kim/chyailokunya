@@ -117,13 +117,12 @@ export function ScheduleEditor({
      null(비활성)이다. 저장에 성공하면 baseline 이 서버 응답으로 갈아 끼워지므로(schedule-save
      머신) 새로고침 없이 바로 활성화된다.
 
-     useMemo 로 baseline 이 실제로 바뀔 때만 새 오브젝트를 만든다(라운드 5 적대적 리뷰) —
-     이 컴포넌트는 note 입력·항목 추가 등 draft 가 바뀔 때마다 다시 그려지는데, 그때마다
-     buildWeekCard 를 새로 불러 매번 다른 참조를 주면 week-card-download.tsx 의 in-flight
-     캐시(card 오브젝트 참조로 "같은 요청 재시도"와 "저장으로 내용이 바뀐 새 요청"을 가른다)가
-     타이핑 한 글자마다 캐시 미스로 오판한다 — 그러면 화면에 안 보이는 곳에서 캡처가 계속
-     재시작돼 그 판정 자체가 무의미해진다. baseline 은 저장 성공 시에만 바뀌므로(schedule-save
-     머신), 그때만 새 참조가 나오는 편이 그 캐시의 전제와 맞는다. */
+     useMemo 로 baseline 이 실제로 바뀔 때만 새 오브젝트를 만든다 — note 입력·항목 추가 등
+     draft 가 바뀔 때마다 이 컴포넌트가 다시 그려지는데, 그때마다 buildWeekCard 를 새로 불러
+     날짜 배열까지 매번 다시 만들 이유가 없다(순수 최적화). week-card-download.tsx 의 in-flight
+     캐시는 이 오브젝트의 참조가 아니라 내용(JSON)으로 가르므로(라운드 6 적대적 리뷰) 이
+     useMemo 가 없어도 캐시 판정 자체는 그르치지 않는다 — 다만 없으면 타이핑 한 글자마다
+     buildWeekCard 를 다시 부르는 낭비가 남는다. */
   const card = useMemo(
     () =>
       baseline.published
