@@ -144,7 +144,7 @@ test("관리자: 발행 전엔 og/schedule 이 404, 발행 후엔 실제 PNG", a
   expect(rev).toBeTruthy();
 
   const pinned = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=${rev}`);
-  expect(pinned.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+  expect(pinned.headers()["cache-control"]).toBe("public, max-age=86400");
 
   // 어긋난 rev 는 지금 데이터를 대신 내주지 않는다 — 그 스냅숏은 없다는 게 사실이다(적대적
   // 리뷰 2라운드: "짧게 캐싱한 지금 데이터"조차 URL=콘텐츠 계약을 애매하게 남긴다는 지적).
@@ -154,6 +154,18 @@ test("관리자: 발행 전엔 og/schedule 이 404, 발행 후엔 실제 PNG", a
 
   const noRev = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
   expect(noRev.headers()["cache-control"]).toBe("public, max-age=300");
+
+  /* 발행을 내리면(published→draft) 리비전이 아니라 **발행 여부 자체**가 바뀐다 —
+     `getPublishedWeek` 이 이 주를 통째로 404 시키므로, 방금까지 200 이던 이 pinned URL 도
+     그 순간부터 404 다(적대적 리뷰 4라운드: immutable·영구 캐싱을 쓰지 않는 이유가 바로 이
+     자리 — 유한한 max-age 라야 이미 캐싱한 다운스트림도 언젠가는 이 404 를 보게 된다). */
+  await page.locator('[data-od-id="schedule-publish"]').uncheck();
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  const afterUnpublish = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=${rev}`);
+  expect(afterUnpublish.status()).toBe(404);
 });
 
 test("og/schedule: 아무도 안 건드린 미래 주는 404", async ({ baseURL, request }) => {

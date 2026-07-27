@@ -11,11 +11,11 @@ import { getPublishedWeek } from "@/features/schedule/service";
    낸다 — 더 이상 더미가 아니므로 프로덕션에 살려 둘 이유가 없다.
 
    ── 알고 수용한 한계: Worker 쪽 응답 캐싱은 이 PR 에 없다 ──────────────────────────
-   `Cache-Control: immutable`(아래)은 브라우저·소셜 플랫폼 자체 캐시엔 통하지만, Cloudflare
-   Workers 는 zone 의 엣지 캐시보다 **먼저** 요청을 받으므로 그 헤더만으로 Cloudflare 가 이
-   응답을 대신 캐싱해 주지 않는다 — 하려면 라우트가 `caches.default`(Cache API)를 직접 써야
-   한다. 같은 (주·리비전) URL 이 짧은 시간에 몰리면(여러 플랫폼이 같은 공유 링크를 동시에
-   언퍼얼) 그때마다 Satori 렌더 + Google Fonts 왕복 3회가 매번 돈다는 뜻이다.
+   `Cache-Control`(아래, 유한한 max-age)은 브라우저·소셜 플랫폼 자체 캐시엔 통하지만,
+   Cloudflare Workers 는 zone 의 엣지 캐시보다 **먼저** 요청을 받으므로 그 헤더만으로
+   Cloudflare 가 이 응답을 대신 캐싱해 주지 않는다 — 하려면 라우트가 `caches.default`(Cache
+   API)를 직접 써야 한다. 같은 (주·리비전) URL 이 짧은 시간에 몰리면(여러 플랫폼이 같은 공유
+   링크를 동시에 언퍼얼) 그때마다 Satori 렌더 + Google Fonts 왕복 3회가 매번 돈다는 뜻이다.
 
    Cache API 를 안 붙인 이유: 로컬 workerd 에서는 캐시 히트 여부를 실측할 수단이 마땅치
    않아(이 저장소는 "실측 없이 넣지 않는다"가 원칙), 배포해 봐야만 검증되는 코드를 이 PR 에
@@ -367,12 +367,22 @@ export async function GET(request: Request) {
       /* `/schedule`(generateMetadata)이 og:image 를 지을 때 `rev`(주 메타의 last_updated_at)를
          항상 실어 보낸다 — 그 주가 바뀌면(saveWeek·claimWeek 모두 이 값을 단조 증가시킨다) URL
          자체가 달라지므로, `rev` 가 있는 요청은(위에서 이미 지금 리비전과 일치한다고 확인했다 —
-         안 맞으면 여기 오기 전에 404) 내용이 절대 안 바뀔 URL 이라 영구 캐싱이 안전하다
-         (결정적 렌더는 스파이크가 이미 확인했다). `rev` 없이 두드리면(수동 확인 등) 내용이 그
-         순간의 최신값이라 짧게만 잡는다. */
+         안 맞으면 여기 오기 전에 404) 그 URL 이 살아 있는 한 내용이 안 바뀐다.
+
+         **`immutable`·영구(1년) 캐싱은 안 쓴다 — "안 바뀐다"와 "영원히 있다"는 다른 말이다.**
+         결정 13 이 미발행을 og 카드로 안 내보내는 이유가 "미완성본이 박제되는 걸 막는다"인데,
+         발행을 **내리는** 것도 같은 문(published→draft, service.ts saveWeek)을 쓴다 — 리비전은
+         바뀌지만(그래서 이 URL 자체는 여전히 그 순간의 내용을 정확히 담고 있다) `getPublishedWeek`
+         은 그때부터 이 주를 통째로 404 시킨다(위 판정). `immutable` 은 클라이언트에게 "이 URL 을
+         다시 확인하지 마라"고 못박는 지시라, 발행을 내려도 이미 이 URL 을 캐싱해 둔 소셜
+         플랫폼·브라우저는 그 지시를 곧이곧대로 따라 **1년 동안 재확인을 안 하고 낡은 카드를
+         계속 보여준다** — 관리자가 방금 내린 발행이 이미 퍼진 링크에서는 안 내려간 것처럼
+         보인다(적대적 리뷰 4라운드 지적, 결정 13 의 취지와 정면으로 부딪힌다). 그래서 유한한
+         `max-age`(재확인이 언젠가는 반드시 돈다)로 상한만 걸어 둔다 — 공유 직후 몰리는 조회는
+         그 안에서 캐싱 이득을 그대로 보고, 발행 취소는 하루 안에는 반영된다. `rev` 없이
+         두드리면(수동 확인 등) 내용이 그 순간의 최신값이라 훨씬 짧게만 잡는다. */
       headers: {
-        "Cache-Control":
-          revParam !== null ? "public, max-age=31536000, immutable" : "public, max-age=300",
+        "Cache-Control": revParam !== null ? "public, max-age=86400" : "public, max-age=300",
       },
     },
   );
