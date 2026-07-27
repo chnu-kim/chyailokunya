@@ -15,6 +15,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useMachine } from "@xstate/react";
+import { isAborted } from "@/core/error-message";
 import { createSubmitMachine } from "@/core/submit.machine";
 import type { WeekCardData } from "@/features/schedule/card";
 import { WeekCard } from "./week-card";
@@ -28,15 +29,28 @@ const PIXEL_RATIO = 2;
 
 const downloadMachine = createSubmitMachine<string, void>();
 
-// 서버 코드가 없는 순수 클라이언트 동작이라 error-message.ts 의 코드 분기 매퍼들과 다르다 —
-// 실패하면 로컬에서 아무 부작용도 안 남으므로("저장됐을 수도"류의 애매함이 없다) 원인을
-// 단정하지 않고 그대로 다시 시도해 보라고만 말한다.
-function downloadErrorMessage(): string {
+/* 서버 코드가 없는 순수 클라이언트 동작이라 error-message.ts 의 코드 분기 매퍼들과 다르지만,
+   "기다리다 멈췄다"(isAborted)만은 같은 뜻을 공유한다 — submit 머신이 15초 뒤 이 run 에 넘기는
+   AbortSignal(아래 capture)이 그 시간을 못 지키면 이 갈래로 온다. 그 밖엔 실패해도 로컬에서
+   아무 부작용도 안 남으므로("저장됐을 수도"류의 애매함이 없다) 원인을 단정하지 않고 그대로
+   다시 시도해 보라고만 말한다. */
+function downloadErrorMessage(e: unknown): string {
+  if (isAborted(e))
+    return "카드를 만드는 데 시간이 너무 오래 걸려서 멈췄습니다. 다시 시도해 주십시오.";
   return "카드를 만들지 못했습니다. 다시 시도해 주십시오.";
 }
 
 function downloadFileName(weekStartDate: string): string {
   return `챠이로쿠냐_주간일정_${weekStartDate}.png`;
+}
+
+// signal 이 이미 중단됐거나 나중에 중단되면 그 reason 으로 거절하는 프라미스 — 아래 capture 의
+// Promise.race 짝이다. html-to-image 는 AbortSignal 을 안 받으므로 직접 경주를 붙인다.
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  if (signal.aborted) return Promise.reject(signal.reason as unknown);
+  return new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason as unknown), { once: true });
+  });
 }
 
 /* 캡처 대상은 항상 스케일 없는 원본 1200×630 노드다(week-card.tsx 주석 — 조상의 transform 은
@@ -49,10 +63,25 @@ function downloadFileName(weekStartDate: string): string {
    발행된 주를 저장 → 다운로드 → PNG 를 직접 열어 --font-hand 가 정확히 나온 것을 확인, 콘솔의
    SecurityError 는 직접 접근 실패 뒤 fetch 폴백이 도는 과정에서 나는 양성 경고다). 기본값으로
    충분하다는 뜻이지, "이 배선의 검증 불가 지점"이라는 뜻이 아니다 — 이 코드나 이 사이트의 폰트
-   로딩 방식(layout.tsx 의 <link>)이 바뀌면 이 확인을 다시 해야 한다. */
-async function capture(node: HTMLDivElement, weekStartDate: string): Promise<void> {
-  const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
-  const dataUrl = await toPng(node, { pixelRatio: PIXEL_RATIO });
+   로딩 방식(layout.tsx 의 <link>)이 바뀌면 이 확인을 다시 해야 한다.
+
+   signal 을 반드시 받아 경주 붙인다(적대적 리뷰 지적) — 서버 요청과 달리 fetch 기반이 아니라
+   신호를 그냥 무시해도 타입은 통과하지만, 폰트 임베드가 위 SecurityError 폴백 경로처럼 느려지거나
+   막히면 toPng 이 영영 안 끝나 버튼이 "만드는 중…"에 붙박인다 — 새로고침 말고는 빠져나갈 길이
+   없다. Promise.race 는 진 쪽 프라미스를 취소하지 않지만(html-to-image 내부 작업은 계속 돈다),
+   화면은 제때 idle 로 돌아가 재시도할 수 있다. */
+async function capture(
+  node: HTMLDivElement,
+  weekStartDate: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const dataUrl = await Promise.race([
+    (async () => {
+      const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
+      return toPng(node, { pixelRatio: PIXEL_RATIO });
+    })(),
+    rejectOnAbort(signal),
+  ]);
   const a = document.createElement("a");
   a.href = dataUrl;
   a.download = downloadFileName(weekStartDate);
@@ -100,10 +129,10 @@ export function WeekCardDownload({
          안 돼 이 run 클로저가 **첫 마운트 때의 weekStartDate 에 영영 고정**된다(적대적 리뷰가
          잡은 자리 — 캡처되는 그림은 매번 새 카드로 맞지만 파일명만 첫 주에 고정됐다). submit
          머신의 계약대로 클릭 시점의 값은 submit 이벤트의 values 로 실어 보낸다. */
-      run: async (values) => {
+      run: async (values, signal) => {
         const node = nodeRef.current;
         if (!node) throw new Error("week-card 노드가 아직 마운트되지 않았습니다");
-        await capture(node, values);
+        await capture(node, values, signal);
       },
       mapError: downloadErrorMessage,
     },

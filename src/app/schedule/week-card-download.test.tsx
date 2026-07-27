@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { WeekCardData } from "@/features/schedule/card";
 import { WeekCardDownload } from "./week-card-download";
 
@@ -8,6 +8,14 @@ import { WeekCardDownload } from "./week-card-download";
    직접 눈으로 확인한다, week-card-download.tsx 주석) — 그래서 mock 해 "버튼을 누르면 캡처
    함수가 옳은 인자로 불리고, 결과를 다운로드로 잇는가"만 못박는다. */
 vi.mock("html-to-image", () => ({ toPng: vi.fn() }));
+
+/* submit 머신이 15초(REQUEST_TIMEOUT_MS) 뒤 run 에 넘기는 AbortSignal 이 실제로 걸리는지
+   보려고 그 값만 20ms 로 줄인다(적대적 리뷰 지적 — toPng 이 안 끝나면 버튼이 영영 안 풀렸다).
+   나머지(isAborted 등)는 실제 구현 그대로 써야 downloadErrorMessage 의 분기가 진짜로 맞물린다. */
+vi.mock("@/core/error-message", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/core/error-message")>();
+  return { ...actual, REQUEST_TIMEOUT_MS: 20 };
+});
 
 import { toPng } from "html-to-image";
 
@@ -129,6 +137,28 @@ describe("WeekCardDownload", () => {
     });
 
     expect(screen.getByText("카드를 만들지 못했습니다. 다시 시도해 주십시오.")).toBeInTheDocument();
+    expect(screen.getByTestId("week-card-download-btn")).toBeEnabled();
+    expect(capturedAnchor).toBeNull();
+  });
+
+  it("캡처가 시간 안에 안 끝나면 멈추고 다시 누를 수 있다", async () => {
+    // 적대적 리뷰가 잡은 자리 — signal 을 무시하면 이 mock 처럼 영원히 안 끝나는 toPng 앞에서
+    // 버튼이 "만드는 중…"에 붙박인 채 새로고침 말고는 빠져나갈 길이 없었다.
+    vi.mocked(toPng).mockImplementation(() => new Promise(() => {}));
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    expect(screen.getByTestId("week-card-download-btn")).toBeDisabled();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "카드를 만드는 데 시간이 너무 오래 걸려서 멈췄습니다. 다시 시도해 주십시오.",
+        ),
+      ).toBeInTheDocument(),
+    );
     expect(screen.getByTestId("week-card-download-btn")).toBeEnabled();
     expect(capturedAnchor).toBeNull();
   });
