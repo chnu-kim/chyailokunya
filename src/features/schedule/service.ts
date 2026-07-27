@@ -350,8 +350,22 @@ export async function publishWeek(db: Db, input: PublishWeekInput): Promise<Week
   /* 발행(공개 전환)만 항목이 있어야 한다 — 비공개 전환은 반대 방향이라 이 검사가 없다
      (canUnpublish 와 같은 비대칭, schedule-save.machine.ts 주석). CAS 를 걸기 **전에** 본다 —
      빈 주 거절이 revision 을 안 건드려야 다음 정상 요청이 안 막힌다(saveWeek 의 prevalidate와
-     같은 자리). */
+     같은 자리).
+
+     **그런데 신원(revision) 확인이 이 검사보다 먼저다**(리뷰 6라운드 지적) — 안 그러면 이미
+     stale 해진 요청(다른 관리자가 그 사이 항목을 전부 지우고 저장함)이 "항목이 없다"는 엉뚱한
+     이유로 거절돼, 사용자는 진짜 원인(다른 곳에서 먼저 바꿨다 — CONFLICT)을 못 알아채고 "그냥
+     잘못된 요청"으로 오독한다. 여기서 읽는 revision 은 최종 UPDATE 의 WHERE 조건과 같은 값을
+     보는 것일 뿐 그 CAS 를 대신하지 않는다 — 이 읽기와 그 UPDATE 사이에 또 누가 끼어들면
+     최종 UPDATE 의 WHERE 가 여전히 0행으로 걸러 CONFLICT 를 던진다(안전은 그쪽이 정본). 이
+     읽기는 오직 **에러 메시지의 우선순위**를 바로잡기 위한 것이다. */
   if (input.published) {
+    const [current] = await db
+      .select({ lastUpdatedAt: scheduleWeeks.lastUpdatedAt })
+      .from(scheduleWeeks)
+      .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
+    if ((current?.lastUpdatedAt ?? null) !== input.revision) throw new WeekRevisionConflict();
+
     const { monday, sunday } = weekBounds(input.weekStartDate);
     const [row] = await db
       .select({ count: sql<number>`count(*)` })

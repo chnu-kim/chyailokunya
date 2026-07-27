@@ -646,6 +646,28 @@ describe("일정 라우터", () => {
       ).rejects.toMatchObject({ code: "CONFLICT" });
     });
 
+    /* 리뷰 지적(2026-07-28, PR #114 6라운드) — stale 한 발행 요청이 "빈 주" 검사에 먼저 걸리면
+       CONFLICT 대신 BAD_REQUEST 를 받는다. 다른 관리자가 그 사이 항목을 전부 지우고 저장했다면
+       사용자는 "다른 곳에서 먼저 바꿨다"를 알아야지 "요청이 잘못됐다"로 오독하면 안 된다 —
+       CAS(신원) 확인이 빈 주 검사보다 먼저여야 한다. */
+    it("stale 한 발행 요청 + 그 사이 항목이 전부 지워짐 — BAD_REQUEST 가 아니라 CONFLICT", async () => {
+      const caller = createCaller(makeCtx({ authorities: admin }));
+      const saved = await saveWeekAsEditor(caller, {
+        weekStartDate: MON,
+        entries: [{ scheduledDate: "2026-07-20", title: "곧 지워질 항목" }],
+      });
+      // 다른 곳에서 그 사이 항목을 전부 지우고 저장했다 — 지금 이 주는 실제로 비어 있다.
+      await saveWeekAsEditor(caller, { weekStartDate: MON, entries: [] });
+
+      await expect(
+        caller.schedule.publishWeek({
+          weekStartDate: MON,
+          revision: saved.revision!, // 항목이 있던 시절의 낡은 revision
+          published: true,
+        }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    });
+
     it("weekStartDate 가 월요일이 아니면 거절", async () => {
       const caller = createCaller(makeCtx({ authorities: admin }));
       await expect(
