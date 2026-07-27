@@ -105,16 +105,23 @@ async function loadSubsetFont(family: string, weight: number, text: string): Pro
   return buf;
 }
 
+// 항목 없는 날의 표기(schedule-read 의 "—"와 같은 결). 렌더(아래 day.entries.length === 0
+// 분기)와 서브셋 수집(collectFontText) 양쪽이 이 상수 하나를 봐야 한다 — 리터럴을 두 자리에
+// 따로 적으면 한쪽만 고치는 날 서브셋이 조용히 갈린다(바로 이 글자가 실제로 그렇게 빠졌었다 —
+// 아래 주석 참고).
+export const EMPTY_DAY_MARK = "—";
+
 /* 렌더가 실제로 그리는 문자열만 모은다(손으로 나열하지 않는다 — 리터럴을 JSX 에 직접 쓰면
    서브셋에서 빠지는 글자가 생긴다). 오버플로 칩("+N개")은 그 날이 실제로 넘칠 때만 그려지므로
    그때만 모은다 — 안 쓰는 글리프를 미리 담을 이유가 없다.
 
-   항목 제목은 `text-overflow: ellipsis` 를 안 쓴다(아래 렌더의 title 스타일 주석) — 그래서
-   여기 나열할 게 없지만, 다시 쓰게 되면 "…"(U+2026)를 반드시 이 목록에 손으로 추가해야
-   한다. 그 글자는 CSS 가 넣는 것이지 이 함수가 훑는 어떤 문자열에도 리터럴로 없어서, 이
-   수집이 아무리 촘촘해도 못 잡는다(AGENTS.md 의 주간 일정 지뢰 목록 참고 — 실측으로 두부(□)
-   렌더를 확인한 자리). */
-function collectFontText(card: WeekCard): { penText: string; bodyText: string } {
+   **이 함수가 한 번 이 규칙을 스스로 어겼다.** 빈 날 표기(`EMPTY_DAY_MARK`)를 처음엔 여기 안
+   모으고 렌더에만 리터럴로 뒀다(적대적 리뷰 3라운드가 잡음) — 빈 날이 있는(실사용에 흔한)
+   발행 주는 그 글자가 서브셋에 없어 두부(□)로 나올 뻔했다. 게이트·e2e(상태 코드만 봄)는
+   여전히 초록이었을 거다. 항목 제목의 `text-overflow: ellipsis` 도 같은 급의 함정이라
+   (아래 렌더의 title 스타일 주석 — 지금은 안 씀), 다시 쓰게 되면 "…"(U+2026)를 반드시 여기
+   손으로 추가해야 한다. */
+export function collectFontText(card: WeekCard): { penText: string; bodyText: string } {
   const penText = HEADING + SUBHEADING + card.days.map((d) => d.dow).join("");
   const bodyText =
     card.rangeLabel +
@@ -122,6 +129,7 @@ function collectFontText(card: WeekCard): { penText: string; bodyText: string } 
     card.days
       .flatMap((d) => [
         d.date,
+        d.entries.length === 0 ? EMPTY_DAY_MARK : "",
         ...d.entries.flatMap((e) => [e.time ?? "", e.title]),
         d.overflow > 0 ? `+${d.overflow}개` : "",
       ])
@@ -282,9 +290,11 @@ export async function GET(request: Request) {
 
             <div style={{ display: "flex", flexDirection: "column", flex: 1, gap: 6 }}>
               {day.entries.length === 0 ? (
-                // schedule-read 의 빈 칸 표기("—")와 같은 결 — 확정된 휴방인지 아직 안 짠
-                // 건지는 이 화면도 안 가른다(is_rest 는 이슈 #56 의 남은 미결).
-                <div style={{ display: "flex", fontSize: 22, color: T.muted }}>—</div>
+                // schedule-read 의 빈 칸 표기(EMPTY_DAY_MARK)와 같은 결 — 확정된 휴방인지
+                // 아직 안 짠 건지는 이 화면도 안 가른다(is_rest 는 이슈 #56 의 남은 미결).
+                <div style={{ display: "flex", fontSize: 22, color: T.muted }}>
+                  {EMPTY_DAY_MARK}
+                </div>
               ) : (
                 day.entries.map((e, j) => (
                   <div key={j} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
