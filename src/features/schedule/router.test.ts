@@ -1,11 +1,12 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { authoritiesFor, type Authority } from "@/core/authorities";
-import { makeDb, scheduleEntries, scheduleWeeks } from "@/db";
+import { toIsoDate } from "@/core/calendar";
+import { makeDb, scheduleEntries, scheduleWeeks, type Db } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
-import { getPublishedWeek, nextRevision } from "./service";
+import { getPublishedWeek, getWeekForEdit, nextRevision, saveWeek } from "./service";
 
 /* 일정 라우터 — 주 단위 일괄 저장(전체 교체)의 서버 권위·불변식을 caller 로 직접 증명한다.
    각 it 은 격리 저장소라 마이그레이션된 빈 스키마에서 시작한다(setupFiles). */
@@ -181,6 +182,50 @@ describe("일정 라우터", () => {
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
     expect(week.revision).toBeNull();
     expect(week.publishedAt).toBeNull();
+  });
+
+  /* 적대적 리뷰 지적(2026-07-28, PR #114 3라운드) — null revision(새/레거시 주) 청구는 한때
+     "의도한 메타(note·draft·published_at)를 그대로 담아" 행을 만들었다("생성이지 변경이 아니라
+     안전하다"는 논리). 그런데 프리검증(0단계) SELECT 와 2단계 batch INSERT 사이에 참조 게임이
+     지워지는 것처럼 0단계가 못 잡는 이유로 2단계가 실패하면, 이미 커밋된 그 메타 행이 "발행됨·
+     항목 0개"인 채로 남는다 — 실제 경합으로 재현하긴 어렵지만(단일 스레드 테스트) 코드 경로만
+     으로 성립하는 지적이라 서비스 코드를 고쳐 안전한 placeholder(draft:true·publishedAt:null)로
+     만들게 했다(saveWeek 주석 참고). 진짜 경합 대신 **같은 실패 지점**(청구 성공 뒤 2단계 batch
+     실패)을 db.batch 를 감싸 결정적으로 재현한다 — saveWeek 은 db.batch 를 정확히 두 번 부른다
+     (메타·이전 항목을 읽는 1회, 실제 쓰기 2회)는 사실에 의존하므로, 그 호출 횟수가 바뀌면 이
+     테스트도 같이 고쳐야 한다. */
+  it("null revision 청구 뒤 2단계가 실패해도 그 주는 발행된 채로 안 남는다", async () => {
+    const db = makeDb(env.DB);
+    let batchCalls = 0;
+    const failingDb = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === "batch") {
+          return (...args: Parameters<Db["batch"]>) => {
+            batchCalls += 1;
+            if (batchCalls === 2) return Promise.reject(new Error("simulated batch failure"));
+            return target.batch(...(args as Parameters<Db["batch"]>));
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Db;
+
+    await expect(
+      saveWeek(failingDb, {
+        weekStartDate: toIsoDate(MON),
+        revision: null,
+        note: null,
+        published: true,
+        entries: [{ scheduledDate: toIsoDate(MON), startTime: null, title: "젤다", gameId: null }],
+      }),
+    ).rejects.toThrow();
+
+    // 1단계 청구는 (실제 DB 에) 성공했더라도, 그 행은 안전한 placeholder 로 남아야 한다 —
+    // 실패가 "발행됨·항목 0개"를 남기면 손실 0 은 지켜도 발행 경계가 샌다.
+    const week = await getWeekForEdit(db, MON);
+    expect(week.publishedAt).toBeNull();
+    expect(week.draft).toBe(true);
+    expect(week.entries).toHaveLength(0);
   });
 
   /* 공개 철회는 "공개를 거둔다"이지 "안 짠 것으로 되돌린다"가 아니다. 한 번 발행한 주를 내렸다고

@@ -255,21 +255,28 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      null 이면 INSERT … onConflictDoNothing(그 사이 아무도 안 만들었을 때만). 어느 쪽이든 0행이면
      그 사이 누가 손댄 것이라 CONFLICT.
 
-     **두 경로가 published_at 을 다루는 방식이 반대인 게 핵심이다.**
-     - 기존 주(revision 있음): published_at 을 **안 건드린다**(revision 만 단조 증가). 이미 값이
-       있는데 실패한 저장이 그걸 바꾸면 발행 경계를 넘는다 — 그래서 진짜 값은 2단계 batch 에서만
-       원자적으로 쓴다(round-4 에서 이렇게 닫았다).
-     - 새/레거시 주(revision null): 행이 **없어서** 문제가 반대다. 청구가 빈 placeholder 를
-       만들면 그 순간 도메인 상태가 정해지는데, 청구 뒤 batch 가 실패하면 그 상태가 남는다
-       (적대적 리뷰가 잡은 자리). 그래서 null 청구는 **의도한 메타(note·draft·published_at)를
-       담아** 만든다 — 레거시 주라면 위에서 유도한 draft 가 false 라, 실패해도 그 주 항목이
-       계속 보드에 뜬다(손실 0 유지). 여기서 값을 담아도 round-4 문제가 안 도지는 건 바꿀 기존
-       값이 없기 때문이다(생성이지 변경이 아니다). */
+     **두 경로 모두 published_at 을 청구 단계에서 안 건드린다** — 진짜 값은 항상 2단계 batch
+     에서만 원자적으로 쓴다.
+     - 기존 주(revision 있음): revision 만 단조 증가시킨다(round-4 에서 이렇게 닫았다).
+     - 새/레거시 주(revision null): 한때 여기서 **의도한 메타(note·draft·published_at)를 그대로
+       담아** 행을 만들었다("생성이지 변경이 아니니 안전하다"는 논리) — 그런데 그 논리가 놓친
+       자리가 있다: 이 INSERT 뒤 0단계가 못 잡는 새 참조 무결성 위반(예: 프리검증 SELECT 와
+       2단계 INSERT 사이에 다른 관리자가 참조 게임을 지움)으로 2단계가 실패하면, **이미 커밋된
+       이 메타 행이 "발행됨·항목 0개"인 채로 남는다**(적대적 리뷰 3라운드가 실측 없이 추론으로
+       잡은 자리 — 코드 경로만으로 성립하는 지적이라 타당하다). 그래서 지금은 **항상 안전한
+       placeholder**(`draft: true`·`publishedAt: null` — 보드도 공개도 안 세는 상태)로 만들고,
+       의도한 실제 값은 기존 주와 똑같이 2단계에서만 쓴다. 2단계가 실패해도 이 행은 placeholder
+       그대로 남아 아무것도 안 샌다 — 두 경로의 안전 논리가 이제 하나로 합쳐진다. */
   const claimed =
     input.revision === null
       ? await db
           .insert(scheduleWeeks)
-          .values({ weekStartDate: input.weekStartDate, note: input.note, draft, publishedAt })
+          .values({
+            weekStartDate: input.weekStartDate,
+            note: input.note,
+            draft: true,
+            publishedAt: null,
+          })
           .onConflictDoNothing({ target: scheduleWeeks.weekStartDate })
           .returning({ id: scheduleWeeks.id })
       : await db
