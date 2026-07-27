@@ -238,7 +238,14 @@ export function ScheduleGameSearch({
     send({ type: "activeMoved", to });
   }
 
-  const searching = query !== "" && !hasExactLocalMatch && !state.context.searched;
+  // searchError 가 있으면 searched 는 여전히 false 다(요청이 결론 없이 실패했으므로) — 그
+  // 실패까지 "찾는 중…"으로 읽으면 에러 문구 옆에서 로딩 표시가 영원히 안 풀린다(리뷰 지적,
+  // PR #114 7라운드). game-composer.tsx 의 finding 판정과 같은 이유로 같은 예외를 둔다.
+  const searching =
+    query !== "" &&
+    !hasExactLocalMatch &&
+    !state.context.searched &&
+    state.context.searchError === "";
 
   return (
     <div className="sched-picker" data-od-id={idPrefix + "picker"}>
