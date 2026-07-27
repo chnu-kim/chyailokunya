@@ -139,26 +139,48 @@ describe("일정 라우터", () => {
 
   it("발행 시각은 처음 발행 때만 찍고 재저장엔 유지, 내리면 null", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
+    // 빈 주는 발행이 거절되므로(아래 "빈 주는 발행이 거절된다") 항목을 하나 채운다.
+    const entry = { scheduledDate: "2026-07-20", title: "젤다" };
     const first = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: true,
-      entries: [],
+      entries: [entry],
     });
     expect(typeof first.publishedAt).toBe("number");
     // 재저장(계속 발행)엔 발행 시각이 안 바뀐다.
     const again = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: true,
-      entries: [],
+      entries: [entry],
     });
     expect(again.publishedAt).toBe(first.publishedAt);
     // 발행을 내리면 공개가 꺼진다 — 다만 "짜는 중"으로 되돌아가지는 않는다(아래 테스트).
     const unpublished = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: false,
-      entries: [],
+      entries: [entry],
     });
     expect(unpublished.publishedAt).toBeNull();
+  });
+
+  /* 적대적 리뷰 지적(2026-07-28, PR #114 2라운드) — EmptyWeekCannotPublish 를 publishWeek 에만
+     걸면 saveWeek(여전히 노출된, schedule:write 권한자가 직접 부를 수 있는 뮤테이션)으로 그대로
+     우회된다. saveWeek 은 전체 교체라 input.entries 가 곧 저장 후의 항목 전체이므로 DB 조회 없이
+     입력만으로 판정한다. */
+  it("빈 주는 saveWeek(published:true) 로도 발행이 거절된다 — publishWeek 우회 경로를 막는다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    await expect(
+      caller.schedule.saveWeek({
+        weekStartDate: MON,
+        revision: null,
+        published: true,
+        entries: [],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // 거절됐으면 메타 자체가 안 생긴다 — DB 를 하나도 안 건드리고 막혔다는 뜻이다.
+    const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.revision).toBeNull();
+    expect(week.publishedAt).toBeNull();
   });
 
   /* 공개 철회는 "공개를 거둔다"이지 "안 짠 것으로 되돌린다"가 아니다. 한 번 발행한 주를 내렸다고

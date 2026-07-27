@@ -352,6 +352,47 @@ test("관리자: 게임 검색 — 보드에 있는 게임은 로컬에서 즉�
   await expect(trigger).toHaveText("게임 연결");
 });
 
+/* 적대적 리뷰 지적(2026-07-28, PR #114 2라운드) — 로컬 부분 일치("엘든"을 찾는데 로컬엔
+   "엘든 링"만 있음)만으로 치지직 검색을 막으면, 실제로 다른 게임("엘든 링 확장팩")을 찾는
+   사용자는 영영 치지직 검색도 직접 추가도 못 여는 막다른 골목에 갇힌다
+   (schedule-game-search.tsx 의 hasExactLocalMatch 주석). 정확히 같은 이름일 때만 막아야
+   한다는 걸 실제 화면에서 못박는다. */
+test("관리자: 게임 검색 — 로컬 부분 일치가 있어도 치지직 검색이 막히지 않는다", async ({
+  page,
+  baseURL,
+}) => {
+  await page.route("**/api/trpc/chzzk.categorySearch*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        result: {
+          data: [
+            {
+              categoryType: "GAME",
+              categoryId: "c-e2e-partial",
+              categoryValue: "엘든 링 확장팩",
+              posterImageUrl: null,
+            },
+          ],
+        },
+      }),
+    }),
+  );
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 읽는 먼 미래 주.
+  await page.goto("/schedule?week=2034-02-06");
+  await page.locator('[data-od-id="schedule-day-add-2034-02-06"]').click();
+
+  const trigger = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
+  await trigger.click();
+  // "엘든"은 로컬의 "엘든 링"과 부분 일치일 뿐 정확히 같은 이름이 아니므로, 로컬 매치와
+  // 치지직 검색 결과가 함께 뜬다.
+  await page.locator('[data-od-id$="-input"][role="combobox"]').fill("엘든");
+  await expect(page.locator(".sched-picker__result", { hasText: "엘든 링" })).toBeVisible();
+  await expect(page.locator(".sched-picker__result", { hasText: "엘든 링 확장팩" })).toBeVisible();
+});
+
 test("관리자: 게임 검색 — 로컬에 없으면 치지직에서 찾아 새로 추가하고 즉시 잇는다", async ({
   page,
   baseURL,

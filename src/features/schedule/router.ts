@@ -42,6 +42,15 @@ export const scheduleRouter = router({
         if (e instanceof ReferencedGameMissing || isForeignKeyViolation(e)) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "보드에 없는 게임을 가리켰습니다." });
         }
+        // UI 는 이미 막지만(canPublish, entries.length>0) 그건 편의일 뿐 유일한 방어선이 아니다 —
+        // saveWeek 도 published:true 를 받으므로 이 노출된 경로에도 서버가 같은 규칙을 강제한다
+        // (적대적 리뷰 지적 — publishWeek 에만 걸면 이 뮤테이션으로 그대로 우회된다).
+        if (e instanceof EmptyWeekCannotPublish) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "항목이 있어야 발행할 수 있습니다.",
+          });
+        }
         throw e;
       }
     }),

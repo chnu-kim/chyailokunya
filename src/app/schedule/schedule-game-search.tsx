@@ -26,9 +26,13 @@ import { trpc } from "@/features/trpc/client";
       안 쓰는 인라인 스프레드시트형이고(schedule-editor.tsx 파일 상단 주석), 여기만 모달을 끌어오면
       회귀 격리 원칙이 깨진다.
    2. **보드에 이미 있는 게임을 먼저 본다.** `localGames`(부모가 들고 있는, 이번 세션에 새로 추가한
-      게임까지 포함된 로컬 목록)를 검색어로 즉시 필터링해 보여준다 — 매주 반복되는 게임은 네트워크
-      없이 한 클릭으로 잇는다(결정 11의 원래 근거, "이 선택만으로 왕복이 없다"). 로컬에 없을 때만
-      `composerMachine`(치지직 검색)의 디바운스 검색을 태운다.
+      게임까지 포함된 로컬 목록)를 검색어로 즉시 필터링해 보여준다(부분 일치 포함) — 매주
+      반복되는 게임은 네트워크 없이 한 클릭으로 잇는다(결정 11의 원래 근거, "이 선택만으로
+      왕복이 없다"). 로컬에 **정확히 같은 이름**이 있을 때만 `composerMachine`(치지직 검색)의
+      디바운스 검색을 안 태운다 — 부분 일치만으론 막지 않는다. "헤이데스"를 찾는데 로컬엔
+      "헤이데스 2"만 있는 경우처럼, 부분 일치로 목록이 안 비는 것과 "찾는 게임이 있다"는 다른
+      사실이라(적대적 리뷰가 잡은 막다른 골목 — 첫 판은 `localMatches.length` 하나로 갈라
+      이 경우 치지직 검색도 직접 추가도 영영 못 열었다), `hasExactLocalMatch` 를 따로 둔다.
    3. **치지직에서 고른 건 확인 없이 바로 추가한다.** 정본 카테고리라 되돌릴 이유가 약하다.
       반면 **직접 입력(자유 텍스트)은 인라인 확인을 한 번 거친다** — 오타 하나가 영구 게임 행을
       만들 수 있어서다(치지직 pick 과 달리 정본 확인이 없다).
@@ -93,13 +97,23 @@ export function ScheduleGameSearch({
     inputRef.current?.focus();
   }, []);
 
-  /* 보드에 이미 있는 게임 즉시 필터(네트워크 없음). 여기가 비어 있을 때만 아래 effect 가 치지직
-     검색을 태운다 — 매주 반복되는 게임은 이 목록 하나로 끝난다(결정 11). */
+  /* 보드에 이미 있는 게임 즉시 필터(네트워크 없음) — 매주 반복되는 게임은 이 목록 하나로
+     끝난다(결정 11). 부분 일치까지 보여준다("헤이데스"를 치면 "헤이데스 2"도 뜬다) — 그래야
+     비슷한 이름의 다른 게임이 이미 있어도 그 카드를 눈으로 확인하고 지나칠 수 있다. */
   const localMatches = useMemo(() => {
     if (query === "") return [];
     const q = query.toLowerCase();
     return localGames.filter((g) => g.categoryValue.toLowerCase().includes(q)).slice(0, 8);
   }, [localGames, query]);
+
+  /* 로컬에 **정확히 같은 이름**이 있을 때만 치지직 검색을 안 태운다 — 그 게임을 이미 찾았다고
+     본다. 부분 일치만으론 안 막는다: "헤이데스"를 찾는데 로컬엔 "헤이데스 2"만 있으면 그건
+     다른 게임이라, localMatches.length 로만 가르면(첫 판의 실수 — 적대적 리뷰 지적) 원하는
+     게임을 영영 치지직에서 못 찾고 직접 추가도 못 하는 막다른 골목이 된다. */
+  const hasExactLocalMatch = useMemo(
+    () => localMatches.some((g) => g.categoryValue.trim().toLowerCase() === query.toLowerCase()),
+    [localMatches, query],
+  );
 
   async function runSearch(submitted: string) {
     const q = submitted.trim();
@@ -116,15 +130,15 @@ export function ScheduleGameSearch({
     }
   }
 
-  // localMatches 가 있으면 치지직 검색을 안 태운다 — game-composer.tsx 의 debounce effect 와
-  // 같은 모양이되 이 페이지만의 판단(로컬 우선)이 하나 더 낀다.
+  // 정확히 같은 이름이 로컬에 있으면 치지직 검색을 안 태운다 — game-composer.tsx 의 debounce
+  // effect 와 같은 모양이되 이 페이지만의 판단(로컬 우선)이 하나 더 낀다.
   useEffect(() => {
-    if (localMatches.length > 0) return;
+    if (hasExactLocalMatch) return;
     if (!composerNeedsSearch(state.context)) return;
     const timer = setTimeout(() => void runSearch(state.context.query), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.context.query, state.context.searched, state.context.selected, localMatches.length]);
+  }, [state.context.query, state.context.searched, state.context.selected, hasExactLocalMatch]);
 
   useEffect(() => {
     if (state.context.activeIndex < 0) return;
@@ -210,7 +224,7 @@ export function ScheduleGameSearch({
     send({ type: "activeMoved", to });
   }
 
-  const searching = query !== "" && localMatches.length === 0 && !state.context.searched;
+  const searching = query !== "" && !hasExactLocalMatch && !state.context.searched;
 
   return (
     <div className="sched-picker" data-od-id={idPrefix + "picker"}>
@@ -286,7 +300,9 @@ export function ScheduleGameSearch({
             </p>
           )}
 
-          {localMatches.length === 0 && query !== "" && (
+          {/* 로컬에 부분 일치가 있어도 정확히 같은 이름이 아니면 이 목록을 같이 보여준다 —
+              hasExactLocalMatch 주석 참고(적대적 리뷰가 잡은 막다른 골목). */}
+          {!hasExactLocalMatch && query !== "" && (
             <ul
               className="sched-picker__results"
               id={resultsId}

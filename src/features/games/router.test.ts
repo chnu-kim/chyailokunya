@@ -669,12 +669,14 @@ describe("games 라우터", () => {
   it("이미 발행된 주는 게임 폼이 건드려도 발행 상태가 유지된다", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const row = await authed.games.add(eldenring);
-    // 편집기가 그 주를 발행 상태로 세운다.
+    /* 편집기가 그 주를 발행 상태로 세운다. 빈 주는 발행할 수 없으므로(이슈 #56 결정 22,
+       2026-07-28 서버 강제) 자유 항목을 하나 채운 채로 발행한다 — 이 테스트의 관심사(발행
+       상태가 게임 폼의 쓰기에 안 흔들리는가)와는 무관한 전제조건일 뿐이다. */
     await authed.schedule.saveWeek({
       weekStartDate: "2026-07-20",
       revision: null,
       published: true,
-      entries: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "이미 있던 항목" }],
     });
 
     await authed.games.update({
@@ -687,7 +689,9 @@ describe("games 라우터", () => {
 
     const published = await getPublishedWeek(makeDb(env.DB), "2026-07-20");
     expect(published).not.toBeNull();
-    expect(published!.entries).toHaveLength(1); // 게임 폼이 넣은 항목이 그 주에 선다
+    // 게임 폼이 넣은 항목이 기존 항목 옆에 더해진다 — 발행 상태·기존 항목 둘 다 안 건드린다.
+    expect(published!.entries).toHaveLength(2);
+    expect(published!.entries.map((e) => e.scheduledDate)).toContain("2026-07-22");
   });
 
   /* ── 편집기의 낙관적 동시성 ────────────────────────────────────────────────────────

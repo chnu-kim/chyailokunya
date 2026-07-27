@@ -196,6 +196,13 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
   const { monday, sunday } = weekBounds(input.weekStartDate);
   const now = Date.now();
 
+  /* 빈 주는 발행할 수 없다(publishWeek 과 같은 규칙, 결정 22) — saveWeek 은 전체 교체라
+     `input.entries` 가 곧 저장 후의 항목 전체다(DB 조회 없이 입력만으로 판정된다). publishWeek
+     에만 이 검사를 걸면 이 뮤테이션(schedule:write 권한자가 여전히 직접 부를 수 있는 노출된
+     경로)으로 그대로 우회된다 — 적대적 리뷰가 실제로 이 자리를 잡았다. DB 를 하나도 안 건드린
+     시점에 거절해 실패가 아무 흔적도 안 남긴다. */
+  if (input.published && input.entries.length === 0) throw new EmptyWeekCannotPublish();
+
   /* ── 0단계: 참조 게임을 **메타를 건드리기 전에** 검증한다 ─────────────────────────
      gameId 가 없는 게임을 가리키면 2단계 INSERT 가 FK 로 실패한다. 그 실패를 메타 이전으로 옮겨,
      에디터 로드 후 다른 관리자가 게임을 지운 현실적 시나리오에서 schedule_weeks 가 안 바뀌게 한다.
