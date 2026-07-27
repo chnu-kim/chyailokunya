@@ -2,12 +2,18 @@
    클라이언트 JS 를 하나도 안 싣는다(공개 읽기는 요청마다 서버가 정본을 준다). 발행된 주만
    받는다(page.tsx 가 비관리자에게 getPublishedWeek 을 준다) — 미발행이면 week 가 null 이라
    "준비 중" 빈 상태로 떨어진다. 항목 정렬(하루 안 시각순)은 서버 getWeekForEdit 의 SQL 이 이미
-   해 뒀다. 월간 캘린더·PNG 공유 카드는 다음 작업순서(5의 /calendar·7)라 여기 없다. */
+   해 뒀다. 월간 캘린더는 다음 작업순서(5의 /calendar)라 여기 없다.
+
+   PNG 다운로드(이슈 #109 작업순서 3)는 week 가 있을 때만 건다 — 없으면(미발행) 이미 위
+   "아직이야…" 빈 상태가 그 사실을 말하므로, 비활성 버튼을 또 하나 얹지 않는다(WeekCardDownload
+   는 그 변형도 지원하지만 이 화면에선 늘 card 가 있을 때만 쓴다). */
 
 import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
 import type { GameOption } from "@/features/games/service";
+import { buildWeekCard } from "@/features/schedule/card";
 import type { WeekView } from "@/features/schedule/service";
 import { formatMD, timeLabel, WeekNav } from "./schedule-shared";
+import { WeekCardDownload } from "./week-card-download";
 
 export function ScheduleReadView({
   weekStartDate,
@@ -86,6 +92,8 @@ export function ScheduleReadView({
                 );
               })}
             </ol>
+
+            <WeekCardDownload card={buildWeekCard(week)} weekStartDate={weekStartDate} />
           </>
         ) : (
           <div className="sched__empty" data-od-id="schedule-empty">

@@ -42,6 +42,39 @@ test("관리자: 편집기로 항목을 저장하고 되읽는다", async ({ pag
   );
 });
 
+/* PNG 다운로드 카드는 baseline(저장된 값)으로 그린다 — 폼에 미저장 변경이 남아 있으면 미리보기가
+   그 변경을 안 보여주는데, 신호가 없으면 "지금 받으면 뭐가 나가지"가 된다(이슈 #109 작업순서 3,
+   적대적 리뷰가 잡은 자리). 이 스펙은 그 신호가 실제로 뜨고 저장하면 걷히는지를 본다. */
+test("관리자: 발행된 주에 미저장 변경이 있으면 다운로드 카드에 힌트가 뜬다", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 읽는 먼 미래 주.
+  await page.goto("/schedule?week=2030-05-06");
+
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  const title = page.locator('[data-od-id^="schedule-entry-title-"]').first();
+  await title.fill("e2e 발행 항목");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+
+  // 발행된 채 저장 직후라 카드가 있고, 아직 미저장 변경이 없으니 힌트도 없다.
+  const stale = page.locator('[data-od-id="week-card-download-stale"]');
+  await expect(page.locator('[data-od-id="week-card"]')).toBeVisible();
+  await expect(stale).toHaveCount(0);
+
+  // 저장 없이 제목만 고치면 힌트가 뜬다.
+  await title.fill("e2e 발행 항목 수정");
+  await expect(stale).toBeVisible();
+
+  // 다시 저장하면 baseline 이 갈아 끼워져 힌트가 걷힌다.
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+  await expect(stale).toHaveCount(0);
+});
+
 test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({
   page,
   baseURL,
@@ -102,6 +135,56 @@ test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 �
      항목 없는 이 주는 draft(보드에도 안 뜸)이고, 레거시 주는 확정 비공개(보드엔 뜸)다.
      그 차이는 화면에 안 나오므로 단위 테스트가 draft 축을 직접 본다. */
   await expect(page.locator('[data-od-id="schedule-publish"]')).not.toBeChecked();
+});
+
+/* 공개 읽기의 PNG 다운로드 회귀(적대적 리뷰 지적, PR #112). WeekCardDownload 의 submit 머신
+   run 은 마운트 시점에 얼어붙는데(submit.machine.ts), 읽기 화면은 편집기와 달리 이 컴포넌트를
+   key 로 리마운트시키지 않는다 — WeekNav 클라이언트 네비로 주를 넘기면 같은 컴포넌트 인스턴스가
+   새 props 만 받는다. weekStartDate 를 그 run 클로저에서 직접 읽으면(고쳐지기 전 코드) 캡처된
+   그림은 새 주인데 파일명만 첫 주에 고정된다 — 그래서 submit 이벤트의 values 로 실어 보내게
+   고쳤고, 이 스펙이 실제 브라우저 네비게이션으로 그 수정을 못박는다(dom 단위 테스트는
+   rerender() 로 같은 걸 더 빠르게 재현한다, week-card-download.test.tsx). */
+test("공개 읽기: WeekNav 로 주를 넘겨도(리마운트 없이) 다운로드 파일명이 새 주를 따라간다", async ({
+  page,
+  baseURL,
+  browser,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 인접한 두 주 — 다른 스펙이 안 읽는 자리.
+  await page.goto("/schedule?week=2031-06-02");
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("A 주 항목");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+
+  await page.goto("/schedule?week=2031-06-09");
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("B 주 항목");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+
+  // 비로그인 컨텍스트로 공개 읽기 화면에서 실제 WeekNav 클라이언트 네비게이션(리마운트 없음)을 탄다.
+  // baseURL 을 명시한다 — browser.newContext() 는 이 프로젝트에서 실측으로 config 의 baseURL 을
+  // 이어받는 걸 확인했지만(fixture 로 만든 page 와 달리 보장이 문서화돼 있지 않다), 상대 경로
+  // goto 가 이 컨텍스트에서도 반드시 서게 명시적으로 못박는다(codex review 지적).
+  const anon = await browser.newContext({ baseURL });
+  const pub = await anon.newPage();
+  await pub.goto("/schedule?week=2031-06-02");
+  await expect(pub.locator('[data-od-id="week-card"]')).toBeVisible();
+
+  await pub.locator('.sched-nav__step[rel="next"]').click();
+  await expect(pub).toHaveURL(/week=2031-06-09/);
+  await expect(pub.locator('[data-od-id="week-card"]')).toContainText("B 주 항목");
+
+  const [download] = await Promise.all([
+    pub.waitForEvent("download"),
+    pub.locator('[data-od-id="week-card-download-btn"]').click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("챠이로쿠냐_주간일정_2031-06-09.png");
+
+  await anon.close();
 });
 
 /* og:url canonical(적대적 리뷰 지적). 발행 여부와 무관하게 metadata 는 항상 나가므로 로그인·

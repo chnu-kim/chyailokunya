@@ -589,3 +589,29 @@ test.describe("본문 터치 타깃 — 팬 제안", () => {
     });
   }
 });
+
+/* 주간표 PNG 다운로드 버튼의 44 하한(이슈 #109 작업순서 3). `.btn` 계열엔 min-height 가 없어
+   (위 두 자리와 같은 함정) `.week-card-download__btn` 이 직접 못박았는데, 그 값이 실제로 서는지
+   여기서 잰다. 픽스처엔 발행된 주가 없어(schedule.spec.ts 의 "픽스처엔 발행된 주가 없어" 주석)
+   버튼은 항상 비활성이다 — `disabled` 는 opacity 만 깎지 레이아웃은 안 바꾸므로(`.btn:disabled`,
+   chrome.css) 이 상태로도 크기 계약은 그대로 검증된다. 활성 상태의 클릭·PNG 검증은 작업순서 4
+   (이슈 #109 본문)의 몫이다. */
+test.describe("본문 터치 타깃 — 주간표 다운로드", () => {
+  for (const width of NARROW) {
+    test(`${width}px /schedule: PNG 다운로드 버튼이 44 하한을 지킨다`, async ({
+      page,
+      baseURL,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await signIn(page.context(), baseURL!);
+      // 다른 스펙이 안 읽는 먼 미래 주 — 초안이라 버튼은 비활성이지만 크기 계약은 같다.
+      await page.goto("/schedule?week=2029-02-05");
+      await expectSignedIn(page);
+      await page.evaluate(() => document.fonts.ready);
+      await expectTouchTarget(
+        page.locator('[data-od-id="week-card-download-btn"]'),
+        "PNG 다운로드",
+      );
+    });
+  }
+});

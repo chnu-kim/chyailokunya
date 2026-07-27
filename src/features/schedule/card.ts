@@ -6,7 +6,19 @@
    입력으로 받는데, core 는 db 계층 타입을 몰라야 한다(레이어 경계). */
 
 import { formatMD, toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
-import type { WeekView } from "./service";
+
+/* WeekView 전체가 아니라 카드가 실제로 쓰는 부분집합만 받는다(작업순서 3). 편집기(schedule-editor.tsx)
+   가 다운로드 미리보기를 만들 때 서버 왕복 없이 **저장된 상태**(schedule-save 머신의 baseline,
+   core 소유 WeekDraft)로도 이 함수를 불러야 하는데, WeekDraft.entries 는 core 타입(DraftEntry —
+   scheduledDate·startTime·title 에 key·gameId 가 더 있다)이다. 이 함수를 WeekView 로 못박으면
+   호출자가 그 타입 하나만 만들 수 있어, 편집기가 매번 가짜 WeekView 를 조립해야 한다 — 대신
+   실제로 쓰는 필드만 담은 구조적 타입을 두면 WeekView 도 WeekDraft(+weekStartDate)도 별다른
+   변환 없이 그대로 만족한다(TypeScript 구조적 타이핑, 여분 필드는 무시된다). */
+export type WeekCardSource = {
+  weekStartDate: string;
+  note: string | null;
+  entries: { scheduledDate: string; startTime: string | null; title: string }[];
+};
 
 /* 한 칸에 다 못 그리는 날의 상한. 실사용은 하루 1~2건(결정 8 의 예 — "오후 저챗 + 밤 게임")
    이지만 입력 상한(saveWeekInput 의 entries.max(60))은 이보다 훨씬 크다 — 몰아 넣힌 항목이
@@ -34,23 +46,23 @@ export type WeekCardData = {
   days: WeekCardDay[];
 };
 
-/* week.entries 는 이미 getWeekForEdit 의 SQL 정렬(날짜 오름차순 · 하루 안 시각 있는 항목 먼저 ·
-   id 순)을 탄 채로 온다 — 여기서 다시 정렬하지 않고 날짜로만 가른다. weekStartDate 를 별도
-   인자로 받지 않는 이유: WeekView.weekStartDate 가 이미 그 주를 유일하게 정하므로(getWeekForEdit
-   이 그대로 되돌려 준다), 같은 값을 두 자리에 실어 어긋날 여지를 만들지 않는다.
+/* source.entries 는 이미 정렬된 채로 온다고 가정한다 — 서버 호출자(WeekView)는 getWeekForEdit 의
+   SQL 정렬(날짜 오름차순 · 하루 안 시각 있는 항목 먼저 · id 순)을, 클라이언트 호출자(WeekDraft)는
+   entriesForDate 와 같은 규칙을 이미 태운 baseline 을 준다 — 여기서 다시 정렬하지 않고 날짜로만
+   가른다. weekStartDate 를 별도 인자로 받지 않는 이유: source.weekStartDate 가 이미 그 주를
+   유일하게 정하므로, 같은 값을 두 자리에 실어 어긋날 여지를 만들지 않는다.
 
-   week.weekStartDate 는 getWeekForEdit 이 호출자 인자를 검증 없이 그대로 echo 한 값이라 월요일이
-   아닐 수도 있다 — 그래도 안전한 이유는 weekDates 자체가 내부에서 weekStartOf 를 한 번 더 태워
-   무슨 요일을 넣든 그 주의 월요일부터 7일을 돌려주기 때문이다(calendar.ts 주석). 그래서 entries
-   를 가른 질의(getWeekForEdit 의 weekBounds)와 여기의 days 가 같은 정규화를 거쳐 항상 같은
-   7일을 가리킨다. */
-export function buildWeekCard(week: WeekView): WeekCardData {
-  const days = weekDates(toIsoDate(week.weekStartDate));
+   source.weekStartDate 는 호출자 인자를 검증 없이 그대로 echo 한 값이라 월요일이 아닐 수도
+   있다 — 그래도 안전한 이유는 weekDates 자체가 내부에서 weekStartOf 를 한 번 더 태워 무슨 요일을
+   넣든 그 주의 월요일부터 7일을 돌려주기 때문이다(calendar.ts 주석). 그래서 entries 를 가른 질의
+   (서버의 weekBounds)와 여기의 days 가 같은 정규화를 거쳐 항상 같은 7일을 가리킨다. */
+export function buildWeekCard(source: WeekCardSource): WeekCardData {
+  const days = weekDates(toIsoDate(source.weekStartDate));
   return {
     rangeLabel: `${formatMD(days[0]!)} – ${formatMD(days[6]!)}`,
-    note: week.note,
+    note: source.note,
     days: days.map((date, i) => {
-      const dayEntries = week.entries.filter((e) => e.scheduledDate === date);
+      const dayEntries = source.entries.filter((e) => e.scheduledDate === date);
       return {
         dow: WEEKDAY_LABELS[i]!,
         date: formatMD(date),
