@@ -3,6 +3,7 @@ import {
   addWeeks,
   dateOfInstantKST,
   isIsoDate,
+  resolveWeekParam,
   toIsoDate,
   todayKST,
   WEEKDAY_LABELS,
@@ -136,6 +137,26 @@ describe("weekStartOf", () => {
     // YYYY-MM-DD 가 아니라 ?week= 키·정렬이 깨진다. 방송 일정엔 안 올 값이지만 계약은
     // 무조건 참이어야 한다.
     expect(() => weekStartOf(d("0000-01-01"))).toThrow(TypeError);
+  });
+});
+
+describe("resolveWeekParam", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("실재하는 날짜면 그 주의 월요일로 정규화", () => {
+    expect(resolveWeekParam("2026-07-23")).toBe("2026-07-20");
+  });
+
+  it("undefined·형식 오류·실재하지 않는 날짜는 이번 주로 — 화면이 안 깨진다", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-23T00:00:00Z")); // KST 2026-07-23(목)
+    const thisWeek = "2026-07-20";
+    expect(resolveWeekParam(undefined)).toBe(thisWeek);
+    expect(resolveWeekParam("")).toBe(thisWeek);
+    expect(resolveWeekParam("2026-13-01")).toBe(thisWeek); // 형식만 맞고 실재하지 않음
+    expect(resolveWeekParam("not-a-date")).toBe(thisWeek);
   });
 });
 

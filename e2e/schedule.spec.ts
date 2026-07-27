@@ -103,3 +103,41 @@ test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 �
      그 차이는 화면에 안 나오므로 단위 테스트가 draft 축을 직접 본다. */
   await expect(page.locator('[data-od-id="schedule-publish"]')).not.toBeChecked();
 });
+
+/* og:image PNG 라우트(이슈 #56 작업순서 7). 페이지가 아니라 API 라우트를 직접 request 로
+   두드린다 — 카드 레이아웃(다건 항목·오버플로 등)은 core/features 단위 테스트가 이미
+   못박았고, 여기선 "발행 경계를 실제로 타는가"(공유 픽스처의 다른 스펙이 이미 증명한 값어치를
+   또 재느니)와 상태 코드·content-type 만 스모크한다. */
+test("관리자: 발행 전엔 og/schedule 이 404, 발행 후엔 실제 PNG", async ({
+  page,
+  baseURL,
+  request,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 건드리는 먼 주 — 항목·메타 둘 다 없는 브랜드-뉴 주라 초안(결정 13)이다.
+  const WEEK = "2029-05-07";
+  await page.goto(`/schedule?week=${WEEK}`);
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+
+  const before = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
+  expect(before.status()).toBe(404);
+
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("e2e 방송");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+
+  const save = page.locator('[data-od-id="schedule-save"]');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  const after = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
+  expect(after.status()).toBe(200);
+  expect(after.headers()["content-type"]).toBe("image/png");
+});
+
+test("og/schedule: 아무도 안 건드린 미래 주는 404", async ({ baseURL, request }) => {
+  // 위 테스트가 발행한 주와 다른 날짜 — 이 스펙 파일 안에서도 격리한다.
+  const res = await request.get(`${baseURL}/api/og/schedule?week=2029-05-14`);
+  expect(res.status()).toBe(404);
+});
