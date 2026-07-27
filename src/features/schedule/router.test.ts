@@ -184,48 +184,84 @@ describe("일정 라우터", () => {
     expect(week.publishedAt).toBeNull();
   });
 
-  /* 적대적 리뷰 지적(2026-07-28, PR #114 3라운드) — null revision(새/레거시 주) 청구는 한때
-     "의도한 메타(note·draft·published_at)를 그대로 담아" 행을 만들었다("생성이지 변경이 아니라
-     안전하다"는 논리). 그런데 프리검증(0단계) SELECT 와 2단계 batch INSERT 사이에 참조 게임이
-     지워지는 것처럼 0단계가 못 잡는 이유로 2단계가 실패하면, 이미 커밋된 그 메타 행이 "발행됨·
-     항목 0개"인 채로 남는다 — 실제 경합으로 재현하긴 어렵지만(단일 스레드 테스트) 코드 경로만
-     으로 성립하는 지적이라 서비스 코드를 고쳐 안전한 placeholder(draft:true·publishedAt:null)로
-     만들게 했다(saveWeek 주석 참고). 진짜 경합 대신 **같은 실패 지점**(청구 성공 뒤 2단계 batch
-     실패)을 db.batch 를 감싸 결정적으로 재현한다 — saveWeek 은 db.batch 를 정확히 두 번 부른다
-     (메타·이전 항목을 읽는 1회, 실제 쓰기 2회)는 사실에 의존하므로, 그 호출 횟수가 바뀌면 이
-     테스트도 같이 고쳐야 한다. */
-  it("null revision 청구 뒤 2단계가 실패해도 그 주는 발행된 채로 안 남는다", async () => {
-    const db = makeDb(env.DB);
+  /* db.batch 를 감싸 n번째 호출만 실패시킨다 — saveWeek 의 특정 단계(0단계가 못 잡는 이유로
+     2단계가 실패하는 경우 등) 실패를 결정적으로 재현한다. 진짜 경합(프리검증 SELECT 와 2단계
+     INSERT 사이에 다른 관리자가 참조 게임을 지움 등)은 단일 스레드 테스트로 못 만든다 — 대신
+     **같은 실패 지점**을 재현한다. saveWeek 은 db.batch 를 정확히 두 번 부른다(메타·이전 항목을
+     읽는 1회, 실제 쓰기 2회)는 사실에 의존하므로, 그 호출 횟수가 바뀌면 이 헬퍼를 쓰는 테스트도
+     같이 고쳐야 한다. */
+  function dbFailingOnNthBatch(db: Db, n: number): Db {
     let batchCalls = 0;
-    const failingDb = new Proxy(db, {
+    return new Proxy(db, {
       get(target, prop, receiver) {
         if (prop === "batch") {
           return (...args: Parameters<Db["batch"]>) => {
             batchCalls += 1;
-            if (batchCalls === 2) return Promise.reject(new Error("simulated batch failure"));
+            if (batchCalls === n) return Promise.reject(new Error("simulated batch failure"));
             return target.batch(...(args as Parameters<Db["batch"]>));
           };
         }
         return Reflect.get(target, prop, receiver);
       },
     }) as Db;
+  }
 
+  /* 적대적 리뷰 지적(2026-07-28, PR #114 3~4라운드) — null revision(새/레거시 주) 청구는 한때
+     "의도한 메타(note·draft·published_at)를 그대로 담아" 행을 만들었다("생성이지 변경이 아니라
+     안전하다"는 논리). 그런데 프리검증(0단계) SELECT 와 2단계 batch INSERT 사이에 참조 게임이
+     지워지는 것처럼 0단계가 못 잡는 이유로 2단계가 실패하면, 이미 커밋된 그 메타 행이 "발행됨·
+     항목 0개·제출한 공지"인 채로 남는다(3라운드가 draft·publishedAt 을, 4라운드가 note 를 잡았다).
+     서비스가 청구 행을 "메타 행이 아예 없던 상태"와 같은 뜻으로 채우게 고쳤다(saveWeek 주석
+     참고) — note 가 진짜로 안 남는지까지 이 테스트가 본다(4라운드 지적: 첫 판은 note:null 만
+     테스트해 이 누락을 못 잡았다). */
+  it("null revision 청구 뒤 2단계가 실패해도 그 주는 발행·공지된 채로 안 남는다", async () => {
+    const db = makeDb(env.DB);
     await expect(
-      saveWeek(failingDb, {
+      saveWeek(dbFailingOnNthBatch(db, 2), {
         weekStartDate: toIsoDate(MON),
         revision: null,
-        note: null,
+        note: "저장이 거절됐다는데 남으면 안 되는 공지",
         published: true,
         entries: [{ scheduledDate: toIsoDate(MON), startTime: null, title: "젤다", gameId: null }],
       }),
     ).rejects.toThrow();
 
     // 1단계 청구는 (실제 DB 에) 성공했더라도, 그 행은 안전한 placeholder 로 남아야 한다 —
-    // 실패가 "발행됨·항목 0개"를 남기면 손실 0 은 지켜도 발행 경계가 샌다.
+    // 실패가 "발행됨·항목 0개·공지 있음"을 남기면 손실 0 은 지켜도 발행 경계가 샌다.
     const week = await getWeekForEdit(db, MON);
     expect(week.publishedAt).toBeNull();
+    expect(week.note).toBeNull();
     expect(week.draft).toBe(true);
     expect(week.entries).toHaveLength(0);
+  });
+
+  /* 4라운드가 잡은 반대 방향 회귀 — draft placeholder 를 무조건 true 로 두면, 메타 없이 이미
+     보드에 떠 있던 **레거시 주**(항목은 있고 메타는 없어 coalesce 로 draft=0 취급, ADR-0024)가
+     저장 실패의 그 순간 draft=true 로 바뀌어 **보드에서 사라진다** — 저장이 실패했을 뿐인데
+     이미 공개돼 있던 데이터가 없어지면 손실 0(결정 16)이 정확히 깨진다. placeholder 의 draft 는
+     "메타 행이 없었을 때와 같은 값"(priorEntries.length===0)이어야 한다. */
+  it("null revision 청구 뒤 2단계가 실패해도 이관된 레거시 주는 보드에서 안 사라진다", async () => {
+    const db = makeDb(env.DB);
+    // 마이그레이션 0007 이 만드는 모양 그대로: 항목만 있고 schedule_weeks 메타는 없다.
+    await db.insert(scheduleEntries).values({ scheduledDate: MON, title: "레거시 항목" });
+    const before = await getWeekForEdit(db, MON);
+    expect(before.draft).toBe(false); // 메타 없음 + 항목 있음 = 확정(보드에 뜸)
+
+    await expect(
+      saveWeek(dbFailingOnNthBatch(db, 2), {
+        weekStartDate: toIsoDate(MON),
+        revision: null, // 메타가 없으니 편집기가 읽는 revision 도 null 이다.
+        note: null,
+        published: false,
+        entries: [
+          { scheduledDate: toIsoDate(MON), startTime: null, title: "레거시 항목", gameId: null },
+        ],
+      }),
+    ).rejects.toThrow();
+
+    const after = await getWeekForEdit(db, MON);
+    expect(after.draft).toBe(false); // 저장이 실패했다고 갑자기 보드에서 빠지면 안 된다
+    expect(after.entries.map((e) => e.title)).toEqual(["레거시 항목"]);
   });
 
   /* 공개 철회는 "공개를 거둔다"이지 "안 짠 것으로 되돌린다"가 아니다. 한 번 발행한 주를 내렸다고

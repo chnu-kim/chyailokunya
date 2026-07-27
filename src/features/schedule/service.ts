@@ -255,26 +255,35 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      null 이면 INSERT … onConflictDoNothing(그 사이 아무도 안 만들었을 때만). 어느 쪽이든 0행이면
      그 사이 누가 손댄 것이라 CONFLICT.
 
-     **두 경로 모두 published_at 을 청구 단계에서 안 건드린다** — 진짜 값은 항상 2단계 batch
-     에서만 원자적으로 쓴다.
+     **두 경로 모두 published_at·note 를 청구 단계에서 안 건드린다** — 진짜 값은 항상 2단계
+     batch 에서만 원자적으로 쓴다.
      - 기존 주(revision 있음): revision 만 단조 증가시킨다(round-4 에서 이렇게 닫았다).
      - 새/레거시 주(revision null): 한때 여기서 **의도한 메타(note·draft·published_at)를 그대로
        담아** 행을 만들었다("생성이지 변경이 아니니 안전하다"는 논리) — 그런데 그 논리가 놓친
        자리가 있다: 이 INSERT 뒤 0단계가 못 잡는 새 참조 무결성 위반(예: 프리검증 SELECT 와
        2단계 INSERT 사이에 다른 관리자가 참조 게임을 지움)으로 2단계가 실패하면, **이미 커밋된
        이 메타 행이 "발행됨·항목 0개"인 채로 남는다**(적대적 리뷰 3라운드가 실측 없이 추론으로
-       잡은 자리 — 코드 경로만으로 성립하는 지적이라 타당하다). 그래서 지금은 **항상 안전한
-       placeholder**(`draft: true`·`publishedAt: null` — 보드도 공개도 안 세는 상태)로 만들고,
-       의도한 실제 값은 기존 주와 똑같이 2단계에서만 쓴다. 2단계가 실패해도 이 행은 placeholder
-       그대로 남아 아무것도 안 샌다 — 두 경로의 안전 논리가 이제 하나로 합쳐진다. */
+       잡은 자리 — 코드 경로만으로 성립하는 지적이라 타당하다).
+
+       그래서 청구 행은 **"메타 행이 아예 없던 상태"와 정확히 같은 뜻**으로 채운다 — `note`·
+       `publishedAt` 은 null(행이 없었으면 공지도 발행도 없었다), `draft` 는 `priorEntries.length
+       === 0`(getWeekForEdit·보드의 `coalesce(draft,0)=0`과 같은 유도식 — 이관된 레거시 주(항목
+       있음)는 false, 아직 아무도 안 짠 새 주는 true). **`draft` 를 무조건 `true`로 두면 안 되는
+       이유**(4라운드 지적) — 레거시 주는 메타 행이 없어도 이미 보드에 날짜가 뜨고 있었는데
+       (coalesce 가 행 없음을 draft=0 으로 접는다), 여기서 무조건 true 로 청구하면 2단계가
+       실패했을 때 **그 순간만 보드에서 날짜가 사라진다** — 저장이 실패했을 뿐인데 이미 공개돼
+       있던 데이터가 사라지는, 손실 0(결정 16)을 정확히 어기는 회귀다. 이 유도식을 쓰면 청구
+       직후·2단계 실패 후 어느 시점에 봐도 "메타 행이 없다"고 봤을 때와 100% 같은 값이 보인다.
+       의도한 실제 값(공지·발행 여부 포함)은 기존 주와 똑같이 2단계에서만 쓴다 — 2단계가
+       실패해도 이 행은 이 placeholder 그대로 남아 아무것도 안 샌다. */
   const claimed =
     input.revision === null
       ? await db
           .insert(scheduleWeeks)
           .values({
             weekStartDate: input.weekStartDate,
-            note: input.note,
-            draft: true,
+            note: null,
+            draft: priorEntries.length === 0,
             publishedAt: null,
           })
           .onConflictDoNothing({ target: scheduleWeeks.weekStartDate })
