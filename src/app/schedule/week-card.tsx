@@ -11,15 +11,20 @@
    데이터 변환(7일 폴딩·하루 상한)은 이 컴포넌트의 일이 아니다 — `@/features/schedule/card`
    의 `buildWeekCard`(작업순서 2)가 이미 자른 값을 준다. 여기선 받은 대로 그린다. 타입도 그
    모듈이 정본이다 — features 는 app 을 모르므로(레이어 경계) 여기서 다시 정의하지 않고
-   가져와 쓴다. */
+   가져와 쓴다.
+
+   `ref` 는 PNG 캡처(작업순서 3, week-card-download.tsx)가 찍을 노드를 가리킨다 — React 19 라
+   forwardRef 없이 prop 으로 받는다. 미리보기를 화면 폭에 맞추는 축소는 **이 노드가 아니라
+   감싸는 래퍼**에 건다: html-to-image 는 노드를 복제하며 computed style 을 그대로 베끼므로,
+   이 요소 자신에 transform: scale 이 있으면 캡처된 PNG 안에도 축소된 카드가 찍힌다. */
 
 import type { WeekCardData } from "@/features/schedule/card";
 
 const EMPTY_DAY_MARK = "—";
 
-export function WeekCard({ card }: { card: WeekCardData }) {
+export function WeekCard({ card, ref }: { card: WeekCardData; ref?: React.Ref<HTMLDivElement> }) {
   return (
-    <div className="week-card" data-od-id="week-card">
+    <div className="week-card" data-od-id="week-card" ref={ref}>
       <span className="week-card__tape week-card__tape--left" aria-hidden="true" />
       <span className="week-card__tape week-card__tape--right" aria-hidden="true" />
 

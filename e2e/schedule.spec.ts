@@ -42,6 +42,39 @@ test("관리자: 편집기로 항목을 저장하고 되읽는다", async ({ pag
   );
 });
 
+/* PNG 다운로드 카드는 baseline(저장된 값)으로 그린다 — 폼에 미저장 변경이 남아 있으면 미리보기가
+   그 변경을 안 보여주는데, 신호가 없으면 "지금 받으면 뭐가 나가지"가 된다(이슈 #109 작업순서 3,
+   적대적 리뷰가 잡은 자리). 이 스펙은 그 신호가 실제로 뜨고 저장하면 걷히는지를 본다. */
+test("관리자: 발행된 주에 미저장 변경이 있으면 다운로드 카드에 힌트가 뜬다", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 읽는 먼 미래 주.
+  await page.goto("/schedule?week=2030-05-06");
+
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  const title = page.locator('[data-od-id^="schedule-entry-title-"]').first();
+  await title.fill("e2e 발행 항목");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+
+  // 발행된 채 저장 직후라 카드가 있고, 아직 미저장 변경이 없으니 힌트도 없다.
+  const stale = page.locator('[data-od-id="week-card-download-stale"]');
+  await expect(page.locator('[data-od-id="week-card"]')).toBeVisible();
+  await expect(stale).toHaveCount(0);
+
+  // 저장 없이 제목만 고치면 힌트가 뜬다.
+  await title.fill("e2e 발행 항목 수정");
+  await expect(stale).toBeVisible();
+
+  // 다시 저장하면 baseline 이 갈아 끼워져 힌트가 걷힌다.
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+  await expect(stale).toHaveCount(0);
+});
+
 test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({
   page,
   baseURL,

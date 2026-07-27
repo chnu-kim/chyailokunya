@@ -12,9 +12,11 @@ import {
 } from "@/core/schedule-editor";
 import { scheduleSaveMachine } from "@/core/schedule-save.machine";
 import type { GameOption } from "@/features/games/service";
+import { buildWeekCard } from "@/features/schedule/card";
 import type { WeekView } from "@/features/schedule/service";
 import { trpc } from "@/features/trpc/client";
 import { formatMD, WeekNav } from "./schedule-shared";
+import { WeekCardDownload } from "./week-card-download";
 
 /* 주간 일괄 편집기(이슈 #56 작업순서 6, 결정 12·14). PR #59 가 games.played_at 을 드롭하며 없앤
    "라이브에서 게임 플레이 날짜 배정"을 되살리는 화면이다 — 관리자가 한 주를 통째로 짜서 저장하면
@@ -107,6 +109,16 @@ export function ScheduleEditor({
   const gamesById = new Map(games.map((g) => [g.id, g]));
   const days = weekDates(toIsoDate(weekStartDate));
   const dirty = isWeekDirty(draft, baseline);
+
+  /* 다운로드 카드는 **저장된 상태**(baseline)에서만 만든다 — draft(화면에 입력 중인, 아직
+     안 저장한 값)로 만들면 결정 2("미완성본이 박제되면 안 된다")가 저장 전 편집 중에도 뚫린다.
+     baseline.published 는 이 주가 지금 실제로 공개돼 있는지를 그대로 반영한다(weekToDraft 가
+     publishedAt !== null 로 세팅) — 발행 체크박스를 켰지만 아직 저장을 안 눌렀다면 여전히
+     null(비활성)이다. 저장에 성공하면 baseline 이 서버 응답으로 갈아 끼워지므로(schedule-save
+     머신) 새로고침 없이 바로 활성화된다. */
+  const card = baseline.published
+    ? buildWeekCard({ weekStartDate, note: baseline.note, entries: baseline.entries })
+    : null;
 
   /* 미저장 이탈 경고. 두 겹이 필요하다 — 한 겹으로는 절반만 덮인다.
 
@@ -296,6 +308,8 @@ export function ScheduleEditor({
             );
           })}
         </ol>
+
+        <WeekCardDownload card={card} weekStartDate={weekStartDate} stale={dirty} />
 
         <div className="sched-bar" data-od-id="schedule-save-bar">
           <label className="sched-publish" htmlFor="sched-publish">
