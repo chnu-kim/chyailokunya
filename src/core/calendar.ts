@@ -99,6 +99,16 @@ export function weekStartOf(date: IsoDate): IsoDate {
   return branded(d.subtract({ days: d.dayOfWeek - 1 }));
 }
 
+/* `?week=` 쿼리 파라미터 하나를 그 주의 월요일로 정규화한다. 형식이 틀리거나 실재하지 않는
+   날이면 조용히 이번 주로 떨어진다 — 위조·오타 링크를 눌러도 화면이 깨지지 않는
+   `safeReturnTo` 와 같은 "버리고 기본값" 규율이다. /schedule 페이지와 그 og:image 라우트
+   (`/api/og/schedule`) 둘 다 같은 `?week=` 을 해석하므로 여기 하나로 둔다 — 갈라 두면 한쪽만
+   느슨해지는 날 카드와 화면이 다른 주를 가리킨다. */
+export function resolveWeekParam(param: string | undefined): IsoDate {
+  if (param && isIsoDate(param)) return weekStartOf(param);
+  return weekStartOf(todayKST());
+}
+
 /* 그 날짜가 속한 주의 7일(월→일). 인자로 주의 시작을 요구하지 않는다 — 요구하면 호출자가
    weekStartOf 를 먼저 부르는 규칙을 매번 기억해야 하고, 잊으면 화요일부터 7일 같은 조용히
    틀린 주가 나온다. 아무 날짜나 받아 안에서 주를 가른다. */

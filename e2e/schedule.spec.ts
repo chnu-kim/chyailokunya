@@ -103,3 +103,91 @@ test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 �
      그 차이는 화면에 안 나오므로 단위 테스트가 draft 축을 직접 본다. */
   await expect(page.locator('[data-od-id="schedule-publish"]')).not.toBeChecked();
 });
+
+/* og:image PNG 라우트(이슈 #56 작업순서 7). 페이지가 아니라 API 라우트를 직접 request 로
+   두드린다 — 카드 레이아웃(다건 항목·오버플로 등)은 core/features 단위 테스트가 이미
+   못박았고, 여기선 "발행 경계를 실제로 타는가"(공유 픽스처의 다른 스펙이 이미 증명한 값어치를
+   또 재느니)와 상태 코드·content-type 만 스모크한다. */
+test("관리자: 발행 전엔 og/schedule 이 404, 발행 후엔 실제 PNG", async ({
+  page,
+  baseURL,
+  request,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 건드리는 먼 주 — 항목·메타 둘 다 없는 브랜드-뉴 주라 초안(결정 13)이다.
+  const WEEK = "2029-05-07";
+  await page.goto(`/schedule?week=${WEEK}`);
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+
+  const before = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
+  expect(before.status()).toBe(404);
+
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("e2e 방송");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+
+  const save = page.locator('[data-od-id="schedule-save"]');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  const after = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
+  expect(after.status()).toBe(200);
+  expect(after.headers()["content-type"]).toBe("image/png");
+
+  /* 리비전이 지금 값과 맞을 때만 영구 캐싱한다(적대적 리뷰 지적 — rev 가 있다는 사실만으로
+     캐싱하면, 이 주가 다시 저장돼 리비전이 바뀐 뒤에도 옛 리비전 번호 아래 캐시가 낡은 내용을
+     영원히 내줄 길이 열린다). `/schedule` 이 실제로 박아 보내는 rev 값을 og:image 메타에서
+     그대로 뽑아 쓴다 — 숫자를 손으로 다시 계산하면 라우트의 실제 판정과 갈릴 수 있다. */
+  const html = await (await request.get(`${baseURL}/schedule?week=${WEEK}`)).text();
+  const rev = html.match(/api\/og\/schedule\?week=[^&"]+&amp;rev=(\d+)/)?.[1];
+  expect(rev).toBeTruthy();
+
+  const pinned = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=${rev}`);
+  expect(pinned.headers()["cache-control"]).toBe("public, max-age=86400");
+
+  // 어긋난 rev 는 지금 데이터를 대신 내주지 않는다 — 그 스냅숏은 없다는 게 사실이다(적대적
+  // 리뷰 2라운드: "짧게 캐싱한 지금 데이터"조차 URL=콘텐츠 계약을 애매하게 남긴다는 지적).
+  const wrongRev = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=999999999`);
+  expect(wrongRev.status()).toBe(404);
+  expect(wrongRev.headers()["cache-control"]).toBe("no-store");
+
+  const noRev = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
+  expect(noRev.headers()["cache-control"]).toBe("public, max-age=300");
+
+  /* 발행을 내리면(published→draft) 리비전이 아니라 **발행 여부 자체**가 바뀐다 —
+     `getPublishedWeek` 이 이 주를 통째로 404 시키므로, 방금까지 200 이던 이 pinned URL 도
+     그 순간부터 404 다(적대적 리뷰 4라운드: immutable·영구 캐싱을 쓰지 않는 이유가 바로 이
+     자리 — 유한한 max-age 라야 이미 캐싱한 다운스트림도 언젠가는 이 404 를 보게 된다). */
+  await page.locator('[data-od-id="schedule-publish"]').uncheck();
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  const afterUnpublish = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=${rev}`);
+  expect(afterUnpublish.status()).toBe(404);
+});
+
+test("og/schedule: 아무도 안 건드린 미래 주는 404", async ({ baseURL, request }) => {
+  // 위 테스트가 발행한 주와 다른 날짜 — 이 스펙 파일 안에서도 격리한다.
+  const res = await request.get(`${baseURL}/api/og/schedule?week=2029-05-14`);
+  expect(res.status()).toBe(404);
+});
+
+/* og:url canonical(적대적 리뷰 지적). 발행 여부와 무관하게 metadata 는 항상 나가므로 로그인·
+   발행 없이 확인한다 — 다른 스펙과 겹치지 않는 완전히 새 주를 쓴다. */
+test("og:url — week 이 명시된 공유는 그 주로 못박고, 맨 /schedule 은 안 박는다", async ({
+  baseURL,
+  request,
+}) => {
+  const withWeek = await (await request.get(`${baseURL}/schedule?week=2029-08-06`)).text();
+  expect(withWeek).toContain(
+    'property="og:url" content="https://chyailokunya.com/schedule?week=2029-08-06"',
+  );
+
+  // exact-match 이므로 이 줄이 통과하면 그 자체로 og:url 에 ?week= 가 안 붙었다는 뜻이다 —
+  // 페이지 본문의 WeekNav(지난주·다음주 링크)는 원래도 "/schedule?week=" 를 담고 있어
+  // 페이지 전체에서 그 부분 문자열의 부재를 따로 재면 오탐이다.
+  const bare = await (await request.get(`${baseURL}/schedule`)).text();
+  expect(bare).toContain('property="og:url" content="https://chyailokunya.com/schedule"');
+});

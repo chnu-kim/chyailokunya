@@ -286,6 +286,25 @@ Phase 4(인증)에서 밟은 것:
   그 줄만 현재 포트로 맞춘다(키는 보존 — 살아 있는 서버의 검증을 안 흔든다). 포트를 바꿔 돌려도
   스크립트가 자가 치유한다.
 
+- **Satori(`next/og`)가 CSS 로 끼워 넣는 글자는 렌더 문자열을 아무리 훑어도 폰트 서브셋
+  수집에 안 잡힌다.** 주간표 PNG(작업순서 7)에서 항목 제목에 `text-overflow: ellipsis` 를
+  썼더니 실데이터 렌더에서 "…"(U+2026) 자리가 두부(□)로 나왔다 — 그 글자는 Satori 가 잘라낸
+  자리에 스스로 넣는 것이라 JS 문자열 어디에도 리터럴로 없다. 게이트 8종·e2e(상태 코드·
+  content-type 만 봄) 는 전부 초록이었고 **실제로 PNG 를 열어 봐야만 보였다**. 결국 이 라우트는
+  `text-overflow: ellipsis` 를 버리고 `maxHeight`(2줄 상한) + `overflow:hidden` 하드컷으로
+  바꿔 문제 자체를 없앴다 — CSS 가 글자를 끼워 넣는 자리(ellipsis 외에도 `list-style`·
+  `content` 같은 생성 콘텐츠)를 다시 쓰게 되면, 그 글자를 서브셋 수집 문자열에 **손으로**
+  추가해야 한다는 걸 잊지 말 것.
+
+- **`Cache-Control` 헤더만으로는 Cloudflare 가 Worker 응답을 엣지에 캐싱해 주지 않는다.**
+  Worker 는 zone 의 캐시보다 먼저 요청을 받으므로, 직접 `caches.default`(Cache API)를 안 쓰면
+  헤더는 브라우저·소셜 플랫폼 쪽 캐시에만 통한다. og/schedule PNG 라우트가 이 헤더만 두고
+  Cache API 는 안 붙인 채 나갔다(2026-07-27 사용자 결정) — 로컬 workerd 에서 캐시 히트를
+  실측할 수 없어(이 저장소 원칙: 실측 없이 안 넣는다) 배포해야만 검증되는 코드를 블라인드로
+  넣지 않기로 했다. 팬사이트 규모(관리자 소수·언퍼얼 봇은 링크당 한 번만 가져가 자기 쪽에
+  캐싱)에선 폭주 확률이 낮다고 봤다 — D1 동시성 수용 경계(`saveWeek`)와 같은 결의 판단.
+  필요해지면 `getCloudflareContext().ctx.waitUntil()` 로 `caches.default.put()` 을 붙인다.
+
 게임 보드 개편(#61 이후, ADR-0023)에서 밟은 것들:
 
 - **`-webkit-box`(line-clamp)는 자식을 blockify 해서, 안에 요소를 하나 넣는 순간 말줄임이 조용히
