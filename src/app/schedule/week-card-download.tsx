@@ -27,7 +27,11 @@ const CARD_WIDTH = 1200;
    2 로 못박아 카페·트위터에 올려도 흐릿하지 않을 해상도(2400×1260)를 모든 기기에서 보장한다. */
 const PIXEL_RATIO = 2;
 
-const downloadMachine = createSubmitMachine<string, void>();
+/* weekStartDate 뿐 아니라 card 도 함께 싣는다 — 이유는 아래 startCapture 주석("card 로 캐시를
+   가른다"). */
+type DownloadValues = { weekStartDate: string; card: WeekCardData };
+
+const downloadMachine = createSubmitMachine<DownloadValues, void>();
 
 /* 서버 코드가 없는 순수 클라이언트 동작이라 error-message.ts 의 코드 분기 매퍼들과 다르지만,
    "기다리다 멈췄다"(isAborted)만은 같은 뜻을 공유한다 — submit 머신이 15초 뒤 이 run 에 넘기는
@@ -53,41 +57,72 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
   });
 }
 
-type InFlightCapture = { weekStartDate: string; promise: Promise<string> };
+/* 클릭 시점 노드를 그대로 복제해 화면 밖에 숨긴 채로 캡처한다(평이한 리뷰 지적, 라운드 5) —
+   살아있는 nodeRef.current 를 그대로 넘기면 아래 import("html-to-image")·document.fonts.ready
+   를 기다리는 사이(비동기 틈)에도 <WeekCard> 는 이 컴포넌트의 최신 props 로 계속 다시 그려진다.
+   읽기 화면은 WeekNav 로 주가 바뀌어도 리마운트를 안 하므로(아래 run 주석과 같은 사정), 그
+   틈에 사용자가 다음 주로 넘어가면 클릭 당시엔 이번 주였던 바로 그 노드가 toPng 이 실제로 도는
+   시점엔 이미 다음 주 내용으로 바뀌어 있다 — 파일명은 클릭 시점 weekStartDate 그대로인데
+   그림은 그 사이 바뀐 주가 찍혀 나간다. cloneNode 는 동기 호출이라 이 줄과 다음 await 사이엔
+   아무 틈도 없다 — onClick → send → (XState 가 동기로 invoke 하는) run → capture →
+   startCapture 까지 전부 같은 동기 구간이므로, 클릭 그 순간의 DOM 을 그대로 얼려 둔다.
 
-/* 물리적으로 진행 중인 캡처를 주(weekStartDate)당 하나로 묶는다(적대적 리뷰 지적) — 위
-   Promise.race 는 화면을 제때 풀어 재시도할 수 있게 하지만, 진 쪽(html-to-image 내부 작업)을
-   취소하지는 않는다. 그 상태에서 같은 주에 재시도가 매번 새 toPng() 를 또 부르면, 폰트 임베드가
-   막힌 환경(느린 fetch 폴백 — 아래 capture 주석)에서 재시도할 때마다 1200×630 캔버스 작업 +
-   cross-origin 요청이 쌓인다.
+   화면 밖으로 치워도 body 에는 붙여 둔다 — computed style·레이아웃(오프셋·폭)은 실제로 문서
+   트리에 앉아 있어야 나오고, 떨어져 나간 조각은 레이아웃이 없어 html-to-image 가 치수를 못
+   읽는다. 디자인 토큰(globals.css 의 :root 변수)은 문서 어디에 붙든 그대로 상속되므로(이
+   컴포넌트가 var() 로만 색을 읽는 week-card.tsx 와 같은 전제) 시각 결과는 원본과 같다. */
+function snapshotCard(node: HTMLDivElement): HTMLDivElement {
+  const clone = node.cloneNode(true) as HTMLDivElement;
+  clone.style.position = "fixed";
+  clone.style.top = "-10000px";
+  clone.style.left = "-10000px";
+  clone.setAttribute("aria-hidden", "true");
+  document.body.appendChild(clone);
+  return clone;
+}
 
-   **weekStartDate 로 캐시를 가른다 — node 만으로는 안 된다.** 읽기 화면은 WeekNav 로 주가
-   바뀌어도 이 컴포넌트가 리마운트를 안 하고(위 run 주석), <WeekCard> 도 key 없이 다시 그려
-   React 가 같은 DOM 노드를 재사용한다(내용만 갱신) — 그래서 주 A 의 캡처가 시간 초과로 화면만
-   풀린 채 아직 도는 동안 주 B 로 넘어가 다시 눌러도 `node`(같은 참조)만 보면 "이미 진행 중"으로
-   오판해 주 A 캡처를 재사용하고, 파일명은 새 weekStartDate 를 붙여 **주 A 의 그림이 주 B 파일로
-   나간다**(적대적 리뷰가 잡은 자리 — 실측 없이 넘어갔다면 이 기능이 막으려던 바로 그 실수를
-   저지를 뻔했다). weekStartDate 가 요청과 다르면 캐시를 버리고 새로 시작한다 — 버려진 주 A
-   프라미스는 계속 돌다 끝나면 조용히 사라질 뿐, 더는 아무도 안 기다린다.
+type InFlightCapture = { card: WeekCardData; promise: Promise<string> };
+
+/* 물리적으로 진행 중인 캡처를 카드(card)당 하나로 묶는다(적대적 리뷰 지적) — 위 Promise.race
+   는 화면을 제때 풀어 재시도할 수 있게 하지만, 진 쪽(html-to-image 내부 작업)을 취소하지는
+   않는다. 그 상태에서 재시도가 매번 새 toPng() 를 또 부르면, 폰트 임베드가 막힌 환경(느린
+   fetch 폴백 — 아래 capture 주석)에서 재시도할 때마다 1200×630 캔버스 작업 + cross-origin
+   요청이 쌓인다.
+
+   **card 로 캐시를 가른다 — weekStartDate 로는 부족하다(라운드 5 적대적 리뷰).** 한때
+   weekStartDate 문자열로만 갈랐는데, 편집기는 같은 주를 저장해도 weekStartDate 가 그대로다 —
+   저장 전 캡처가 시간 초과로 화면만 풀린 채 아직 배경에서 돌던 중 admin 이 내용을 고쳐 저장하면
+   baseline 이 바뀌어 card 가 새로 만들어지지만(schedule-editor.tsx 의 useMemo, baseline 이
+   deps), weekStartDate 문자열은 그대로라 그 키로는 "같은 요청의 재시도"와 "저장으로 내용이
+   바뀐 새 요청"을 못 가른다 — 후자를 전자로 오판하면 저장 전 옛 그림이 저장 후 파일명으로
+   나간다. card 오브젝트 참조는 baseline 이 실제로 바뀔 때만(저장 성공 시) 새로 생기므로
+   (useMemo), 재시도(같은 렌더의 같은 card)와 내용 변경(다른 렌더의 다른 card)을 정확히 가른다.
+   읽기 화면(schedule-read.tsx)은 애초에 주마다 서버가 새 card 를 내려주므로 이 키가 자연히
+   주 경계와도 일치한다 — weekStartDate 를 따로 더 실을 필요가 없다.
 
    컴포넌트 인스턴스의 ref 에 두는 이유(모듈 스코프가 아니라): 리마운트되면(편집기의 key 교체)
    새 ref 로 새로 시작하는 것도 맞다(언마운트된 옛 노드의 캡처를 기다릴 이유가 없다). */
 function startCapture(
   node: HTMLDivElement,
-  weekStartDate: string,
+  card: WeekCardData,
   inFlightRef: RefObject<InFlightCapture | null>,
 ): Promise<string> {
   const current = inFlightRef.current;
-  if (current && current.weekStartDate === weekStartDate) return current.promise;
+  if (current && current.card === card) return current.promise;
 
+  const snapshot = snapshotCard(node);
   const promise = (async () => {
-    const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
-    return toPng(node, { pixelRatio: PIXEL_RATIO });
+    try {
+      const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
+      return await toPng(snapshot, { pixelRatio: PIXEL_RATIO });
+    } finally {
+      snapshot.remove();
+    }
   })();
-  const entry: InFlightCapture = { weekStartDate, promise };
+  const entry: InFlightCapture = { card, promise };
   inFlightRef.current = entry;
-  /* 이 항목이 아직도 "그 진행 중인 캡처"일 때만 지운다 — 방금 위에서 주가 다르면 이미 새 항목
-     으로 갈아 끼웠으므로, 버려진 옛 항목이 나중에 정산돼도 새 항목을 지우지 않는다.
+  /* 이 항목이 아직도 "그 진행 중인 캡처"일 때만 지운다 — 방금 위에서 card 가 다르면 이미 새
+     항목으로 갈아 끼웠으므로, 버려진 옛 항목이 나중에 정산돼도 새 항목을 지우지 않는다.
 
      `.finally()`는 새 프라미스를 반환하고 그 프라미스는 `promise`가 거절되면 같이 거절된다 —
      실패 자체는 이 함수가 반환하는 `promise`를 기다리는 쪽(race)이 이미 처리하지만, 여기서
@@ -101,10 +136,10 @@ function startCapture(
   return promise;
 }
 
-/* 캡처 대상은 항상 스케일 없는 원본 1200×630 노드다(week-card.tsx 주석 — 조상의 transform 은
-   복제 대상 노드의 computed style 에 안 들어오므로 미리보기 축소와 무관하게 항상 실제 크기로
-   찍힌다). fontEmbedCSS 를 직접 만들지 않고 기본 임베딩에 맡긴다 — 이 사이트 폰트는 구글
-   폰트 cross-origin <link> 라 기본 구현이 sheet.cssRules 직접 접근 대신 fetch 폴백을 타는데
+/* 복제 원본은 항상 스케일 없는 1200×630 week-card 노드다(week-card.tsx 주석 — 조상의 transform
+   은 복제 대상 노드의 computed style 에 안 들어오므로, 미리보기 축소와 무관하게 clone 은 항상
+   실제 크기로 찍힌다). fontEmbedCSS 를 직접 만들지 않고 기본 임베딩에 맡긴다 — 이 사이트 폰트는
+   구글 폰트 cross-origin <link> 라 기본 구현이 sheet.cssRules 직접 접근 대신 fetch 폴백을 타는데
    (html-to-image embed-webfonts.js), dom 테스트는 이 모듈을 mock 하고 e2e(작업순서 4)는 PNG
    매직 바이트만 보므로 폴백 폰트로 찍혀도 게이트는 전부 초록이다(옛 Satori "…" 두부 사건과
    같은 자리) — 그래서 실제 다운로드 결과물을 **눈으로 확인했다**(2026-07-27, Playwright 로
@@ -124,12 +159,13 @@ function startCapture(
    상한을 각각 확실히 보장하는 쪽을 택했다. */
 async function capture(
   node: HTMLDivElement,
+  card: WeekCardData,
   weekStartDate: string,
   signal: AbortSignal,
   inFlightRef: RefObject<InFlightCapture | null>,
 ): Promise<void> {
   const dataUrl = await Promise.race([
-    startCapture(node, weekStartDate, inFlightRef),
+    startCapture(node, card, inFlightRef),
     rejectOnAbort(signal),
   ]);
   const a = document.createElement("a");
@@ -174,16 +210,16 @@ export function WeekCardDownload({
     input: {
       /* nodeRef 는 마운트 시점에 얼어붙지 않는다 — submit.machine.ts 의 "얼어붙음"은 렌더마다
          바뀌는 컴포넌트 **값**(state)에 해당하고, ref 객체는 그대로 캡처되되 `.current` 는
-         호출 시점에 새로 읽으므로 안전하다(state 와 다르다). weekStartDate 는 정확히 그
+         호출 시점에 새로 읽으므로 안전하다(state 와 다르다). weekStartDate·card 는 정확히 그
          "렌더마다 바뀌는 값"이라 여기서 클로저로 읽으면 안 된다 — 읽기 화면은 이 컴포넌트를
          key 없이 그리므로(schedule-editor 와 달리) WeekNav 로 다음 주로 넘어가도 리마운트가
-         안 돼 이 run 클로저가 **첫 마운트 때의 weekStartDate 에 영영 고정**된다(적대적 리뷰가
-         잡은 자리 — 캡처되는 그림은 매번 새 카드로 맞지만 파일명만 첫 주에 고정됐다). submit
-         머신의 계약대로 클릭 시점의 값은 submit 이벤트의 values 로 실어 보낸다. */
+         안 돼 이 run 클로저가 **첫 마운트 때의 값에 영영 고정**된다(적대적 리뷰가 잡은 자리 —
+         캡처되는 그림은 매번 새 카드로 맞지만 파일명만 첫 주에 고정됐다). submit 머신의 계약대로
+         클릭 시점의 값은 submit 이벤트의 values 로 실어 보낸다. */
       run: async (values, signal) => {
         const node = nodeRef.current;
         if (!node) throw new Error("week-card 노드가 아직 마운트되지 않았습니다");
-        await capture(node, values, signal, inFlightRef);
+        await capture(node, values.card, values.weekStartDate, signal, inFlightRef);
       },
       mapError: downloadErrorMessage,
     },
@@ -232,7 +268,7 @@ export function WeekCardDownload({
         type="button"
         disabled={capturing}
         data-od-id="week-card-download-btn"
-        onClick={() => send({ type: "submit", values: weekStartDate })}
+        onClick={() => send({ type: "submit", values: { weekStartDate, card } })}
       >
         {capturing ? "만드는 중…" : "PNG 다운로드"}
       </button>

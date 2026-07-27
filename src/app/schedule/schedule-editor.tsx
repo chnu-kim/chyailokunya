@@ -1,7 +1,7 @@
 "use client";
 
 import { useMachine } from "@xstate/react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
 import { isAborted } from "@/core/error-message";
 import {
@@ -115,10 +115,22 @@ export function ScheduleEditor({
      baseline.published 는 이 주가 지금 실제로 공개돼 있는지를 그대로 반영한다(weekToDraft 가
      publishedAt !== null 로 세팅) — 발행 체크박스를 켰지만 아직 저장을 안 눌렀다면 여전히
      null(비활성)이다. 저장에 성공하면 baseline 이 서버 응답으로 갈아 끼워지므로(schedule-save
-     머신) 새로고침 없이 바로 활성화된다. */
-  const card = baseline.published
-    ? buildWeekCard({ weekStartDate, note: baseline.note, entries: baseline.entries })
-    : null;
+     머신) 새로고침 없이 바로 활성화된다.
+
+     useMemo 로 baseline 이 실제로 바뀔 때만 새 오브젝트를 만든다(라운드 5 적대적 리뷰) —
+     이 컴포넌트는 note 입력·항목 추가 등 draft 가 바뀔 때마다 다시 그려지는데, 그때마다
+     buildWeekCard 를 새로 불러 매번 다른 참조를 주면 week-card-download.tsx 의 in-flight
+     캐시(card 오브젝트 참조로 "같은 요청 재시도"와 "저장으로 내용이 바뀐 새 요청"을 가른다)가
+     타이핑 한 글자마다 캐시 미스로 오판한다 — 그러면 화면에 안 보이는 곳에서 캡처가 계속
+     재시작돼 그 판정 자체가 무의미해진다. baseline 은 저장 성공 시에만 바뀌므로(schedule-save
+     머신), 그때만 새 참조가 나오는 편이 그 캐시의 전제와 맞는다. */
+  const card = useMemo(
+    () =>
+      baseline.published
+        ? buildWeekCard({ weekStartDate, note: baseline.note, entries: baseline.entries })
+        : null,
+    [weekStartDate, baseline],
+  );
 
   /* 미저장 이탈 경고. 두 겹이 필요하다 — 한 겹으로는 절반만 덮인다.
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { WeekCardData } from "@/features/schedule/card";
 import { WeekCardDownload } from "./week-card-download";
@@ -57,6 +57,13 @@ beforeEach(() => {
   ) {
     capturedAnchor = this;
   });
+});
+
+// 시간 초과 뒤에도 배경에서 계속 도는 toPng mock(안 끝남)은 startCapture 의 snapshotCard 가
+// document.body 에 붙인 복제 노드를 finally 로 못 지운다(toPng 이 안 끝나므로) — 그 조각이
+// 다음 테스트의 getByTestId("week-card") 를 "여러 개 찾음"으로 깨뜨리지 않도록 매번 치운다.
+afterEach(() => {
+  document.body.innerHTML = "";
 });
 
 describe("WeekCardDownload", () => {
@@ -123,9 +130,11 @@ describe("WeekCardDownload", () => {
     });
 
     expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-27.png");
-    // 캡처 대상 그림도 새 주 카드여야 한다(미리보기가 새 데이터로 다시 그려졌는지).
+    // 캡처 대상 그림도 새 주 카드여야 한다(미리보기가 새 데이터로 다시 그려졌는지). toBeInTheDocument
+    // 는 못 쓴다 — startCapture 가 캡처 직후 finally 에서 스냅샷을 문서에서 곧장 떼어내므로(라운드
+    // 5, snapshotCard) 이 시점엔 이미 detached 다. getByText 가 못 찾으면 그 자체로 던진다.
     const [node] = vi.mocked(toPng).mock.calls.at(-1)!;
-    expect(within(node as HTMLElement).getByText("7.27 – 8.2")).toBeInTheDocument();
+    within(node as HTMLElement).getByText("7.27 – 8.2");
   });
 
   it("캡처가 실패하면 오류를 알리고 다시 누를 수 있다", async () => {
@@ -206,9 +215,78 @@ describe("WeekCardDownload", () => {
     });
 
     expect(toPng).toHaveBeenCalledTimes(2); // 주 A 의 진행 중인 캡처를 재사용하지 않고 새로 불렀다.
+    // toBeInTheDocument 는 못 쓴다 — 캡처 직후 finally 가 스냅샷을 곧장 떼어낸다(위 주석 참고).
     const [node] = vi.mocked(toPng).mock.calls.at(-1)!;
-    expect(within(node as HTMLElement).getByText("7.27 – 8.2")).toBeInTheDocument();
+    within(node as HTMLElement).getByText("7.27 – 8.2");
     expect(capturedAnchor!.href).toBe("data:image/png;base64,week-b");
     expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-27.png");
+  });
+
+  it("같은 주라도(weekStartDate 그대로) 카드 내용이 바뀌면 진행 중이던 캡처를 재사용하지 않는다", async () => {
+    // 적대적 리뷰가 잡은 자리(라운드 5) — weekStartDate 문자열로만 in-flight 캐시를 가르면,
+    // 편집기에서 같은 주를 저장해 baseline 이 바뀌어도(card 오브젝트가 새로 만들어져도)
+    // weekStartDate 는 그대로라 "같은 요청 재시도"로 오판한다. 그러면 저장 전 옛 캡처가 시간
+    // 초과로 화면만 풀린 채 배경에서 계속 돌던 중, 저장 후 다시 눌렀을 때 그 옛 프라미스를
+    // 그대로 돌려줘 저장 전 그림이 저장 후 파일명으로 나갈 뻔했다.
+    vi.mocked(toPng).mockImplementation(() => new Promise(() => {})); // 저장 전 캡처 — 안 끝남
+    const { rerender } = render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
+    expect(toPng).toHaveBeenCalledTimes(1); // 저장 전 캡처는 여전히 배경에서 도는 채다.
+
+    // weekStartDate 는 그대로, 내용만 바뀐 새 card — 편집기가 저장 성공 시 baseline 을 갈아
+    // 끼워 useMemo 가 새 참조를 주는 것과 같은 모양(schedule-editor.tsx).
+    const REVISED_CARD: WeekCardData = { ...CARD, note: "공지 수정됨" };
+    vi.mocked(toPng).mockResolvedValue("data:image/png;base64,revised");
+    rerender(<WeekCardDownload card={REVISED_CARD} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    expect(toPng).toHaveBeenCalledTimes(2); // 내용이 바뀐 카드라 재사용하지 않고 새로 캡처했다.
+    expect(capturedAnchor!.href).toBe("data:image/png;base64,revised");
+    expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-20.png");
+  });
+
+  it("클릭 직후(폰트 대기 중) 리마운트 없이 주가 바뀌어도 클릭 시점 내용을 그대로 캡처한다", async () => {
+    // 평이한 리뷰가 잡은 자리(라운드 5) — 살아있는 nodeRef.current 를 그대로 넘기면,
+    // import("html-to-image")·document.fonts.ready 를 기다리는 사이(비동기 틈)에 사용자가
+    // WeekNav 로 다음 주로 넘어가도(리마운트 없음) 그 노드가 다음 주 내용으로 다시 그려진
+    // 뒤에야 toPng 이 돈다 — 파일명은 클릭 시점 주인데 그림은 그 사이 바뀐 주가 찍힐 뻔했다.
+    // document.fonts.ready 를 손으로 쥐고 있다가, rerender 뒤에 풀어 그 창을 재현한다.
+    let resolveFontsReady!: () => void;
+    Object.defineProperty(document, "fonts", {
+      value: {
+        ready: new Promise<void>((resolve) => {
+          resolveFontsReady = resolve;
+        }),
+      },
+      configurable: true,
+    });
+    vi.mocked(toPng).mockResolvedValue("data:image/png;base64,week-a-snapshot");
+
+    const { rerender } = render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    // 클릭 직후, 아직 폰트 대기 중(캡처가 실제로 시작되기 전)에 리마운트 없이 주 B 로 넘어간다.
+    rerender(<WeekCardDownload card={NEXT_WEEK_CARD} weekStartDate="2026-07-27" />);
+
+    await act(async () => {
+      resolveFontsReady();
+    });
+    await waitFor(() => expect(toPng).toHaveBeenCalledTimes(1));
+
+    // toBeInTheDocument 는 못 쓴다 — 캡처 직후 finally 가 스냅샷을 곧장 떼어낸다(위 주석 참고).
+    const [node] = vi.mocked(toPng).mock.calls[0]!;
+    // 캡처는 클릭 시점(주 A) 내용의 스냅샷이어야 한다 — 그 사이 넘어간 주 B 가 아니라.
+    within(node as HTMLElement).getByText("7.20 – 7.26");
+    expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-20.png");
   });
 });
