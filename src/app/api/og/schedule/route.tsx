@@ -8,7 +8,24 @@ import { getPublishedWeek } from "@/features/schedule/service";
 /* 주간표 PNG(이슈 #56 작업순서 7) — /schedule 의 og:image 겸용(결정 15). 스파이크(#57)가
    더미 데이터로 확인한 넷(배포 계약·workerd 렌더·한글 글리프·번들 한도)을 통과한 뒤, 이제
    `schedule_entries` 실데이터를 그린다. 스파이크의 `OG_SCHEDULE_SPIKE` 게이트는 여기서 걷어
-   낸다 — 더 이상 더미가 아니므로 프로덕션에 살려 둘 이유가 없다. */
+   낸다 — 더 이상 더미가 아니므로 프로덕션에 살려 둘 이유가 없다.
+
+   ── 알고 수용한 한계: Worker 쪽 응답 캐싱은 이 PR 에 없다 ──────────────────────────
+   `Cache-Control: immutable`(아래)은 브라우저·소셜 플랫폼 자체 캐시엔 통하지만, Cloudflare
+   Workers 는 zone 의 엣지 캐시보다 **먼저** 요청을 받으므로 그 헤더만으로 Cloudflare 가 이
+   응답을 대신 캐싱해 주지 않는다 — 하려면 라우트가 `caches.default`(Cache API)를 직접 써야
+   한다. 같은 (주·리비전) URL 이 짧은 시간에 몰리면(여러 플랫폼이 같은 공유 링크를 동시에
+   언퍼얼) 그때마다 Satori 렌더 + Google Fonts 왕복 3회가 매번 돈다는 뜻이다.
+
+   Cache API 를 안 붙인 이유: 로컬 workerd 에서는 캐시 히트 여부를 실측할 수단이 마땅치
+   않아(이 저장소는 "실측 없이 넣지 않는다"가 원칙), 배포해 봐야만 검증되는 코드를 이 PR 에
+   블라인드로 넣는 게 검증 없이 넣는 리스크(그리고 `wrangler.jsonc` 에 캐시 설정을 더하는
+   변경 자체도 다른 지뢰가 있다 — AGENTS.md Phase 4)보다 크다고 봤다. 실사용 규모(관리자 소수·
+   팬사이트 방송 일정, D1 동시성 수용 경계와 같은 결)에서 언퍼얼 봇은 대개 링크당 한 번만
+   가져가 자기 쪽에 오래 캐싱하므로, 지금 상태로도 폭주로 이어질 확률은 낮다고 판단했다.
+   2026-07-27 사용자 결정 — 필요해지면 `getCloudflareContext().ctx.waitUntil()` 로
+   `caches.default.put()` 을 붙인다(OpenNext 의 자동 waitUntil 은 ISR 전용이라 직접 불러야
+   한다). */
 
 // og:image 겸용이라 1200×630 고정이다(결정 15). 이 비율을 벗어나면 트위터·카페
 // 카드가 임의로 잘라내 요일 칸이 통째로 사라진다.
