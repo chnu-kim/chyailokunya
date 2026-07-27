@@ -4,7 +4,7 @@
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { toIsoDate, weekDates, weekStartOf } from "@/core/calendar";
 import { games, scheduleEntries, scheduleWeeks, type Db, type ScheduleEntry } from "@/db";
-import type { SaveWeekInput } from "./schema";
+import type { PublishWeekInput, SaveWeekInput } from "./schema";
 
 /* 한 주의 뷰 — 메타(공지·발행) + 그 주 7일의 항목들. 편집 화면이 불러오고, 저장이 되돌려준다.
    주 자체는 저장하지 않고 날짜에서 유도하므로(결정 2) 항목은 week_id FK 가 아니라 scheduled_date
@@ -295,5 +295,41 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
     await db.batch([setMeta, clearEntries]);
   }
 
+  return getWeekForEdit(db, input.weekStartDate);
+}
+
+/* 발행·비공개 전환만(이슈 #56 결정 14 개정, ADR-0024 2026-07-28 추가) — entries·note 를 안
+   건드리므로 saveWeek 의 prevalidate→claim→batch 3단계가 필요 없다. 단일 원자 UPDATE 하나로
+   revision CAS 와 published_at·draft 를 함께 바꾼다(D1 batch 조차 안 쓴다 — 문장이 하나라
+   그 자체로 원자다).
+
+   publishedAt 은 coalesce 로 **최초 발행 시각을 유지**한다 — SQL 이 이 컬럼의 old 값을 그대로
+   보므로 별도 SELECT 없이 "재발행마다 안 바뀐다"(saveWeek 의 existing?.publishedAt ?? now 와
+   같은 규칙)가 선다. draft 규칙도 saveWeek 과 동일하다 — 발행하면 확정(false), 비공개로
+   돌리면 **손대지 않는다**(발행 철회가 "안 짠 것으로 되돌린다"가 아니다, ADR-0024).
+
+   revision 이 그 사이 바뀌었으면(다른 곳에서 먼저 저장·발행) WHERE 가 0행이라 CONFLICT —
+   saveWeek 의 1단계 claim 과 같은 CAS. */
+export async function publishWeek(db: Db, input: PublishWeekInput): Promise<WeekView> {
+  const now = Date.now();
+  const claimed = await db
+    .update(scheduleWeeks)
+    .set(
+      input.published
+        ? {
+            publishedAt: sql`coalesce(${scheduleWeeks.publishedAt}, ${now})`,
+            draft: false,
+            lastUpdatedAt: nextRevision(input.revision, now),
+          }
+        : { publishedAt: null, lastUpdatedAt: nextRevision(input.revision, now) },
+    )
+    .where(
+      and(
+        eq(scheduleWeeks.weekStartDate, input.weekStartDate),
+        eq(scheduleWeeks.lastUpdatedAt, input.revision),
+      ),
+    )
+    .returning({ id: scheduleWeeks.id });
+  if (claimed.length === 0) throw new WeekRevisionConflict();
   return getWeekForEdit(db, input.weekStartDate);
 }

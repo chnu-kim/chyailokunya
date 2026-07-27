@@ -615,3 +615,60 @@ test.describe("본문 터치 타깃 — 주간표 다운로드", () => {
     });
   }
 });
+
+/* 주간 일정 편집기 — sticky 저장·발행 바 + 게임 검색 돋보기(이슈 #56 결정 11·19·23,
+   2026-07-28). 새로 넣은 인터랙티브 요소라 위 목록들처럼 여기 적어야 검사에 든다(narrow-body
+   상단 주석의 원칙) — `/schedule` 자체가 세 PAGES 상수엔 없어서 로그아웃 상태의 가로 넘침·
+   잘림은 이 describe 밖이다(편집기는 로그인 전용이라 그 둘로는 못 잰다).
+
+   sticky 바는 `position:sticky`(fixed 아님, schedule.css 주석)라 문서 흐름 안에 자기 자리가
+   그대로 남는다 — 그래도 실측으로 "마지막 요일 카드가 가려지지 않는가"를 직접 재는 이유는
+   sticky 가 스크롤 중 콘텐츠를 **덮는 것 자체는 의도**이기 때문이다(늘 보이게 하려고 도입한
+   패턴) — 가려도 되는 범위(스크롤 중)와 안 되는 범위(다 내려도 안 가림)를 가르는 게 이 재기다. */
+test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
+  for (const width of NARROW) {
+    test(`${width}px /schedule: sticky 저장·발행 바와 게임 검색 돋보기가 44 하한을 지키고, 가로 넘침이 없다`, async ({
+      page,
+      baseURL,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await signIn(page.context(), baseURL!);
+      // 다른 스펙이 안 읽는 먼 미래 주.
+      await page.goto("/schedule?week=2034-03-06");
+      await expectSignedIn(page);
+      await page.evaluate(() => document.fonts.ready);
+
+      expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
+      await expectTouchTarget(page.locator('[data-od-id="schedule-save"]'), "저장");
+      await expectTouchTarget(
+        page.locator('[data-od-id="schedule-publish-toggle"]'),
+        "발행 상태 전환",
+      );
+
+      // 항목을 하나 만들어야 게임 검색 트리거가 존재한다.
+      await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+      const trigger = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
+      await expectTouchTarget(trigger, "게임 검색 돋보기");
+      await expectTouchTarget(
+        page.locator('[data-od-id^="schedule-entry-del-"]').first(),
+        "항목 삭제",
+      );
+
+      // 검색 패널을 열어도 넘치지 않는지 — 좁은 폭에서 로컬 매치 목록이 흔한 오버플로 자리다.
+      await trigger.click();
+      expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
+
+      // 마지막 요일 카드가 sticky 바에 다 가려진 채로 끝나지 않는다 — 끝까지 스크롤하면
+      // 카드 아랫변이 바의 윗변보다 위(또는 같은 자리)에 온다.
+      const lastDay = page.locator(".sched-day").last();
+      await lastDay.scrollIntoViewIfNeeded();
+      const [dayBox, barBox] = await Promise.all([
+        lastDay.boundingBox(),
+        page.locator('[data-od-id="schedule-save-bar"]').boundingBox(),
+      ]);
+      expect(dayBox).not.toBeNull();
+      expect(barBox).not.toBeNull();
+      expect(dayBox!.y + dayBox!.height).toBeLessThanOrEqual(barBox!.y + 1);
+    });
+  }
+});

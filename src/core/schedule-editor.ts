@@ -47,10 +47,12 @@ export function newEntryKey(seq: number): string {
   return `new-${seq}`;
 }
 
-/* 그 날짜의 빈 항목 하나. 시각·제목·게임은 편집기가 채운다 — 자유 편성(gameId null·제목만)이
-   기본이라 게임 연결은 선택으로 둔다. */
+/* 그 날짜의 빈 항목 하나. 제목·게임은 편집기가 채운다 — 자유 편성(gameId null·제목만)이
+   기본이라 게임 연결은 선택으로 둔다. 시각은 19:00 을 기본으로 준다 — 매번 타이핑하는
+   반복 마찰을 없애려는 것이고(이슈 #56 결정 20), 저녁 방송이 실사용 최빈값이다. 미정으로
+   두려면 그대로 지울 수 있다(결정 8, '' 는 여전히 유효한 값). */
 export function makeDraftEntry(key: string, scheduledDate: string): DraftEntry {
-  return { key, scheduledDate, startTime: "", title: "", gameId: null };
+  return { key, scheduledDate, startTime: "19:00", title: "", gameId: null };
 }
 
 export function addEntry(draft: WeekDraft, entry: DraftEntry): WeekDraft {
@@ -93,9 +95,22 @@ export function entriesForDate(draft: WeekDraft, date: string): DraftEntry[] {
     .map(({ e }) => e);
 }
 
+/* 제목이 빈 항목을 찾는다 — 저장·발행 전 가드용(이슈 #56, Plan 에이전트 리뷰 2026-07-28).
+   아래 draftEntryInputs 는 이런 항목을 **조용히** 걸러 저장 페이로드에서 뺀다 — 그 자체는
+   맞는 동작이지만(제목 없는 자유 편성은 서버가 거절할 값이라 애초에 안 보내는 게 맞다), 저장이
+   성공하면 draft·baseline 이 서버 응답으로 통째 교체되므로(schedule-save.machine.ts) 그 결과
+   이 placeholder 행이 안내 한 줄 없이 화면에서 사라진다. "+항목 추가"로 만든 뒤 제목을 깜빡한
+   행이 저장을 누르는 순간 조용히 지워지는 걸 막으려면 draftEntryInputs 보다 **먼저** 봐야 한다.
+   처음 걸리는 항목 하나만 돌려준다(한 번에 하나씩 고치게 안내한다 — 여러 개를 한 문장에 나열하면
+   어느 요일 이야기인지 흐려진다). */
+export function firstBlankTitleEntry(draft: WeekDraft): DraftEntry | null {
+  return draft.entries.find((e) => e.title.trim() === "") ?? null;
+}
+
 /* 저장 페이로드의 entries. 제목은 trim, 시각 '' 는 null 로 접는다(정규형). 제목이 빈 항목은
    버린다 — 자유 편성인데 제목이 없으면 서버 min(1)에 걸릴 뿐 아니라 화면에 이름 없는 줄이
-   남는다. 게임 연결 항목은 편집기가 제목을 게임명으로 채우므로 여기 안 걸린다. */
+   남는다. 게임 연결 항목은 편집기가 제목을 게임명으로 채우므로 여기 안 걸린다. 이 필터를 타기
+   **전에** 저장 시도 자체를 막고 싶으면 위 firstBlankTitleEntry 를 먼저 쓴다. */
 export function draftEntryInputs(draft: WeekDraft): DraftEntryInput[] {
   return draft.entries
     .map((e) => ({

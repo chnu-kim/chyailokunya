@@ -435,6 +435,101 @@ describe("일정 라우터", () => {
     expect(published?.entries.map((e) => e.title)).toEqual(["젤다"]);
   });
 
+  describe("publishWeek — 발행·비공개 전환 전용(이슈 #56 결정 14 개정)", () => {
+    it("schedule:write 없으면 FORBIDDEN", async () => {
+      const caller = createCaller(makeCtx());
+      await expect(
+        caller.schedule.publishWeek({ weekStartDate: MON, revision: 1, published: true }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("발행하면 publishedAt 이 서고, entries·note 는 그대로다", async () => {
+      const caller = createCaller(makeCtx({ authorities: admin }));
+      const saved = await saveWeekAsEditor(caller, {
+        weekStartDate: MON,
+        note: "이번 주는 젤다 위주",
+        entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      });
+      expect(saved.publishedAt).toBeNull(); // saveWeek 은 published 를 안 실어 보냈다(기본 false)
+
+      const published = await caller.schedule.publishWeek({
+        weekStartDate: MON,
+        revision: saved.revision!,
+        published: true,
+      });
+      expect(typeof published.publishedAt).toBe("number");
+      expect(published.draft).toBe(false);
+      // entries·note 는 publishWeek 이 안 건드린다.
+      expect(published.note).toBe("이번 주는 젤다 위주");
+      expect(published.entries.map((e) => e.title)).toEqual(["젤다"]);
+    });
+
+    it("재발행해도 최초 발행 시각이 유지된다", async () => {
+      const caller = createCaller(makeCtx({ authorities: admin }));
+      const saved = await saveWeekAsEditor(caller, { weekStartDate: MON, entries: [] });
+      const first = await caller.schedule.publishWeek({
+        weekStartDate: MON,
+        revision: saved.revision!,
+        published: true,
+      });
+      const again = await caller.schedule.publishWeek({
+        weekStartDate: MON,
+        revision: first.revision!,
+        published: true,
+      });
+      expect(again.publishedAt).toBe(first.publishedAt);
+    });
+
+    it("비공개로 전환하면 공개만 꺼지고 확정(draft=false) 상태와 entries 는 그대로다", async () => {
+      const caller = createCaller(makeCtx({ authorities: admin }));
+      const saved = await saveWeekAsEditor(caller, {
+        weekStartDate: MON,
+        entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      });
+      const published = await caller.schedule.publishWeek({
+        weekStartDate: MON,
+        revision: saved.revision!,
+        published: true,
+      });
+      const unpublished = await caller.schedule.publishWeek({
+        weekStartDate: MON,
+        revision: published.revision!,
+        published: false,
+      });
+      expect(unpublished.publishedAt).toBeNull();
+      expect(unpublished.draft).toBe(false); // "안 짠 것으로" 안 돌아간다(ADR-0024)
+      expect(unpublished.entries.map((e) => e.title)).toEqual(["젤다"]);
+    });
+
+    it("stale revision 이면 CONFLICT — 남의 발행·저장을 안 덮는다", async () => {
+      const caller = createCaller(makeCtx({ authorities: admin }));
+      const saved = await saveWeekAsEditor(caller, { weekStartDate: MON, entries: [] });
+      // 다른 곳에서 먼저 저장해 revision 이 이미 올라갔다.
+      await saveWeekAsEditor(caller, {
+        weekStartDate: MON,
+        entries: [{ scheduledDate: "2026-07-20", title: "새로 넣은 항목" }],
+      });
+      await expect(
+        caller.schedule.publishWeek({
+          weekStartDate: MON,
+          revision: saved.revision!,
+          published: true,
+        }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    });
+
+    it("weekStartDate 가 월요일이 아니면 거절", async () => {
+      const caller = createCaller(makeCtx({ authorities: admin }));
+      await expect(
+        caller.schedule.publishWeek({
+          weekStartDate: "2026-07-21",
+          revision: 1,
+          published: true,
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+  });
+
   it("게임에 이어 붙인 항목이 보드의 플레이 날짜를 유도한다(No-ship 이 닫는 지점)", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     const game = await caller.games.add({

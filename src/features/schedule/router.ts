@@ -4,8 +4,14 @@
 
 import { TRPCError } from "@trpc/server";
 import { authorizedProcedure, router } from "../trpc/init";
-import { getWeekInput, saveWeekInput } from "./schema";
-import { getWeekForEdit, ReferencedGameMissing, saveWeek, WeekRevisionConflict } from "./service";
+import { getWeekInput, publishWeekInput, saveWeekInput } from "./schema";
+import {
+  getWeekForEdit,
+  publishWeek,
+  ReferencedGameMissing,
+  saveWeek,
+  WeekRevisionConflict,
+} from "./service";
 
 export const scheduleRouter = router({
   // 편집 화면이 한 주를 불러온다 — 발행 여부와 무관하게(초안 편집). 읽기지만 초안이 새지 않게
@@ -34,6 +40,24 @@ export const scheduleRouter = router({
         // 둘 다 같은 문구로 맵한다(사용자에겐 원인이 같다).
         if (e instanceof ReferencedGameMissing || isForeignKeyViolation(e)) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "보드에 없는 게임을 가리켰습니다." });
+        }
+        throw e;
+      }
+    }),
+
+  /* 발행·비공개 전환만(이슈 #56 결정 14 개정) — entries·note 는 안 건드리는 별도 뮤테이션이다.
+     "저장"과 "발행"이 체크박스+버튼 하나로 묶여 헷갈린다는 피드백(2026-07-28)에서 분리했다. */
+  publishWeek: authorizedProcedure("schedule:write")
+    .input(publishWeekInput)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await publishWeek(ctx.db, input);
+      } catch (e) {
+        if (e instanceof WeekRevisionConflict) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "다른 곳에서 이 주를 먼저 저장했습니다.",
+          });
         }
         throw e;
       }

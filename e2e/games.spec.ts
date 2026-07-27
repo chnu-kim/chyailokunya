@@ -204,7 +204,11 @@ test("관리자: 여러 날 편성 게임도 저장이 통과한다", async ({ p
   await page.locator('[data-od-id="schedule-day-add-2026-02-17"]').click();
   const day = page.locator('[data-od-id="schedule-day-2026-02-17"]');
   await day.locator('[data-od-id^="schedule-entry-title-"]').fill("엘든 링 1일차");
-  await day.locator('[data-od-id^="schedule-entry-game-"]').selectOption({ label: "엘든 링" });
+  // 옛 <select> 자리가 돋보기 트리거 + 인라인 검색 패널로 바뀌었다(이슈 #56 결정 11·19,
+  // 2026-07-28) — 검색어를 치면 로컬 매치가 뜨고, 그걸 클릭해 잇는다.
+  await day.locator('[data-od-id^="schedule-entry-game-trigger-"]').click();
+  await page.locator('[data-od-id$="-input"][role="combobox"]').fill("엘든");
+  await page.locator(".sched-picker__result", { hasText: "엘든 링" }).click();
   const save = page.locator('[data-od-id="schedule-save"]');
   await save.click();
   await expect(save).toHaveText("저장됨");

@@ -3,6 +3,7 @@ import {
   addEntry,
   draftEntryInputs,
   entriesForDate,
+  firstBlankTitleEntry,
   isWeekDirty,
   makeDraftEntry,
   newEntryKey,
@@ -28,6 +29,16 @@ describe("newEntryKey", () => {
   it("seq 로 충돌 없는 안정 키를 낸다", () => {
     expect(newEntryKey(0)).toBe("new-0");
     expect(newEntryKey(3)).not.toBe(newEntryKey(4));
+  });
+});
+
+describe("makeDraftEntry", () => {
+  it("시각 기본값은 19:00 이고, 지우면 미정('')으로 남는다", () => {
+    const e = makeDraftEntry("new-0", MON);
+    expect(e).toMatchObject({ scheduledDate: MON, startTime: "19:00", title: "", gameId: null });
+    expect(
+      updateEntry(draft({ entries: [e] }), "new-0", { startTime: "" }).entries[0]!.startTime,
+    ).toBe("");
   });
 });
 
@@ -73,6 +84,29 @@ describe("entriesForDate — 하루 안 정렬(서버 ORDER BY 짝)", () => {
       ],
     });
     expect(entriesForDate(d, MON).map((e) => e.title)).toEqual(["먼저", "나중"]);
+  });
+});
+
+describe("firstBlankTitleEntry — 저장 전 가드", () => {
+  it("빈 항목이 없으면 null", () => {
+    const d = draft({ entries: [entry("a", { title: "젤다" }), entry("b", { title: "저챗" })] });
+    expect(firstBlankTitleEntry(d)).toBeNull();
+  });
+
+  it("공백만 있는 제목도 빈 항목으로 잡는다", () => {
+    const d = draft({ entries: [entry("a", { title: "  " })] });
+    expect(firstBlankTitleEntry(d)?.key).toBe("a");
+  });
+
+  it("여러 개 중 먼저 더한 것 하나만 돌려준다", () => {
+    const d = draft({
+      entries: [
+        entry("a", { title: "젤다" }),
+        entry("b", { title: "" }),
+        entry("c", { title: "" }),
+      ],
+    });
+    expect(firstBlankTitleEntry(d)?.key).toBe("b");
   });
 });
 
