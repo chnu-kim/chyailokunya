@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import { WeekCard, type WeekCardData } from "./week-card";
+import type { WeekCardData } from "@/features/schedule/card";
+import { WeekCard } from "./week-card";
 
 /* 스냅샷이 아니라 명시적 단언으로 못박는다(이슈 #109 작업순서 1) — 이 컴포넌트는 데이터를
    받은 대로 그리기만 하므로(7일 폴딩·하루 상한은 작업순서 2 의 buildWeekCard 몫), 각 필드가
