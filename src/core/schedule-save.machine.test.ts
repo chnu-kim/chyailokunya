@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { makeDraftEntry, type WeekDraft } from "./schedule-editor";
 import {
   scheduleSaveMachine,
+  type PublishWeekResult,
+  type PublishWeekValues,
   type SaveWeekResult,
   type SaveWeekValues,
 } from "./schedule-save.machine";
@@ -27,6 +29,7 @@ function deferred<T>() {
 
 function start(opts: {
   run: (values: SaveWeekValues, signal: AbortSignal) => Promise<SaveWeekResult>;
+  publishRun?: (values: PublishWeekValues, signal: AbortSignal) => Promise<PublishWeekResult>;
   mapError?: (e: unknown) => string;
   initialDraft?: WeekDraft;
   initialRevision?: number | null;
@@ -37,6 +40,11 @@ function start(opts: {
       initialDraft: opts.initialDraft ?? draft(),
       initialRevision: opts.initialRevision ?? null,
       run: opts.run,
+      publishRun:
+        opts.publishRun ??
+        (async () => {
+          throw new Error("publishRun 이 이 테스트에서 안 쓰일 것으로 예상됐다");
+        }),
       mapError: opts.mapError ?? (() => "실패 문구"),
     },
   });
@@ -58,17 +66,16 @@ describe("scheduleSaveMachine — 초기 상태", () => {
     expect(s.context.baseline).toBe(initialDraft);
     expect(s.context.revision).toBe(5);
     expect(s.context.error).toBe("");
+    expect(s.context.publishError).toBe("");
     expect(s.context.announcement).toBe("");
   });
 });
 
 describe("scheduleSaveMachine — 편집 이벤트(순수 전이의 얇은 배선)", () => {
-  it("NOTE_CHANGED·PUBLISHED_CHANGED 는 draft 의 그 필드만 바꾼다", () => {
+  it("NOTE_CHANGED 는 draft 의 그 필드만 바꾼다", () => {
     const actor = start({ run: async () => ({ draft: draft(), revision: null }) });
     actor.send({ type: "NOTE_CHANGED", note: "이번 주는 젤다" });
     expect(actor.getSnapshot().context.draft.note).toBe("이번 주는 젤다");
-    actor.send({ type: "PUBLISHED_CHANGED", published: true });
-    expect(actor.getSnapshot().context.draft.published).toBe(true);
   });
 
   it("ENTRY_ADDED 는 new-{seq} 키로 더하고 seq 를 증가시킨다 — 같은 날 두 번 더해도 키가 겹치지 않는다", () => {
@@ -98,6 +105,44 @@ describe("scheduleSaveMachine — 편집 이벤트(순수 전이의 얇은 배�
 });
 
 describe("scheduleSaveMachine — SAVE 계약", () => {
+  /* firstBlankTitleEntry 가드(Plan 에이전트 리뷰, 2026-07-28) — draftEntryInputs 가 빈 제목
+     항목을 조용히 걸러 버리므로, 막지 않으면 저장이 "성공"하고 그 줄이 화면에서 신호 없이
+     사라진다. */
+  it("제목이 빈 항목이 있으면 서버로 안 나가고 요일을 짚은 에러만 세운다", () => {
+    let calls = 0;
+    const seeded = draft({
+      entries: [
+        makeDraftEntry("a", "2027-01-04"), // 월요일 — title 기본값 "" 그대로(빈 제목)
+      ],
+    });
+    const actor = start({
+      run: async () => {
+        calls += 1;
+        return { draft: draft(), revision: 1 };
+      },
+      initialDraft: seeded,
+    });
+    actor.send({ type: "SAVE" });
+    expect(actor.getSnapshot().value).toBe("ready"); // saving 으로 안 간다
+    expect(calls).toBe(0);
+    expect(actor.getSnapshot().context.error).toContain("월요일");
+    expect(actor.getSnapshot().context.error).toContain("제목이 없습니다");
+  });
+
+  it("제목을 채우면 다시 SAVE 가 정상 진행된다", async () => {
+    const actor = start({ run: async () => ({ draft: draft(), revision: 1 }) });
+    actor.send({ type: "ENTRY_ADDED", date: "2027-01-04" });
+    actor.send({ type: "SAVE" });
+    expect(actor.getSnapshot().value).toBe("ready");
+    expect(actor.getSnapshot().context.error).not.toBe("");
+
+    actor.send({ type: "ENTRY_PATCHED", key: "new-0", patch: { title: "젤다" } });
+    actor.send({ type: "SAVE" });
+    expect(actor.getSnapshot().value).toBe("saving");
+    await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 1);
+    expect(actor.getSnapshot().context.error).toBe("");
+  });
+
   it("run 이 받는 payload 가 CAS 계약 그대로다(weekStartDate·revision·note·published·entries)", async () => {
     const seeded = draft({
       note: "  공지  ",
@@ -105,6 +150,7 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
       entries: [makeDraftEntry("a", "2027-01-04")],
     });
     seeded.entries[0]!.title = "젤다";
+    seeded.entries[0]!.startTime = ""; // 시각 미정 경로도 이 테스트가 함께 본다(기본값 19:00 과 별개)
     let seen: SaveWeekValues | undefined;
     const actor = start({
       run: async (values) => {
@@ -260,5 +306,165 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 2);
     // 저장 중 편집("저장 중에 고친 공지")은 서버 응답에 덮인다.
     expect(actor.getSnapshot().context.draft).toBe(fromServer);
+  });
+});
+
+describe("scheduleSaveMachine — PUBLISH·UNPUBLISH 계약(이슈 #56 결정 14 개정)", () => {
+  const savedDraft = draft({
+    note: "공지",
+    entries: [makeDraftEntry("db-1", "2027-01-04")],
+  });
+
+  it("PUBLISH 는 dirty 하면 가드가 막는다 — publishRun 이 안 불리고 상태도 그대로다", () => {
+    let calls = 0;
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async () => {
+        calls += 1;
+        return { published: true, revision: 99 };
+      },
+      initialDraft: savedDraft,
+      initialRevision: 3,
+    });
+    actor.send({ type: "NOTE_CHANGED", note: "아직 저장 안 한 변경" });
+    actor.send({ type: "PUBLISH" });
+    expect(actor.getSnapshot().value).toBe("ready"); // publishing 으로 안 간다
+    expect(calls).toBe(0);
+    expect(actor.getSnapshot().context.revision).toBe(3);
+  });
+
+  /* PUBLISH 와의 비대칭이 핵심이다(Plan 에이전트 리뷰) — 공개를 거두는 건 저장된 값을 새로
+     공개하는 게 아니라서 "이미 저장된 값 기준"이 적용될 대상이 없다. 급히 내려야 하는데 마침
+     다른 걸 고치던 중이라 막히면 안전이 아니라 방해다. */
+  it("UNPUBLISH 는 dirty 해도 막히지 않는다", async () => {
+    const publishedDirty = { ...savedDraft, published: true };
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async () => ({ published: false, revision: 8 }),
+      initialDraft: publishedDirty,
+      initialRevision: 5,
+    });
+    actor.send({ type: "NOTE_CHANGED", note: "아직 저장 안 한 변경" });
+    expect(actor.getSnapshot().context.draft.note).not.toBe(
+      actor.getSnapshot().context.baseline.note,
+    ); // dirty
+    actor.send({ type: "UNPUBLISH" });
+    expect(actor.getSnapshot().value).toBe("publishing");
+    await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 8);
+    expect(actor.getSnapshot().context.draft.published).toBe(false);
+  });
+
+  it("저장된 적 없으면(revision null) PUBLISH 가 막힌다", () => {
+    let calls = 0;
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async () => {
+        calls += 1;
+        return { published: true, revision: 99 };
+      },
+      initialDraft: savedDraft,
+      initialRevision: null,
+    });
+    actor.send({ type: "PUBLISH" });
+    expect(actor.getSnapshot().value).toBe("ready");
+    expect(calls).toBe(0);
+  });
+
+  it("entries 가 비어 있으면 PUBLISH 가 막힌다(빈 주는 공개 안 한다) — UNPUBLISH 는 막히지 않는다", () => {
+    let publishCalls = 0;
+    const emptyDraft = draft({ published: true });
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async (values) => {
+        publishCalls += 1;
+        return { published: values.published, revision: 5 };
+      },
+      initialDraft: emptyDraft,
+      initialRevision: 4,
+    });
+    actor.send({ type: "PUBLISH" });
+    expect(actor.getSnapshot().value).toBe("ready");
+    expect(publishCalls).toBe(0);
+
+    actor.send({ type: "UNPUBLISH" });
+    expect(actor.getSnapshot().value).toBe("publishing");
+  });
+
+  it("PUBLISH 성공 — published 만 병합하고 entries·note 는 그대로, revision 이 갱신된다", async () => {
+    let seen: PublishWeekValues | undefined;
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async (values) => {
+        seen = values;
+        return { published: true, revision: 42 };
+      },
+      initialDraft: savedDraft,
+      initialRevision: 3,
+    });
+    actor.send({ type: "PUBLISH" });
+    expect(actor.getSnapshot().value).toBe("publishing");
+    await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 42);
+
+    expect(seen).toEqual({ weekStartDate: "2027-01-04", revision: 3, published: true });
+    const s = actor.getSnapshot();
+    expect(s.context.draft.published).toBe(true);
+    expect(s.context.baseline.published).toBe(true);
+    expect(s.context.draft.note).toBe("공지"); // publishWeek 이 안 건드린 필드는 그대로
+    expect(s.context.draft.entries).toBe(savedDraft.entries); // 통째로 안 갈아 끼운다
+    expect(s.context.publishError).toBe("");
+    expect(s.context.announcement).toBe("발행했습니다");
+  });
+
+  it("UNPUBLISH 성공 — 문구가 다르다", async () => {
+    const publishedDraft = { ...savedDraft, published: true };
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async () => ({ published: false, revision: 7 }),
+      initialDraft: publishedDraft,
+      initialRevision: 6,
+    });
+    actor.send({ type: "UNPUBLISH" });
+    await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 7);
+    const s = actor.getSnapshot();
+    expect(s.context.draft.published).toBe(false);
+    expect(s.context.announcement).toBe("비공개로 전환했습니다");
+  });
+
+  it("실패하면 publishError 만 세운다 — 저장용 error·announcement·draft·revision 은 안 건드린다", async () => {
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async () => {
+        throw new Error("conflict");
+      },
+      mapError: () => "다른 곳에서 먼저 발행했습니다",
+      initialDraft: savedDraft,
+      initialRevision: 3,
+    });
+    actor.send({ type: "PUBLISH" });
+    await waitFor(actor, (s) => s.matches("ready") && s.context.publishError !== "");
+    const s = actor.getSnapshot();
+    expect(s.context.publishError).toBe("다른 곳에서 먼저 발행했습니다");
+    expect(s.context.error).toBe("");
+    expect(s.context.announcement).toBe("");
+    expect(s.context.draft).toBe(savedDraft);
+    expect(s.context.revision).toBe(3);
+  });
+
+  it("publishing 중 재요청은 무시된다(submit.machine 의 재제출 방어와 같다)", () => {
+    const { promise } = deferred<PublishWeekResult>();
+    let calls = 0;
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async () => {
+        calls += 1;
+        return promise;
+      },
+      initialDraft: savedDraft,
+      initialRevision: 3,
+    });
+    actor.send({ type: "PUBLISH" });
+    expect(actor.getSnapshot().value).toBe("publishing");
+    actor.send({ type: "PUBLISH" });
+    expect(calls).toBe(1);
   });
 });

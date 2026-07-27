@@ -1,7 +1,7 @@
 "use client";
 
 import { useMachine } from "@xstate/react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
 import { isAborted } from "@/core/error-message";
 import {
@@ -15,6 +15,8 @@ import type { GameOption } from "@/features/games/service";
 import { buildWeekCard } from "@/features/schedule/card";
 import type { WeekView } from "@/features/schedule/service";
 import { trpc } from "@/features/trpc/client";
+import { PublishConfirmDialog } from "./publish-confirm-dialog";
+import { ScheduleGameSearch } from "./schedule-game-search";
 import { formatMD, WeekNav } from "./schedule-shared";
 import { WeekCardDownload } from "./week-card-download";
 
@@ -30,9 +32,9 @@ import { WeekCardDownload } from "./week-card-download";
    "한 주를 통으로 기획"하는 행위라 7일이 한눈에 보이고 바로 고쳐지는 편이 맞고, 게임 보드의
    모달 CSS 에 기대지 않아 그 페이지와 회귀가 격리된다.
 
-   게임 연결은 **보드에 이미 있는 게임 중에서** 고른다(항목의 game_id 는 games.id FK). 치지직
-   검색으로 새 게임을 편집기 안에서 바로 추가하는 길(결정 11)은 이 PR 범위 밖이다 — 새 게임은
-   /games 에서 추가한 뒤 여기서 잇는다(매주 반복되는 기존 게임은 이 선택만으로 왕복이 없다). */
+   게임 연결은 돋보기 버튼 → `schedule-game-search.tsx` 인라인 패널이 맡는다(결정 11·19,
+   2026-07-28 구현) — 보드에 이미 있는 게임을 먼저 로컬로 검색하고, 없으면 치지직 검색으로
+   새로 추가한다. 항목의 game_id 는 여전히 games.id FK. */
 
 /* 발행 체크 기본값 = **그 주가 지금 공개돼 있나**, 그게 전부다.
 
@@ -101,14 +103,41 @@ export function ScheduleEditor({
         const saved = await trpc.schedule.saveWeek.mutate(values, { signal });
         return { draft: weekToDraft(saved), revision: saved.revision };
       },
+      // publishWeek 은 entries·note 를 안 건드리므로 반환도 published·revision 뿐이다
+      // (schedule-save.machine.ts 의 PublishWeekResult).
+      publishRun: async (values, signal) => {
+        const saved = await trpc.schedule.publishWeek.mutate(values, { signal });
+        return { published: saved.publishedAt !== null, revision: saved.revision };
+      },
       mapError: saveErrorMessage,
     },
   });
-  const { draft, baseline, error, announcement } = state.context;
+  const { draft, baseline, revision, error, publishError, announcement } = state.context;
   const saving = state.matches("saving");
-  const gamesById = new Map(games.map((g) => [g.id, g]));
+  const publishing = state.matches("publishing");
+  /* games prop 을 로컬 상태로 승격한다 — 편집기 안에서 새 게임을 추가하면(ScheduleGameSearch)
+     서버가 다시 내려주기 전까지는 이 목록에만 존재한다. 주가 바뀌면 이 컴포넌트가 key 로
+     리마운트되므로(page.tsx) 초기값만으로 충분하다. */
+  const [localGames, setLocalGames] = useState<GameOption[]>(games);
+  const gamesById = new Map(localGames.map((g) => [g.id, g]));
   const days = weekDates(toIsoDate(weekStartDate));
   const dirty = isWeekDirty(draft, baseline);
+  // 지금 게임 검색 패널이 열린 항목의 key. 한 번에 하나만 연다(아코디언) — 여러 패널이 동시에
+  // 열리면 각자 자기 검색어를 따로 들고 있어야 해서 화면이 붐빈다.
+  const [openGameSearchKey, setOpenGameSearchKey] = useState<string | null>(null);
+  /* 발행·비공개 전환 확인창. null = 닫힘. 버튼은 이걸로 여는 신호만 세우고, 실제 뮤테이션은
+     확인을 누른 뒤(PublishConfirmDialog 의 onConfirm)에만 나간다. */
+  const [confirmMode, setConfirmMode] = useState<"publish" | "unpublish" | null>(null);
+  /* 발행은 항상 baseline(이미 저장된 값)을 대상으로 한다 — WeekCardDownload 가 baseline 으로
+     카드를 만드는 것과 같은 원칙(결정 22). revision===null 은 저장된 적 없는 주(레거시 아카이브
+     포함)라 발행 자체가 성립하지 않는다 — 머신의 canPublish 가드와 같은 조건을 화면도 들고
+     있어야 disabled 문구를 정확히 띄운다.
+
+     canUnpublish 는 **dirty 를 안 본다** — 공개를 거두는 건 저장된 값을 새로 공개하는 게
+     아니라서 그 원칙이 적용될 대상이 없다(머신의 canUnpublish 와 같은 비대칭, 그 파일 주석
+     참고). 급히 공개를 내려야 하는데 마침 다른 걸 고치던 중이라 막히면 안전이 아니라 방해다. */
+  const canPublish = !dirty && revision !== null && baseline.entries.length > 0;
+  const canUnpublish = revision !== null;
 
   /* 다운로드 카드는 **저장된 상태**(baseline)에서만 만든다 — draft(화면에 입력 중인, 아직
      안 저장한 값)로 만들면 결정 2("미완성본이 박제되면 안 된다")가 저장 전 편집 중에도 뚫린다.
@@ -227,82 +256,111 @@ export function ScheduleEditor({
                 </div>
                 <div className="sched-day__entries">
                   {dayEntries.map((e) => (
-                    <div className="sched-row" key={e.key} data-od-id={`schedule-entry-${e.key}`}>
-                      <label className="sr-only" htmlFor={`${e.key}-game`}>
-                        게임 연결
-                      </label>
-                      <select
-                        id={`${e.key}-game`}
-                        className="sched-field sched-row__game"
-                        value={e.gameId ?? ""}
-                        data-od-id={`schedule-entry-game-${e.key}`}
-                        onChange={(ev) => {
-                          const val = ev.target.value;
-                          if (val === "") {
-                            patch(e.key, { gameId: null });
-                            return;
+                    <div
+                      className="sched-entry-block"
+                      key={e.key}
+                      data-od-id={`schedule-entry-${e.key}`}
+                    >
+                      <div className="sched-row">
+                        <button
+                          type="button"
+                          className="sched-field sched-row__game-trigger"
+                          aria-haspopup="true"
+                          aria-expanded={openGameSearchKey === e.key}
+                          data-od-id={`schedule-entry-game-trigger-${e.key}`}
+                          onClick={() =>
+                            setOpenGameSearchKey(openGameSearchKey === e.key ? null : e.key)
                           }
-                          const gid = Number(val);
-                          // 게임을 고르면 잇고, 제목이 비어 있을 때만 게임명으로 채운다(입력한 제목은 안 덮는다).
-                          patch(e.key, {
-                            gameId: gid,
-                            title:
-                              e.title.trim() === ""
-                                ? (gamesById.get(gid)?.categoryValue ?? "")
-                                : e.title,
-                          });
-                        }}
-                      >
-                        <option value="">게임 없음</option>
-                        {games.map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.categoryValue}
-                          </option>
-                        ))}
-                      </select>
+                        >
+                          <svg
+                            className="sched-row__game-icon"
+                            aria-hidden="true"
+                            viewBox="0 0 16 16"
+                          >
+                            <circle
+                              cx="7"
+                              cy="7"
+                              r="5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                            />
+                            <path
+                              d="M11 11l3.5 3.5"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                          <span className="sched-row__game-name">
+                            {e.gameId !== null
+                              ? (gamesById.get(e.gameId)?.categoryValue ?? "연결된 게임")
+                              : "게임 연결"}
+                          </span>
+                        </button>
 
-                      <label className="sr-only" htmlFor={`${e.key}-title`}>
-                        제목
-                      </label>
-                      <input
-                        id={`${e.key}-title`}
-                        className="sched-field sched-row__title"
-                        type="text"
-                        maxLength={200}
-                        placeholder="제목 (예: 저챗)"
-                        value={e.title}
-                        data-od-id={`schedule-entry-title-${e.key}`}
-                        onChange={(ev) => patch(e.key, { title: ev.target.value })}
-                      />
+                        <label className="sr-only" htmlFor={`${e.key}-title`}>
+                          제목
+                        </label>
+                        <input
+                          id={`${e.key}-title`}
+                          className="sched-field sched-row__title"
+                          type="text"
+                          maxLength={200}
+                          placeholder="제목 (예: 저챗)"
+                          value={e.title}
+                          data-od-id={`schedule-entry-title-${e.key}`}
+                          onChange={(ev) => patch(e.key, { title: ev.target.value })}
+                        />
 
-                      <label className="sr-only" htmlFor={`${e.key}-time`}>
-                        시각 (선택)
-                      </label>
-                      <input
-                        id={`${e.key}-time`}
-                        className="sched-field sched-row__time"
-                        type="time"
-                        value={e.startTime}
-                        data-od-id={`schedule-entry-time-${e.key}`}
-                        onChange={(ev) => patch(e.key, { startTime: ev.target.value })}
-                      />
+                        <label className="sr-only" htmlFor={`${e.key}-time`}>
+                          시각 (선택)
+                        </label>
+                        <input
+                          id={`${e.key}-time`}
+                          className="sched-field sched-row__time"
+                          type="time"
+                          value={e.startTime}
+                          data-od-id={`schedule-entry-time-${e.key}`}
+                          onChange={(ev) => patch(e.key, { startTime: ev.target.value })}
+                        />
 
-                      <button
-                        type="button"
-                        className="sched-row__del"
-                        data-od-id={`schedule-entry-del-${e.key}`}
-                        onClick={() => remove(e.key)}
-                      >
-                        <svg aria-hidden="true" viewBox="0 0 16 16">
-                          <path
-                            d="M4 4l8 8M12 4l-8 8"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                        <span className="sr-only">항목 삭제</span>
-                      </button>
+                        <button
+                          type="button"
+                          className="sched-row__del"
+                          data-od-id={`schedule-entry-del-${e.key}`}
+                          onClick={() => remove(e.key)}
+                        >
+                          <svg aria-hidden="true" viewBox="0 0 16 16">
+                            <path
+                              d="M4 4l8 8M12 4l-8 8"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                          <span className="sr-only">항목 삭제</span>
+                        </button>
+                      </div>
+
+                      {openGameSearchKey === e.key && (
+                        <ScheduleGameSearch
+                          idPrefix={`schedule-entry-game-search-${e.key}-`}
+                          localGames={localGames}
+                          currentGameId={e.gameId}
+                          onPick={(gameId, categoryValue) =>
+                            patch(e.key, {
+                              gameId,
+                              // 제목이 비어 있을 때만 게임명으로 채운다(입력한 제목은 안 덮는다) —
+                              // 옛 select 와 같은 규칙.
+                              title: e.title.trim() === "" ? categoryValue : e.title,
+                            })
+                          }
+                          onUnlink={() => patch(e.key, { gameId: null })}
+                          onGameCreated={(g) => setLocalGames((prev) => [...prev, g])}
+                          onClose={() => setOpenGameSearchKey(null)}
+                        />
+                      )}
                     </div>
                   ))}
                   <button
@@ -322,25 +380,48 @@ export function ScheduleEditor({
 
         <WeekCardDownload card={card} weekStartDate={weekStartDate} stale={dirty} />
 
+        {/* 저장·발행 바 — 뷰포트 하단 sticky(결정 23). 발행은 저장과 분리된 별도 확인 흐름이다
+            (결정 14 개정) — 체크박스가 아니라 지금 상태를 말하는 칩 + 반대 상태로 여는 버튼. */}
         <div className="sched-bar" data-od-id="schedule-save-bar">
-          <label className="sched-publish" htmlFor="sched-publish">
-            <input
-              id="sched-publish"
-              type="checkbox"
-              checked={draft.published}
-              data-od-id="schedule-publish"
-              onChange={(e) => send({ type: "PUBLISHED_CHANGED", published: e.target.checked })}
-            />
-            <span className="sched-publish__label">
-              발행{" "}
-              <span className="sched-publish__hint">
-                — 체크하면 공개되고, 보드에 플레이 날짜가 떠요
-              </span>
+          <div className="sched-status" data-od-id="schedule-publish-status">
+            <span
+              className={baseline.published ? "chip chip--ok" : "chip chip--ink"}
+              data-od-id="schedule-publish-chip"
+            >
+              {baseline.published ? "공개 중" : "비공개"}
             </span>
-          </label>
+            <button
+              type="button"
+              className="btn btn--secondary sched-status__btn"
+              data-od-id="schedule-publish-toggle"
+              disabled={baseline.published ? !canUnpublish : !canPublish}
+              onClick={() => setConfirmMode(baseline.published ? "unpublish" : "publish")}
+            >
+              {baseline.published ? "비공개로 전환" : "발행하기"}
+            </button>
+            {/* 발행(공개 전환)만 dirty 에 막힌다 — 비공개 전환은 안 막힌다(canUnpublish 주석).
+                세 갈래가 서로 안 겹친다(dirty·entries 없음·저장된 적 없음) — 한 번에 하나만 뜬다. */}
+            {!baseline.published && dirty && (
+              <p className="sched-status__hint">
+                저장하지 않은 변경이 있어 발행할 수 없습니다. 먼저 저장해 주십시오.
+              </p>
+            )}
+            {!baseline.published && !dirty && baseline.entries.length === 0 && (
+              <p className="sched-status__hint">항목이 있어야 발행할 수 있습니다.</p>
+            )}
+            {/* 이관된 레거시 주(항목은 있지만 schedule_weeks 메타가 없어 revision 이 null)가
+               이 경로다 — dirty 도 아니고 entries 도 있지만 저장된 적이 없어 발행 대상이 될
+               revision 자체가 없다(canPublish 가드와 같은 조건, 그 주석 참고). 무언가 고쳐 한 번
+               저장해야 다음부터 발행할 수 있다. */}
+            {!baseline.published && !dirty && baseline.entries.length > 0 && revision === null && (
+              <p className="sched-status__hint">
+                이 주는 아직 저장된 적이 없습니다. 무언가 고친 뒤 저장하면 발행할 수 있습니다.
+              </p>
+            )}
+          </div>
 
           {error && (
-            <p className="sched-err" role="alert">
+            <p className="sched-err" role="alert" data-od-id="schedule-save-error">
               {error}
             </p>
           )}
@@ -355,6 +436,17 @@ export function ScheduleEditor({
             {saving ? "저장 중…" : dirty ? "저장" : "저장됨"}
           </button>
         </div>
+
+        {confirmMode && (
+          <PublishConfirmDialog
+            odId="schedule-publish-confirm"
+            mode={confirmMode}
+            publishing={publishing}
+            error={publishError}
+            onConfirm={() => send({ type: confirmMode === "publish" ? "PUBLISH" : "UNPUBLISH" })}
+            onClose={() => setConfirmMode(null)}
+          />
+        )}
 
         <p className="sr-only" role="status">
           {announcement}

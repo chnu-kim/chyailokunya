@@ -4,7 +4,7 @@
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { toIsoDate, weekDates, weekStartOf } from "@/core/calendar";
 import { games, scheduleEntries, scheduleWeeks, type Db, type ScheduleEntry } from "@/db";
-import type { SaveWeekInput } from "./schema";
+import type { PublishWeekInput, SaveWeekInput } from "./schema";
 
 /* 한 주의 뷰 — 메타(공지·발행) + 그 주 7일의 항목들. 편집 화면이 불러오고, 저장이 되돌려준다.
    주 자체는 저장하지 않고 날짜에서 유도하므로(결정 2) 항목은 week_id FK 가 아니라 scheduled_date
@@ -97,6 +97,17 @@ export class ReferencedGameMissing extends Error {
   }
 }
 
+/* 빈 주는 발행할 수 없다(이슈 #56 결정 22). 편집기의 disabled 버튼·머신 가드(canPublish)는
+   편의일 뿐 유일한 방어선이 아니다 — schedule:write 권한자가 tRPC 를 직접 불러 이 검사를
+   우회할 수 있어서 서버가 정본으로 다시 확인한다(불변식 2·3, 적대적 리뷰 지적: 실제로 이
+   경로가 열려 있었다). */
+export class EmptyWeekCannotPublish extends Error {
+  constructor() {
+    super("empty week cannot be published");
+    this.name = "EmptyWeekCannotPublish";
+  }
+}
+
 /* 다음 revision. revision 은 그 주 메타의 last_updated_at 이지만 **단조 증가가 정본이다** —
    벽시계 ms 를 그대로 쓰면 같은 ms 에 두 번 저장될 때 새 값이 옛 값과 같아져(now === oldRevision),
    그 옛 revision 을 든 stale 요청이 CAS(WHERE last_updated_at = revision)를 통과해 남의 저장을
@@ -185,6 +196,13 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
   const { monday, sunday } = weekBounds(input.weekStartDate);
   const now = Date.now();
 
+  /* 빈 주는 발행할 수 없다(publishWeek 과 같은 규칙, 결정 22) — saveWeek 은 전체 교체라
+     `input.entries` 가 곧 저장 후의 항목 전체다(DB 조회 없이 입력만으로 판정된다). publishWeek
+     에만 이 검사를 걸면 이 뮤테이션(schedule:write 권한자가 여전히 직접 부를 수 있는 노출된
+     경로)으로 그대로 우회된다 — 적대적 리뷰가 실제로 이 자리를 잡았다. DB 를 하나도 안 건드린
+     시점에 거절해 실패가 아무 흔적도 안 남긴다. */
+  if (input.published && input.entries.length === 0) throw new EmptyWeekCannotPublish();
+
   /* ── 0단계: 참조 게임을 **메타를 건드리기 전에** 검증한다 ─────────────────────────
      gameId 가 없는 게임을 가리키면 2단계 INSERT 가 FK 로 실패한다. 그 실패를 메타 이전으로 옮겨,
      에디터 로드 후 다른 관리자가 게임을 지운 현실적 시나리오에서 schedule_weeks 가 안 바뀌게 한다.
@@ -237,21 +255,37 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      null 이면 INSERT … onConflictDoNothing(그 사이 아무도 안 만들었을 때만). 어느 쪽이든 0행이면
      그 사이 누가 손댄 것이라 CONFLICT.
 
-     **두 경로가 published_at 을 다루는 방식이 반대인 게 핵심이다.**
-     - 기존 주(revision 있음): published_at 을 **안 건드린다**(revision 만 단조 증가). 이미 값이
-       있는데 실패한 저장이 그걸 바꾸면 발행 경계를 넘는다 — 그래서 진짜 값은 2단계 batch 에서만
-       원자적으로 쓴다(round-4 에서 이렇게 닫았다).
-     - 새/레거시 주(revision null): 행이 **없어서** 문제가 반대다. 청구가 빈 placeholder 를
-       만들면 그 순간 도메인 상태가 정해지는데, 청구 뒤 batch 가 실패하면 그 상태가 남는다
-       (적대적 리뷰가 잡은 자리). 그래서 null 청구는 **의도한 메타(note·draft·published_at)를
-       담아** 만든다 — 레거시 주라면 위에서 유도한 draft 가 false 라, 실패해도 그 주 항목이
-       계속 보드에 뜬다(손실 0 유지). 여기서 값을 담아도 round-4 문제가 안 도지는 건 바꿀 기존
-       값이 없기 때문이다(생성이지 변경이 아니다). */
+     **두 경로 모두 published_at·note 를 청구 단계에서 안 건드린다** — 진짜 값은 항상 2단계
+     batch 에서만 원자적으로 쓴다.
+     - 기존 주(revision 있음): revision 만 단조 증가시킨다(round-4 에서 이렇게 닫았다).
+     - 새/레거시 주(revision null): 한때 여기서 **의도한 메타(note·draft·published_at)를 그대로
+       담아** 행을 만들었다("생성이지 변경이 아니니 안전하다"는 논리) — 그런데 그 논리가 놓친
+       자리가 있다: 이 INSERT 뒤 0단계가 못 잡는 새 참조 무결성 위반(예: 프리검증 SELECT 와
+       2단계 INSERT 사이에 다른 관리자가 참조 게임을 지움)으로 2단계가 실패하면, **이미 커밋된
+       이 메타 행이 "발행됨·항목 0개"인 채로 남는다**(적대적 리뷰 3라운드가 실측 없이 추론으로
+       잡은 자리 — 코드 경로만으로 성립하는 지적이라 타당하다).
+
+       그래서 청구 행은 **"메타 행이 아예 없던 상태"와 정확히 같은 뜻**으로 채운다 — `note`·
+       `publishedAt` 은 null(행이 없었으면 공지도 발행도 없었다), `draft` 는 `priorEntries.length
+       === 0`(getWeekForEdit·보드의 `coalesce(draft,0)=0`과 같은 유도식 — 이관된 레거시 주(항목
+       있음)는 false, 아직 아무도 안 짠 새 주는 true). **`draft` 를 무조건 `true`로 두면 안 되는
+       이유**(4라운드 지적) — 레거시 주는 메타 행이 없어도 이미 보드에 날짜가 뜨고 있었는데
+       (coalesce 가 행 없음을 draft=0 으로 접는다), 여기서 무조건 true 로 청구하면 2단계가
+       실패했을 때 **그 순간만 보드에서 날짜가 사라진다** — 저장이 실패했을 뿐인데 이미 공개돼
+       있던 데이터가 사라지는, 손실 0(결정 16)을 정확히 어기는 회귀다. 이 유도식을 쓰면 청구
+       직후·2단계 실패 후 어느 시점에 봐도 "메타 행이 없다"고 봤을 때와 100% 같은 값이 보인다.
+       의도한 실제 값(공지·발행 여부 포함)은 기존 주와 똑같이 2단계에서만 쓴다 — 2단계가
+       실패해도 이 행은 이 placeholder 그대로 남아 아무것도 안 샌다. */
   const claimed =
     input.revision === null
       ? await db
           .insert(scheduleWeeks)
-          .values({ weekStartDate: input.weekStartDate, note: input.note, draft, publishedAt })
+          .values({
+            weekStartDate: input.weekStartDate,
+            note: null,
+            draft: priorEntries.length === 0,
+            publishedAt: null,
+          })
           .onConflictDoNothing({ target: scheduleWeeks.weekStartDate })
           .returning({ id: scheduleWeeks.id })
       : await db
@@ -295,5 +329,71 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
     await db.batch([setMeta, clearEntries]);
   }
 
+  return getWeekForEdit(db, input.weekStartDate);
+}
+
+/* 발행·비공개 전환만(이슈 #56 결정 14 개정, ADR-0024 2026-07-28 추가) — entries·note 를 안
+   건드리므로 saveWeek 의 prevalidate→claim→batch 3단계가 필요 없다. 단일 원자 UPDATE 하나로
+   revision CAS 와 published_at·draft 를 함께 바꾼다(D1 batch 조차 안 쓴다 — 문장이 하나라
+   그 자체로 원자다).
+
+   publishedAt 은 coalesce 로 **최초 발행 시각을 유지**한다 — SQL 이 이 컬럼의 old 값을 그대로
+   보므로 별도 SELECT 없이 "재발행마다 안 바뀐다"(saveWeek 의 existing?.publishedAt ?? now 와
+   같은 규칙)가 선다. draft 규칙도 saveWeek 과 동일하다 — 발행하면 확정(false), 비공개로
+   돌리면 **손대지 않는다**(발행 철회가 "안 짠 것으로 되돌린다"가 아니다, ADR-0024).
+
+   revision 이 그 사이 바뀌었으면(다른 곳에서 먼저 저장·발행) WHERE 가 0행이라 CONFLICT —
+   saveWeek 의 1단계 claim 과 같은 CAS. */
+export async function publishWeek(db: Db, input: PublishWeekInput): Promise<WeekView> {
+  const now = Date.now();
+
+  /* 발행(공개 전환)만 항목이 있어야 한다 — 비공개 전환은 반대 방향이라 이 검사가 없다
+     (canUnpublish 와 같은 비대칭, schedule-save.machine.ts 주석). CAS 를 걸기 **전에** 본다 —
+     빈 주 거절이 revision 을 안 건드려야 다음 정상 요청이 안 막힌다(saveWeek 의 prevalidate와
+     같은 자리).
+
+     **그런데 신원(revision) 확인이 이 검사보다 먼저다**(리뷰 6라운드 지적) — 안 그러면 이미
+     stale 해진 요청(다른 관리자가 그 사이 항목을 전부 지우고 저장함)이 "항목이 없다"는 엉뚱한
+     이유로 거절돼, 사용자는 진짜 원인(다른 곳에서 먼저 바꿨다 — CONFLICT)을 못 알아채고 "그냥
+     잘못된 요청"으로 오독한다. 여기서 읽는 revision 은 최종 UPDATE 의 WHERE 조건과 같은 값을
+     보는 것일 뿐 그 CAS 를 대신하지 않는다 — 이 읽기와 그 UPDATE 사이에 또 누가 끼어들면
+     최종 UPDATE 의 WHERE 가 여전히 0행으로 걸러 CONFLICT 를 던진다(안전은 그쪽이 정본). 이
+     읽기는 오직 **에러 메시지의 우선순위**를 바로잡기 위한 것이다. */
+  if (input.published) {
+    const [current] = await db
+      .select({ lastUpdatedAt: scheduleWeeks.lastUpdatedAt })
+      .from(scheduleWeeks)
+      .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
+    if ((current?.lastUpdatedAt ?? null) !== input.revision) throw new WeekRevisionConflict();
+
+    const { monday, sunday } = weekBounds(input.weekStartDate);
+    const [row] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(scheduleEntries)
+      .where(
+        and(gte(scheduleEntries.scheduledDate, monday), lte(scheduleEntries.scheduledDate, sunday)),
+      );
+    if (!row || row.count === 0) throw new EmptyWeekCannotPublish();
+  }
+
+  const claimed = await db
+    .update(scheduleWeeks)
+    .set(
+      input.published
+        ? {
+            publishedAt: sql`coalesce(${scheduleWeeks.publishedAt}, ${now})`,
+            draft: false,
+            lastUpdatedAt: nextRevision(input.revision, now),
+          }
+        : { publishedAt: null, lastUpdatedAt: nextRevision(input.revision, now) },
+    )
+    .where(
+      and(
+        eq(scheduleWeeks.weekStartDate, input.weekStartDate),
+        eq(scheduleWeeks.lastUpdatedAt, input.revision),
+      ),
+    )
+    .returning({ id: scheduleWeeks.id });
+  if (claimed.length === 0) throw new WeekRevisionConflict();
   return getWeekForEdit(db, input.weekStartDate);
 }

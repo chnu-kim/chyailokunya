@@ -93,3 +93,24 @@ export const getWeekInput = z
     },
   );
 export type GetWeekInput = z.infer<typeof getWeekInput>;
+
+/* 발행·비공개 전환 전용(이슈 #56 결정 14 개정, ADR-0024 2026-07-28 추가) — entries·note 는 안
+   건드린다. saveWeek 이 저장할 때마다 schedule_weeks 행을 청구(claim)해 두므로, 편집기가 이
+   뮤테이션을 부를 수 있는 시점(dirty 가 아니고 항목이 있는 주)엔 그 행이 항상 있다 — 그래서
+   revision 은 saveWeekInput 과 달리 null 을 안 받는다(처음 저장하는 주는 발행 버튼 자체가
+   비활성이라 이 경로를 안 탄다). */
+export const publishWeekInput = z
+  .object({
+    weekStartDate: isoDate,
+    revision: z.number().int(),
+    published: z.boolean(),
+  })
+  .refine(
+    (v) =>
+      !isIsoDate(v.weekStartDate) || weekStartOf(toIsoDate(v.weekStartDate)) === v.weekStartDate,
+    {
+      message: "주의 시작(월요일)이어야 합니다",
+      path: ["weekStartDate"],
+    },
+  );
+export type PublishWeekInput = z.infer<typeof publishWeekInput>;

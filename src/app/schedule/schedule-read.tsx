@@ -46,6 +46,13 @@ export function ScheduleReadView({
 
         {week ? (
           <>
+            {/* 카드가 먼저다(이슈 #56 결정 23) — 비관리자의 첫 인상은 "종이 카드" 은유가 보여야
+                한다(사용자가 세 안 중 "카드+목록 병행" 채택, 2026-07-28). 목록은 그 아래 그대로
+                유지한다 — 접근성 목록이 정본이고 카드는 여전히 aria-hidden(둘이 같은 내용을
+                중복해서 말한다, week-card-download.tsx 주석). 편집기 쪽 카드 위치는 이번
+                스코프 밖이다(발행 전 미저장 변경까지 다뤄야 해서 결이 다르다). */}
+            <WeekCardDownload card={buildWeekCard(week)} weekStartDate={weekStartDate} />
+
             {week.note && (
               <p className="sched__note" data-od-id="schedule-note">
                 {week.note}
@@ -92,8 +99,6 @@ export function ScheduleReadView({
                 );
               })}
             </ol>
-
-            <WeekCardDownload card={buildWeekCard(week)} weekStartDate={weekStartDate} />
           </>
         ) : (
           <div className="sched__empty" data-od-id="schedule-empty">

@@ -206,6 +206,14 @@
   width: 100%;
 }
 
+/* 항목 행 + (열렸으면) 게임 검색 패널을 한 덩어리로 묶는다 — 패널이 행 아래로 펼쳐지되 다음
+   항목과는 gap 으로 갈린다(sched-day__entries 의 gap 을 그대로 물려받는다). */
+.sched-entry-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 /* 한 줄에 넷이 서고, 좁아지면 wrap 으로 접힌다(560 아래에서 게임·제목이 각자 한 줄로 내려온다).
    flex-basis 를 주되 min-width:0 로 셋 다 줄어들 수 있게 해 320 에서도 가로 넘침이 없다. */
 .sched-row {
@@ -214,9 +222,31 @@
   align-items: center;
   gap: var(--space-2);
 }
-.sched-row__game {
+/* 게임 연결 트리거 — 옛 <select> 자리(결정 11·19, 2026-07-28). 돋보기 아이콘 + 연결된 게임명
+   (없으면 "게임 연결" 플레이스홀더). 누르면 아래 ScheduleGameSearch 패널이 펼쳐진다. */
+.sched-row__game-trigger {
   flex: 1 1 140px;
   min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.sched-row__game-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: var(--fg-muted);
+}
+.sched-row__game-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sched-row__game-trigger[aria-expanded="true"] {
+  border-color: var(--focus);
 }
 .sched-row__title {
   flex: 2 1 160px;
@@ -254,6 +284,92 @@
   outline-offset: 2px;
 }
 
+/* ── 게임 검색 패널(schedule-game-search.tsx, 결정 11·19) ─────────────────────
+   모달이 아니라 행 아래로 펼치는 인라인 블록이다 — 이 페이지가 이미 모달 없는 인라인
+   스프레드시트형이라(파일 상단 주석) 여기만 모달을 끌어오면 회귀 격리가 깨진다. */
+.sched-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.sched-picker__unlink {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--danger);
+  background: transparent;
+  border: 1.5px solid var(--danger);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.sched-picker__local,
+.sched-picker__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.sched-picker__result {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: var(--text-base);
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.sched-picker__result:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.sched-picker__result--active {
+  background: var(--surface-2);
+  border-color: var(--focus);
+}
+.sched-picker__hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+.sched-picker__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sched-picker__confirm-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.sched-picker__close {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.sched-picker__close:hover {
+  color: var(--fg);
+}
+
 /* 항목 추가 — 고스트 버튼. 하루 카드 안에서 가볍게, 그러나 44 를 세운다. */
 .sched-day__add {
   align-self: flex-start;
@@ -279,8 +395,19 @@
   outline-offset: 2px;
 }
 
-/* ── 저장 바 ────────────────────────────────────────────────────────────────── */
+/* ── 저장·발행 바(이슈 #56 결정 23) ───────────────────────────────────────────
+   뷰포트 하단에 sticky — 7일치 폼이 길어 맨 아래 고정이면 스크롤해야만 상태(저장됨·발행 여부)가
+   보였다(사용자 지적). `position: sticky`(fixed 아님)를 쓴 이유: 이 바가 편집기의 **마지막
+   요소**라, sticky 는 문서 흐름 안에 자기 자리를 그대로 남겨 두고(스크롤이 그 지점에 닿으면
+   자연히 정적 위치로 풀린다) 그 뒤를 가릴 콘텐츠 자체가 없다 — fixed 처럼 별도 여백 보정이
+   필요 없다. 새 상호작용 패턴이라(kunya-design §3, "있는 부품을 쓴다") 정당화를 남긴다: 모바일
+   엄지 도달 구역(화면 하단)에 늘 보이게 두는 게 목적이라 sticky 가 그 목적에 부합하는 최소
+   변경이다. z-index 는 5 — nav(60)·skip-link(40) 아래라 겹칠 일이 없고, 네이티브 dialog 는
+   top layer 라 z-index 와 무관하게 이 바 위에 뜬다. */
 .sched-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--space-4);
@@ -290,32 +417,29 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-lift);
 }
-.sched-publish {
+/* 발행 상태 — 체크박스가 없어졌다(결정 14 개정). 지금 공개 여부를 칩으로 말하고, 옆 버튼이
+   반대 상태로의 전환을 연다(눌러도 바로 안 바뀐다 — publish-confirm-dialog.tsx 가 확인을 받는다). */
+.sched-status {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  cursor: pointer;
 }
-.sched-publish input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 auto;
-  accent-color: var(--accent-ink);
-  cursor: pointer;
+.sched-status__btn {
+  min-height: 44px;
 }
-.sched-publish input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+.sched-status__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
-.sched-publish__label {
+/* 발행 못 하는 이유(미저장 변경·빈 주). 버튼 disabled 옆에 문장으로 — 값 칸이 아니라 안내라
+   합쇼체 문장이다(AGENTS 코드 컨벤션). 바 너비 전체를 먹어 다음 줄로 떨어진다. */
+.sched-status__hint {
+  flex-basis: 100%;
+  margin: 0;
   font-size: var(--text-sm);
-  font-weight: 700;
-  color: var(--fg);
-}
-.sched-publish__hint {
-  font-weight: 400;
   color: var(--fg-muted);
 }
 .sched-bar__save {
@@ -329,6 +453,45 @@
   color: var(--danger);
   font-size: var(--text-sm);
   margin: 0;
+}
+
+/* ── 발행·비공개 전환 확인(이슈 #56 결정 21) ──────────────────────────────────
+   games.css 의 dialog.composer 를 안 쓴다(schedule.css 상단 주석의 격리 원칙 그대로) — 여기서
+   같은 레시피(고정 위치·paper 표면·backdrop 딤)를 독립적으로 다시 짠다. 애니메이션은 안 건다 —
+   단발 확인이라 진입 효과의 값어치가 낮고, 그러면 reduced-motion 가드도 따로 안 필요하다. */
+dialog.sched-confirm {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(420px, calc(100vw - 2 * var(--space-5)));
+  max-width: none;
+  max-height: calc(100vh - 2 * var(--space-6));
+  overflow-y: auto;
+  padding: var(--space-5);
+  box-shadow: var(--shadow-lift);
+}
+dialog.sched-confirm::backdrop {
+  background-color: color-mix(in srgb, var(--brand-ink) 40%, transparent);
+}
+.sched-confirm__title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  line-height: 1.15;
+  margin: 0 0 var(--space-2);
+  word-break: keep-all;
+}
+.sched-confirm__hint {
+  font-size: var(--text-base);
+  color: var(--fg-muted);
+  margin: 0 0 var(--space-4);
+}
+.sched-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+.sched-confirm__btn {
+  min-height: 44px;
 }
 
 /* ── 빈 상태(읽기, 미발행 주) ──────────────────────────────────────────────── */
