@@ -47,6 +47,13 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { week } = await searchParams;
   const weekStart = resolveWeekParam(week);
+  /* `week` 이 명시된 요청만 그 주로 못박는다 — 명시가 없는 맨 `/schedule` 은 계속 "지금 주"라는
+     움직이는 과녁이어야 한다(원래 동작). 여기서 `weekStart`(정규화된 값)로 무조건 못박으면
+     맨 URL 공유도 그 순간의 주에 영영 고정돼, 다음 주가 되어도 크롤러가 캐싱해 둔 카드가 지난
+     주를 계속 가리킨다 — og:image 는 이미 주별로 다른데 og:url 만 그대로면(적대적 리뷰 지적)
+     같은 canonical 아래 서로 다른 주의 카드가 뒤섞여 플랫폼이 미리보기를 잘못 중복 제거하거나
+     클릭 시 엉뚱한 주로 보낸다. */
+  const canonicalUrl = week !== undefined ? `/schedule?week=${weekStart}` : "/schedule";
   return {
     title: TITLE,
     description: "챠이로 쿠냐의 이번 주 방송 일정.",
@@ -55,7 +62,7 @@ export async function generateMetadata({
       locale: OG_LOCALE,
       type: "website",
       images: [await resolveOgImage(weekStart)],
-      url: "/schedule",
+      url: canonicalUrl,
       title: TITLE,
       description: OG_DESCRIPTION,
     },

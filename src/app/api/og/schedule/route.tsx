@@ -53,8 +53,19 @@ const fontCache = new Map<string, ArrayBuffer>();
  * 줄인다(같은 (주·리비전)을 두 번 렌더할 일이 적어진다는 뜻이지 의존 자체가 없어지진 않는다.
  * KV/R2 로 폰트 바이너리를 별도 캐싱하는 안은 기각했다 — PNG 응답 자체를 캐싱하면 그 안에서
  * Satori·폰트 페치가 통째로 스킵되므로 더 적은 인프라로 같은 문제를 닫는다). */
+
+/* Google Fonts 로 보낼 고유 글자 수 상한. 화면에 실제로 보이는 문자(하루 4건 상한 ×7일 +
+   공지 500자)는 대개 이 근처에도 못 미치지만(실측: 150 종 정도 쓰는 보통 주가 URL 1.4KB),
+   서로 안 겹치는 글자로만 채운 정상 범위 안 입력(제목 200자·항목 최대 60개)은 산술상 URL 을
+   수십 KB 까지 부풀릴 수 있다 — Google Fonts 요청이 그 크기에서 실패하면 og 카드 전체가 500
+   이 된다(적대적 리뷰 지적). 넘치면 뒤쪽 글자를 자른다 — 아주 드물게 그 문자만 다른 폰트로
+   그려질 수 있지만(누락 글자의 결), 라우트 전체가 죽는 것보다 낫다. */
+const MAX_SUBSET_GLYPHS = 600;
+
 async function loadSubsetFont(family: string, weight: number, text: string): Promise<ArrayBuffer> {
-  const glyphs = Array.from(new Set(Array.from(text))).join("");
+  const glyphs = Array.from(new Set(Array.from(text)))
+    .join("")
+    .slice(0, MAX_SUBSET_GLYPHS);
   const cssUrl =
     `https://fonts.googleapis.com/css2?family=${family.replace(/ /g, "+")}:wght@${weight}` +
     `&text=${encodeURIComponent(glyphs)}`;
@@ -110,6 +121,20 @@ export async function GET(request: Request) {
   // 발행된 주가 없다(초안이거나 아예 없음) — 결정 13 은 미발행이 og 카드로 안 나가는 것까지
   // 포함한다. 404 다(500 아님) — "지금 이 주의 카드가 없다"가 사실이지 에러가 아니다.
   if (!week) return new Response(null, { status: 404 });
+
+  /* URL 이 **그 주의 지금 리비전을 정확히 가리킬 때만** 영구 캐싱을 준다. `rev` 가 있다는
+   * 사실만으로 영원히 캐싱하면(이전 구현), 편집과 요청이 겹치는 좁은 창에서 이 URL 이 실제로
+   * 담보하지 않는 걸 약속하게 된다 — `/schedule` 이 rev=100 을 박아 og:image 태그를 낸 직후
+   * 누군가 그 주를 다시 저장해 rev=105 가 되면, 그 사이 아무 캐시도 아직 안 가진 `?rev=100`
+   * URL 을 처음 요청한 쪽은 (이 라우트가 리비전과 무관하게 항상 "지금" 데이터를 그리므로)
+   * rev=105 의 내용을 받는다 — 그런데 그걸 rev=100 이라는 이름 아래 "영원히 안 바뀐다"고
+   * 캐싱해 버리면, 그 뒤 또 저장(rev=110)이 나가도 그 캐시는 rev=105 짜리 낡은 내용을 계속
+   * 내준다. 콘텐츠 주소화(URL=콘텐츠) 계약을 라우트가 실제로 검증하지 않고 말로만 하던
+   * 자리다(적대적 리뷰가 잡음). 그래서 `rev` 를 지금 리비전과 대조해, 맞을 때만(우리
+   * generateMetadata 가 방금 그 순간의 리비전을 실어 만든 URL 일 때만) 영구 캐싱하고, 어긋나면
+   * (레이스에 걸렸거나 손으로 조작한 값) 그냥 짧게만 잡는다 — 데이터 자체는 항상 "지금"
+   * 값이라 틀린 화면이 나가진 않는다. */
+  const isPinnedToCurrentRevision = url.searchParams.get("rev") === String(week.revision);
 
   const card = buildWeekCard(weekStart, week);
   const { penText, bodyText } = collectFontText(card);
@@ -312,19 +337,14 @@ export async function GET(request: Request) {
         { name: BODY, data: bodyFont, weight: 400, style: "normal" },
         { name: BODY, data: bodyBold, weight: 700, style: "normal" },
       ],
-      /* 이 URL 이 콘텐츠를 정확히 가리키는가로 캐시 기간을 가른다. `/schedule`(generateMetadata)
-         이 og:image 를 지을 때 `rev`(주 메타의 last_updated_at)를 항상 실어 보낸다 — 그 주가
-         바뀌면(saveWeek·claimWeek 모두 이 값을 단조 증가시킨다) URL 자체가 달라지므로, `rev` 가
-         있는 요청은 내용이 절대 안 바뀔 URL 이라 영구 캐싱이 안전하다(결정적 렌더는 스파이크가
-         이미 확인했다). `rev` 없이 라우트를 직접 두드리면(수동 확인 등) 내용이 그 순간의
-         최신값이라 짧게만 잡는다 — 두 경로가 같은 함수를 타므로 분기는 헤더 하나뿐이다.
-
-         `rev` 값 자체는 검증하지 않는다(쿼리에 있다 없다만 본다) — 누가 `?week=X&rev=아무값`
-         을 손으로 만들어도 그 URL 은 우리 og:image 태그가 절대 안 가리키는 낯선 문자열이라
-         캐시가 오염될 자리(누가 그 URL 을 실제로 공유해 캐시를 채우는 경로) 자체가 없다.
-         값을 위조해 봐야 위조한 사람 손에만 있는 URL 하나가 오래 캐싱될 뿐이다. */
+      /* `/schedule`(generateMetadata)이 og:image 를 지을 때 `rev`(주 메타의 last_updated_at)를
+         항상 실어 보낸다 — 그 주가 바뀌면(saveWeek·claimWeek 모두 이 값을 단조 증가시킨다) URL
+         자체가 달라지므로, 지금 리비전과 맞는 `rev` 는 내용이 절대 안 바뀔 URL 이라 영구 캐싱이
+         안전하다(결정적 렌더는 스파이크가 이미 확인했다. 검증은 위
+         `isPinnedToCurrentRevision`). `rev` 없이 두드리거나 리비전이 어긋나면(수동 확인·레이스·
+         조작) 내용이 그 순간의 최신값이라 짧게만 잡는다. */
       headers: {
-        "Cache-Control": url.searchParams.has("rev")
+        "Cache-Control": isPinnedToCurrentRevision
           ? "public, max-age=31536000, immutable"
           : "public, max-age=300",
       },

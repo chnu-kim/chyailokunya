@@ -134,10 +134,46 @@ test("관리자: 발행 전엔 og/schedule 이 404, 발행 후엔 실제 PNG", a
   const after = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
   expect(after.status()).toBe(200);
   expect(after.headers()["content-type"]).toBe("image/png");
+
+  /* 리비전이 지금 값과 맞을 때만 영구 캐싱한다(적대적 리뷰 지적 — rev 가 있다는 사실만으로
+     캐싱하면, 이 주가 다시 저장돼 리비전이 바뀐 뒤에도 옛 리비전 번호 아래 캐시가 낡은 내용을
+     영원히 내줄 길이 열린다). `/schedule` 이 실제로 박아 보내는 rev 값을 og:image 메타에서
+     그대로 뽑아 쓴다 — 숫자를 손으로 다시 계산하면 라우트의 실제 판정과 갈릴 수 있다. */
+  const html = await (await request.get(`${baseURL}/schedule?week=${WEEK}`)).text();
+  const rev = html.match(/api\/og\/schedule\?week=[^&"]+&amp;rev=(\d+)/)?.[1];
+  expect(rev).toBeTruthy();
+
+  const pinned = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=${rev}`);
+  expect(pinned.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+
+  const wrongRev = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=999999999`);
+  expect(wrongRev.status()).toBe(200); // 데이터 자체는 항상 "지금" 값이라 화면은 안 틀린다.
+  expect(wrongRev.headers()["cache-control"]).toBe("public, max-age=300");
+
+  const noRev = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
+  expect(noRev.headers()["cache-control"]).toBe("public, max-age=300");
 });
 
 test("og/schedule: 아무도 안 건드린 미래 주는 404", async ({ baseURL, request }) => {
   // 위 테스트가 발행한 주와 다른 날짜 — 이 스펙 파일 안에서도 격리한다.
   const res = await request.get(`${baseURL}/api/og/schedule?week=2029-05-14`);
   expect(res.status()).toBe(404);
+});
+
+/* og:url canonical(적대적 리뷰 지적). 발행 여부와 무관하게 metadata 는 항상 나가므로 로그인·
+   발행 없이 확인한다 — 다른 스펙과 겹치지 않는 완전히 새 주를 쓴다. */
+test("og:url — week 이 명시된 공유는 그 주로 못박고, 맨 /schedule 은 안 박는다", async ({
+  baseURL,
+  request,
+}) => {
+  const withWeek = await (await request.get(`${baseURL}/schedule?week=2029-08-06`)).text();
+  expect(withWeek).toContain(
+    'property="og:url" content="https://chyailokunya.com/schedule?week=2029-08-06"',
+  );
+
+  // exact-match 이므로 이 줄이 통과하면 그 자체로 og:url 에 ?week= 가 안 붙었다는 뜻이다 —
+  // 페이지 본문의 WeekNav(지난주·다음주 링크)는 원래도 "/schedule?week=" 를 담고 있어
+  // 페이지 전체에서 그 부분 문자열의 부재를 따로 재면 오탐이다.
+  const bare = await (await request.get(`${baseURL}/schedule`)).text();
+  expect(bare).toContain('property="og:url" content="https://chyailokunya.com/schedule"');
 });
