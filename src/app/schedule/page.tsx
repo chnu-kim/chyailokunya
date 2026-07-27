@@ -25,21 +25,14 @@ const getPublishedWeekCached = cache(async (weekStart: string) => {
   return getPublishedWeek(db, weekStart);
 });
 
-/* og:image 는 그 주가 **발행돼 있을 때만** 실제 PNG 를 가리킨다 — 결정 13 은 미발행이 공유
-   카드로 안 나가는 것까지 포함하므로, 초안뿐인 주는 사이트 기본 커버(OG_IMAGE)로 조용히
-   떨어진다. `rev`(주 메타 revision)를 실어 보내 og/schedule 라우트가 영구 캐싱해도 되는
-   URL을 받게 한다(그 라우트의 Cache-Control 주석 참고). */
-async function resolveOgImage(weekStart: string) {
-  const week = await getPublishedWeekCached(weekStart);
-  if (!week) return OG_IMAGE;
-  return {
-    url: `/api/og/schedule?week=${weekStart}&rev=${week.revision}`,
-    width: 1200,
-    height: 630,
-    alt: `챠이로 쿠냐 ${weekStart} 주 방송 일정표`,
-  };
-}
-
+/* og:image 는 주별 동적 PNG 를 다시 가리키지 않는다 — 항상 사이트 기본 커버(OG_IMAGE)다.
+   2026-07-27 프로덕션 인시던트로 되돌렸다: Satori/resvg 서버 렌더가 Cloudflare Workers 무료
+   플랜의 요청당 CPU 10ms 한도를 구조적으로 못 지켜(고정 비용 자체가 한도 초과), 발행된 주의
+   og:image URL 을 소셜 크롤러가 자동으로 두드릴 때마다 그 isolate 가 CPU 한도를 넘겨 죽고,
+   같은 isolate 를 타던 무관한 요청(favicon.ico 까지)도 연쇄로 실패했다(Error 1102, 실측
+   `wrangler tail`). `/api/og/schedule` 라우트 자체를 지웠다 — 이슈 #56 결정 15("PNG = Worker
+   서버 렌더, og:image 겸용")를 잠정 철회한다. 다음 계획은 og:image 자동 링크가 아니라
+   **클라이언트 사이드**(방문자 브라우저) 렌더 + 수동 다운로드로, 별도 이슈에서 다룬다. */
 export async function generateMetadata({
   searchParams,
 }: {
@@ -61,7 +54,7 @@ export async function generateMetadata({
       siteName: OG_SITE_NAME,
       locale: OG_LOCALE,
       type: "website",
-      images: [await resolveOgImage(weekStart)],
+      images: [OG_IMAGE],
       url: canonicalUrl,
       title: TITLE,
       description: OG_DESCRIPTION,
