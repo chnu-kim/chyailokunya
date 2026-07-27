@@ -99,21 +99,35 @@ export function ScheduleGameSearch({
 
   /* 보드에 이미 있는 게임 즉시 필터(네트워크 없음) — 매주 반복되는 게임은 이 목록 하나로
      끝난다(결정 11). 부분 일치까지 보여준다("헤이데스"를 치면 "헤이데스 2"도 뜬다) — 그래야
-     비슷한 이름의 다른 게임이 이미 있어도 그 카드를 눈으로 확인하고 지나칠 수 있다. */
+     비슷한 이름의 다른 게임이 이미 있어도 그 카드를 눈으로 확인하고 지나칠 수 있다.
+
+     **정확히 같은 이름인지는 잘라내기 전의 전체 목록에서 본다**(아래 hasExactLocalMatch) —
+     화면에 보여줄 8개로 자른 뒤에 판정하면(첫 판의 실수 — 5라운드 리뷰 지적), 부분 일치가
+     8개를 넘고 정확히 같은 이름이 9번째 이후(사전순 정렬이라 흔하다)에 있을 때 "이미 있다"는
+     사실 자체를 놓쳐 치지직/직접 추가로 새어 나가고, 직접 추가는 categoryId 가 null 이라 DB
+     UNIQUE 제약도 안 걸려 같은 게임이 두 번 생긴다. */
+  const exactLocalMatch = useMemo(() => {
+    if (query === "") return null;
+    const q = query.trim().toLowerCase();
+    return localGames.find((g) => g.categoryValue.trim().toLowerCase() === q) ?? null;
+  }, [localGames, query]);
+  const hasExactLocalMatch = exactLocalMatch !== null;
+
+  /* 정확히 같은 이름은 잘라내기 전에 맨 앞으로 — 부분 일치가 8개를 넘어도 "이미 있는 게임"이
+     화면에서 안 보이는 일이 없게 한다(exactLocalMatch 와 같은 이유: 그게 있는데도 안 보이면
+     사용자는 그걸 못 고르고 결국 직접 추가로 중복을 만든다). */
   const localMatches = useMemo(() => {
     if (query === "") return [];
     const q = query.toLowerCase();
-    return localGames.filter((g) => g.categoryValue.toLowerCase().includes(q)).slice(0, 8);
+    return localGames
+      .filter((g) => g.categoryValue.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const aExact = a.categoryValue.trim().toLowerCase() === q ? 0 : 1;
+        const bExact = b.categoryValue.trim().toLowerCase() === q ? 0 : 1;
+        return aExact - bExact;
+      })
+      .slice(0, 8);
   }, [localGames, query]);
-
-  /* 로컬에 **정확히 같은 이름**이 있을 때만 치지직 검색을 안 태운다 — 그 게임을 이미 찾았다고
-     본다. 부분 일치만으론 안 막는다: "헤이데스"를 찾는데 로컬엔 "헤이데스 2"만 있으면 그건
-     다른 게임이라, localMatches.length 로만 가르면(첫 판의 실수 — 적대적 리뷰 지적) 원하는
-     게임을 영영 치지직에서 못 찾고 직접 추가도 못 하는 막다른 골목이 된다. */
-  const hasExactLocalMatch = useMemo(
-    () => localMatches.some((g) => g.categoryValue.trim().toLowerCase() === query.toLowerCase()),
-    [localMatches, query],
-  );
 
   async function runSearch(submitted: string) {
     const q = submitted.trim();
