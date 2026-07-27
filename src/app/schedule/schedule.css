@@ -346,6 +346,178 @@
   color: var(--fg);
 }
 
+/* ── 주간표 공유 카드 (이슈 #109) ─────────────────────────────────────────────
+   옛 Satori 렌더(og:image route.tsx, 프로덕션 인시던트로 되돌려짐)를 평범한 CSS 로 이식한
+   프레젠테이션 카드(week-card.tsx). 1200×630 고정 — 이 비율을 벗어나면 트위터·카페 카드가
+   임의로 잘라내 요일 칸이 사라진다. 클래스 접두사가 `sched-*`가 아니라 `week-card` 인 이유는
+   읽기 화면 DOM 을 그대로 안 쓰는 전용 레이아웃이라서다(결정 4).
+
+   ── 카드는 항상 라이트다(사진지 섬 .polaroid 와 같은 결, chrome.css) ────────────
+   물리적 종이 카드 은유라 다크 모드에서도 크림 그대로여야 한다 — 카페·트위터에 다크 배경
+   카드를 올릴 이유가 없다. 배경·브랜드 색 대부분은 이미 테마 불변 앵커(globals.css :root
+   "테마 불변" 주석)라 그대로 쓰지만, 의미론적 토큰(--fg-muted·--tape-amber)만 다크에서 값이
+   바뀌므로 아래 다크 블록에서 .polaroid 와 같은 방식으로 라이트값을 국소 재선언한다. */
+.week-card {
+  position: relative;
+  width: 1200px;
+  height: 630px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--thumb-paper);
+  font-family: var(--font-body);
+  padding: 40px 48px 48px;
+}
+[data-theme="dark"] .week-card {
+  --fg-muted: #6f5a5a;
+  --tape-amber: rgba(214, 196, 168, 0.72);
+}
+
+/* 벽에 붙인 종이라는 은유의 근거(결정 18) — 위쪽 마스킹테이프 두 조각. 장식이라 의미를
+   안 싣는다(aria-hidden). 사이트 공용 .tape(chrome.css)보다 큰 캔버스라 직접 크기를 잡는다. */
+.week-card__tape {
+  position: absolute;
+  top: -14px;
+  width: 132px;
+  height: 40px;
+  background-color: var(--tape-amber);
+  box-shadow: var(--shadow-tape);
+}
+.week-card__tape--left {
+  left: 232px;
+  transform: rotate(-4deg);
+}
+.week-card__tape--right {
+  top: -16px;
+  right: 232px;
+  transform: rotate(3deg);
+}
+
+.week-card__head {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+}
+.week-card__heading {
+  margin: 0;
+  font-family: var(--font-hand);
+  font-size: 74px;
+  color: var(--brand-ink);
+}
+.week-card__subheading {
+  margin: 0;
+  padding-bottom: 12px;
+  font-family: var(--font-hand);
+  font-size: 38px;
+  color: var(--brand-brown);
+}
+.week-card__range {
+  margin: 0 0 0 auto;
+  padding-bottom: 14px;
+  font-size: 26px;
+  color: var(--fg-muted);
+}
+
+/* 제목 아래 밑줄 한 줄. 격자를 그리면 "달력이니까"로 정당화된 표가 되어 가독성이
+   떨어진다(결정 18) — 칸 사이 선 대신 이것만 둔다. */
+.week-card__rule {
+  height: 3px;
+  margin: 14px 0 26px;
+  background-color: var(--brand-pink);
+}
+
+.week-card__days {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.week-card__day {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px 10px;
+  background-color: var(--brand-paper);
+  border: 1px solid var(--thumb-edge);
+  border-radius: 4px;
+  box-shadow: 2px 3px 0 rgba(24, 24, 24, 0.06);
+}
+.week-card__day-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.week-card__dow {
+  font-family: var(--font-hand);
+  font-size: 34px;
+  color: var(--brand-ink);
+}
+.week-card__dow--weekend {
+  color: var(--brand-brown-deep);
+}
+.week-card__date {
+  font-size: 16px;
+  color: var(--fg-muted);
+}
+.week-card__day-rule {
+  height: 1px;
+  margin: 8px 0 10px;
+  background-color: var(--brand-line);
+}
+
+.week-card__entries {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.week-card__empty {
+  margin: 0;
+  font-size: 22px;
+  color: var(--fg-muted);
+}
+.week-card__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.week-card__entry-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--brand-ink);
+  /* 두 줄까지 상한, 넘치면 그냥 자른다(말줄임표 없음) — 옛 Satori 가 -webkit-line-clamp 를
+     지원 안 해 받아들인 하드컷을 그대로 잇는다. 고정 height 대신 max-height 인 이유: 짧은
+     제목이 두 줄 칸만큼 억지로 늘어나 하루 여러 항목 사이가 듬성듬성해지는 걸 막는다. */
+  max-height: 42px;
+  overflow: hidden;
+}
+.week-card__entry-time {
+  align-self: flex-start;
+  padding: 2px 8px;
+  font-size: 13px;
+  color: var(--brand-brown-deep);
+  background-color: var(--brand-pink-soft);
+  border-radius: 999px;
+}
+.week-card__overflow {
+  margin: 0;
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+
+.week-card__note {
+  margin: 22px 0 0;
+  font-size: 22px;
+  color: var(--fg-muted);
+}
+
 /* ── 좁은 폭: 560 에서 머리글을 세로로 ─────────────────────────────────────── */
 @media (max-width: 560px) {
   .sched {
