@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { WeekCardData } from "@/features/schedule/card";
 import { WeekCardDownload } from "./week-card-download";
 
@@ -23,6 +23,12 @@ const CARD: WeekCardData = {
     { dow: "토", date: "7.25", entries: [], overflow: 0 },
     { dow: "일", date: "7.26", entries: [], overflow: 0 },
   ],
+};
+
+const NEXT_WEEK_CARD: WeekCardData = {
+  ...CARD,
+  rangeLabel: "7.27 – 8.2",
+  days: CARD.days.map((d) => ({ ...d, date: d.date === "7.20" ? "7.27" : d.date })),
 };
 
 let capturedAnchor: HTMLAnchorElement | null = null;
@@ -91,6 +97,27 @@ describe("WeekCardDownload", () => {
     expect(capturedAnchor).not.toBeNull();
     expect(capturedAnchor!.href).toBe("data:image/png;base64,zzz");
     expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-20.png");
+  });
+
+  it("리마운트 없이 주가 바뀌어도(공개 읽기의 WeekNav 클라이언트 네비) 새 주 파일명으로 받는다", async () => {
+    // 적대적 리뷰가 잡은 회귀 — submit 머신의 run 은 마운트 시점에 얼어붙으므로(submit.machine.ts),
+    // weekStartDate 를 그 클로저에서 직접 읽으면 이 컴포넌트가 리마운트 없이 새 주 props 만
+    // 받았을 때(읽기 화면은 편집기와 달리 key 로 리마운트를 안 시킨다) 옛 주의 파일명이 나간다.
+    vi.mocked(toPng).mockResolvedValue("data:image/png;base64,first");
+    const { rerender } = render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+
+    // 같은 컴포넌트 인스턴스에 새 주 props 만 흘려보낸다(리마운트 아님 — rerender 가 정확히 그것이다).
+    vi.mocked(toPng).mockResolvedValue("data:image/png;base64,second");
+    rerender(<WeekCardDownload card={NEXT_WEEK_CARD} weekStartDate="2026-07-27" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-27.png");
+    // 캡처 대상 그림도 새 주 카드여야 한다(미리보기가 새 데이터로 다시 그려졌는지).
+    const [node] = vi.mocked(toPng).mock.calls.at(-1)!;
+    expect(within(node as HTMLElement).getByText("7.27 – 8.2")).toBeInTheDocument();
   });
 
   it("캡처가 실패하면 오류를 알리고 다시 누를 수 있다", async () => {

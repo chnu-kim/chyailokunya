@@ -26,7 +26,7 @@ const CARD_WIDTH = 1200;
    2 로 못박아 카페·트위터에 올려도 흐릿하지 않을 해상도(2400×1260)를 모든 기기에서 보장한다. */
 const PIXEL_RATIO = 2;
 
-const downloadMachine = createSubmitMachine<undefined, void>();
+const downloadMachine = createSubmitMachine<string, void>();
 
 // 서버 코드가 없는 순수 클라이언트 동작이라 error-message.ts 의 코드 분기 매퍼들과 다르다 —
 // 실패하면 로컬에서 아무 부작용도 안 남으므로("저장됐을 수도"류의 애매함이 없다) 원인을
@@ -94,11 +94,16 @@ export function WeekCardDownload({
     input: {
       /* nodeRef 는 마운트 시점에 얼어붙지 않는다 — submit.machine.ts 의 "얼어붙음"은 렌더마다
          바뀌는 컴포넌트 **값**(state)에 해당하고, ref 객체는 그대로 캡처되되 `.current` 는
-         호출 시점에 새로 읽으므로 안전하다(state 와 다르다). */
-      run: async () => {
+         호출 시점에 새로 읽으므로 안전하다(state 와 다르다). weekStartDate 는 정확히 그
+         "렌더마다 바뀌는 값"이라 여기서 클로저로 읽으면 안 된다 — 읽기 화면은 이 컴포넌트를
+         key 없이 그리므로(schedule-editor 와 달리) WeekNav 로 다음 주로 넘어가도 리마운트가
+         안 돼 이 run 클로저가 **첫 마운트 때의 weekStartDate 에 영영 고정**된다(적대적 리뷰가
+         잡은 자리 — 캡처되는 그림은 매번 새 카드로 맞지만 파일명만 첫 주에 고정됐다). submit
+         머신의 계약대로 클릭 시점의 값은 submit 이벤트의 values 로 실어 보낸다. */
+      run: async (values) => {
         const node = nodeRef.current;
         if (!node) throw new Error("week-card 노드가 아직 마운트되지 않았습니다");
-        await capture(node, weekStartDate);
+        await capture(node, values);
       },
       mapError: downloadErrorMessage,
     },
@@ -147,7 +152,7 @@ export function WeekCardDownload({
         type="button"
         disabled={capturing}
         data-od-id="week-card-download-btn"
-        onClick={() => send({ type: "submit", values: undefined })}
+        onClick={() => send({ type: "submit", values: weekStartDate })}
       >
         {capturing ? "만드는 중…" : "PNG 다운로드"}
       </button>

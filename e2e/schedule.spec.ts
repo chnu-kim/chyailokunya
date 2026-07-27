@@ -137,6 +137,53 @@ test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 �
   await expect(page.locator('[data-od-id="schedule-publish"]')).not.toBeChecked();
 });
 
+/* 공개 읽기의 PNG 다운로드 회귀(적대적 리뷰 지적, PR #112). WeekCardDownload 의 submit 머신
+   run 은 마운트 시점에 얼어붙는데(submit.machine.ts), 읽기 화면은 편집기와 달리 이 컴포넌트를
+   key 로 리마운트시키지 않는다 — WeekNav 클라이언트 네비로 주를 넘기면 같은 컴포넌트 인스턴스가
+   새 props 만 받는다. weekStartDate 를 그 run 클로저에서 직접 읽으면(고쳐지기 전 코드) 캡처된
+   그림은 새 주인데 파일명만 첫 주에 고정된다 — 그래서 submit 이벤트의 values 로 실어 보내게
+   고쳤고, 이 스펙이 실제 브라우저 네비게이션으로 그 수정을 못박는다(dom 단위 테스트는
+   rerender() 로 같은 걸 더 빠르게 재현한다, week-card-download.test.tsx). */
+test("공개 읽기: WeekNav 로 주를 넘겨도(리마운트 없이) 다운로드 파일명이 새 주를 따라간다", async ({
+  page,
+  baseURL,
+  browser,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 인접한 두 주 — 다른 스펙이 안 읽는 자리.
+  await page.goto("/schedule?week=2031-06-02");
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("A 주 항목");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+
+  await page.goto("/schedule?week=2031-06-09");
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("B 주 항목");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+
+  // 비로그인 컨텍스트로 공개 읽기 화면에서 실제 WeekNav 클라이언트 네비게이션(리마운트 없음)을 탄다.
+  const anon = await browser.newContext();
+  const pub = await anon.newPage();
+  await pub.goto("/schedule?week=2031-06-02");
+  await expect(pub.locator('[data-od-id="week-card"]')).toBeVisible();
+
+  await pub.locator('.sched-nav__step[rel="next"]').click();
+  await expect(pub).toHaveURL(/week=2031-06-09/);
+  await expect(pub.locator('[data-od-id="week-card"]')).toContainText("B 주 항목");
+
+  const [download] = await Promise.all([
+    pub.waitForEvent("download"),
+    pub.locator('[data-od-id="week-card-download-btn"]').click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("챠이로쿠냐_주간일정_2031-06-09.png");
+
+  await anon.close();
+});
+
 /* og:url canonical(적대적 리뷰 지적). 발행 여부와 무관하게 metadata 는 항상 나가므로 로그인·
    발행 없이 확인한다 — 다른 스펙과 겹치지 않는 완전히 새 주를 쓴다. */
 test("og:url — week 이 명시된 공유는 그 주로 못박고, 맨 /schedule 은 안 박는다", async ({
