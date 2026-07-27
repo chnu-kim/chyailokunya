@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { expectSignedIn, signIn } from "./session";
 
@@ -185,6 +186,54 @@ test("공개 읽기: WeekNav 로 주를 넘겨도(리마운트 없이) 다운로
   expect(download.suggestedFilename()).toBe("챠이로쿠냐_주간일정_2031-06-09.png");
 
   await anon.close();
+});
+
+/* 이슈 #109 작업순서 4. card 가 null(미발행)이면 버튼이 비활성이고 이유가 뜬다는 계약
+   (week-card-download.tsx)을 실제 편집기 화면에서 못박는다 — dom 단위 테스트(week-card-download.test.tsx)
+   는 이 분기를 직접 렌더해서 보지만, 여기선 "새로 만든 주가 초안으로 열린다"(결정 13, 위
+   "항목 없는 새 주" 스펙과 같은 전제)는 실제 서버 응답 위에서 본다. */
+test("관리자: 초안 주는 다운로드 버튼이 비활성이고 발행 안내가 뜬다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+  // 픽스처가 안 건드리는 먼 미래 주 — 메타도 항목도 없는 브랜드-뉴 주(=초안).
+  await page.goto("/schedule?week=2028-11-06");
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+
+  await expect(page.locator('[data-od-id="week-card-download-btn"]')).toBeDisabled();
+  await expect(page.locator('[data-od-id="week-card-download"]')).toContainText(
+    "발행된 주만 카드로 내려받을 수 있습니다.",
+  );
+  // card 가 null 이면 미리보기 자체를 안 그린다(week-card-download.tsx 의 이른 반환).
+  await expect(page.locator('[data-od-id="week-card"]')).toHaveCount(0);
+});
+
+/* 이슈 #109 작업순서 4. 상태 코드·content-type 만 보던 옛 Satori 라우트와 달리, 클라이언트
+   캡처는 Playwright 가 실제 다운로드 파일 바이트까지 잴 수 있다(이슈 본문 "기술 메모"). PNG
+   시그니처 + IHDR 청크(offset 16 폭·20 높이, big-endian)를 직접 읽어 외부 이미지 라이브러리
+   없이도 유효성과 치수를 함께 증명한다 — 치수가 1200×630 의 정확히 2배(2400×1260)인 것은
+   PIXEL_RATIO 를 devicePixelRatio 대신 2 로 고정한 결정(week-card-download.tsx)의 관찰 가능한
+   결과다. */
+test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 읽는 먼 미래 주.
+  await page.goto("/schedule?week=2032-02-02");
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("PNG 검증 항목");
+  await page.locator('[data-od-id="schedule-publish"]').check();
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator('[data-od-id="week-card-download-btn"]').click(),
+  ]);
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const buf = readFileSync(path!);
+
+  expect(buf.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  expect(buf.subarray(12, 16).toString("ascii")).toBe("IHDR");
+  expect(buf.readUInt32BE(16)).toBe(2400); // 폭
+  expect(buf.readUInt32BE(20)).toBe(1260); // 높이
 });
 
 /* og:url canonical(적대적 리뷰 지적). 발행 여부와 무관하게 metadata 는 항상 나가므로 로그인·
