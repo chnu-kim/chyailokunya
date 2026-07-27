@@ -183,4 +183,32 @@ describe("WeekCardDownload", () => {
     await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
     expect(toPng).toHaveBeenCalledTimes(1); // 두 번째 클릭이 새 toPng 을 안 불렀다.
   });
+
+  it("주 A 캡처가 아직 도는 동안 주 B 로 넘어가 눌러도 주 B 를 새로 캡처한다", async () => {
+    // 적대적 리뷰가 잡은 자리 — in-flight 재사용을 node 만으로 가르면(week-card.tsx 는 리마운트
+    // 없이 다시 그려 같은 DOM 노드를 재사용하므로) 주 A 의 옛 캡처를 주 B 요청에 그대로 돌려줘,
+    // 화면엔 주 B 인데 실제로 내려받는 그림은 주 A 인 채 파일명만 주 B 로 나갈 뻔했다.
+    vi.mocked(toPng).mockImplementation(() => new Promise(() => {})); // 주 A 캡처 — 안 끝남
+    const { rerender } = render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
+    expect(toPng).toHaveBeenCalledTimes(1); // 주 A 캡처는 여전히 배경에서 도는 채다.
+
+    // 리마운트 없이 주 B 로 props 만 바뀐다(WeekNav 클라이언트 네비와 같은 모양).
+    vi.mocked(toPng).mockResolvedValue("data:image/png;base64,week-b");
+    rerender(<WeekCardDownload card={NEXT_WEEK_CARD} weekStartDate="2026-07-27" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    expect(toPng).toHaveBeenCalledTimes(2); // 주 A 의 진행 중인 캡처를 재사용하지 않고 새로 불렀다.
+    const [node] = vi.mocked(toPng).mock.calls.at(-1)!;
+    expect(within(node as HTMLElement).getByText("7.27 – 8.2")).toBeInTheDocument();
+    expect(capturedAnchor!.href).toBe("data:image/png;base64,week-b");
+    expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-27.png");
+  });
 });

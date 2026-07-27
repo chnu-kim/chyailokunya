@@ -53,38 +53,52 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
   });
 }
 
-/* 물리적으로 진행 중인 캡처를 딱 하나로 묶는다(적대적 리뷰 지적) — 위 Promise.race 는 화면을
-   제때 풀어 재시도할 수 있게 하지만, 진 쪽(html-to-image 내부 작업)을 취소하지는 않는다. 그
-   상태에서 재시도가 매번 새 toPng() 를 또 부르면, 폰트 임베드가 막힌 환경(느린 fetch 폴백 —
-   아래 capture 주석)에서 재시도할 때마다 1200×630 캔버스 작업 + cross-origin 요청이 쌓인다.
-   `startCapture` 는 이미 도는 프라미스가 있으면 그걸 그대로 돌려줘 — 몇 번을 재시도하든 실제
-   작업은 항상 하나뿐이다. 컴포넌트 인스턴스의 ref 에 두는 이유(모듈 스코프가 아니라): 읽기
-   화면은 WeekNav 로 주가 바뀌어도 리마운트가 안 되므로(위 run 주석) 같은 인스턴스 안에서
-   재시도가 이어져야 하고, ref 는 정확히 그 수명을 따라간다 — 리마운트되면(편집기의 key 교체)
+type InFlightCapture = { weekStartDate: string; promise: Promise<string> };
+
+/* 물리적으로 진행 중인 캡처를 주(weekStartDate)당 하나로 묶는다(적대적 리뷰 지적) — 위
+   Promise.race 는 화면을 제때 풀어 재시도할 수 있게 하지만, 진 쪽(html-to-image 내부 작업)을
+   취소하지는 않는다. 그 상태에서 같은 주에 재시도가 매번 새 toPng() 를 또 부르면, 폰트 임베드가
+   막힌 환경(느린 fetch 폴백 — 아래 capture 주석)에서 재시도할 때마다 1200×630 캔버스 작업 +
+   cross-origin 요청이 쌓인다.
+
+   **weekStartDate 로 캐시를 가른다 — node 만으로는 안 된다.** 읽기 화면은 WeekNav 로 주가
+   바뀌어도 이 컴포넌트가 리마운트를 안 하고(위 run 주석), <WeekCard> 도 key 없이 다시 그려
+   React 가 같은 DOM 노드를 재사용한다(내용만 갱신) — 그래서 주 A 의 캡처가 시간 초과로 화면만
+   풀린 채 아직 도는 동안 주 B 로 넘어가 다시 눌러도 `node`(같은 참조)만 보면 "이미 진행 중"으로
+   오판해 주 A 캡처를 재사용하고, 파일명은 새 weekStartDate 를 붙여 **주 A 의 그림이 주 B 파일로
+   나간다**(적대적 리뷰가 잡은 자리 — 실측 없이 넘어갔다면 이 기능이 막으려던 바로 그 실수를
+   저지를 뻔했다). weekStartDate 가 요청과 다르면 캐시를 버리고 새로 시작한다 — 버려진 주 A
+   프라미스는 계속 돌다 끝나면 조용히 사라질 뿐, 더는 아무도 안 기다린다.
+
+   컴포넌트 인스턴스의 ref 에 두는 이유(모듈 스코프가 아니라): 리마운트되면(편집기의 key 교체)
    새 ref 로 새로 시작하는 것도 맞다(언마운트된 옛 노드의 캡처를 기다릴 이유가 없다). */
 function startCapture(
   node: HTMLDivElement,
-  inFlightRef: RefObject<Promise<string> | null>,
+  weekStartDate: string,
+  inFlightRef: RefObject<InFlightCapture | null>,
 ): Promise<string> {
-  if (!inFlightRef.current) {
-    const p = (async () => {
-      const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
-      return toPng(node, { pixelRatio: PIXEL_RATIO });
-    })();
-    inFlightRef.current = p;
-    /* 이 프라미스가 아직도 "그 진행 중인 캡처"일 때만 지운다 — 이론적으로 지나치게 방어적이지만
-       (이 함수는 ref.current 가 null 일 때만 새로 만드므로 항상 참이다) 실수로 다른 곳에서
-       ref 를 갈아 끼우는 변경이 생겨도 옛 캡처가 새 캡처의 자리를 지우지 않게 한다.
+  const current = inFlightRef.current;
+  if (current && current.weekStartDate === weekStartDate) return current.promise;
 
-       `.finally()`는 새 프라미스를 반환하고 그 프라미스는 `p`가 거절되면 같이 거절된다 —
-       실패 자체는 아래에서 반환하는 `p`(= inFlightRef.current)를 기다리는 쪽(race)이 이미
-       처리하지만, 여기서 만든 이 파생 프라미스는 아무도 안 기다리므로 그대로 두면 처리 안 된
-       거절로 잡힌다. 진짜 실패 전파와 무관한 부수 효과일 뿐이라 조용히 삼킨다. */
-    p.finally(() => {
-      if (inFlightRef.current === p) inFlightRef.current = null;
-    }).catch(() => {});
-  }
-  return inFlightRef.current;
+  const promise = (async () => {
+    const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
+    return toPng(node, { pixelRatio: PIXEL_RATIO });
+  })();
+  const entry: InFlightCapture = { weekStartDate, promise };
+  inFlightRef.current = entry;
+  /* 이 항목이 아직도 "그 진행 중인 캡처"일 때만 지운다 — 방금 위에서 주가 다르면 이미 새 항목
+     으로 갈아 끼웠으므로, 버려진 옛 항목이 나중에 정산돼도 새 항목을 지우지 않는다.
+
+     `.finally()`는 새 프라미스를 반환하고 그 프라미스는 `promise`가 거절되면 같이 거절된다 —
+     실패 자체는 이 함수가 반환하는 `promise`를 기다리는 쪽(race)이 이미 처리하지만, 여기서
+     만든 이 파생 프라미스는 아무도 안 기다리므로 그대로 두면 처리 안 된 거절로 잡힌다. 진짜
+     실패 전파와 무관한 부수 효과일 뿐이라 조용히 삼킨다. */
+  promise
+    .finally(() => {
+      if (inFlightRef.current === entry) inFlightRef.current = null;
+    })
+    .catch(() => {});
+  return promise;
 }
 
 /* 캡처 대상은 항상 스케일 없는 원본 1200×630 노드다(week-card.tsx 주석 — 조상의 transform 은
@@ -112,9 +126,12 @@ async function capture(
   node: HTMLDivElement,
   weekStartDate: string,
   signal: AbortSignal,
-  inFlightRef: RefObject<Promise<string> | null>,
+  inFlightRef: RefObject<InFlightCapture | null>,
 ): Promise<void> {
-  const dataUrl = await Promise.race([startCapture(node, inFlightRef), rejectOnAbort(signal)]);
+  const dataUrl = await Promise.race([
+    startCapture(node, weekStartDate, inFlightRef),
+    rejectOnAbort(signal),
+  ]);
   const a = document.createElement("a");
   a.href = dataUrl;
   a.download = downloadFileName(weekStartDate);
@@ -136,7 +153,7 @@ export function WeekCardDownload({
   stale?: boolean;
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
-  const inFlightRef = useRef<Promise<string> | null>(null);
+  const inFlightRef = useRef<InFlightCapture | null>(null);
   const [scale, setScale] = useState(1);
 
   /* 미리보기를 컨테이너 폭에 맞춰 축소한다(1200px 는 안 넘김 — 확대는 안 한다). useEffect
