@@ -146,9 +146,11 @@ test("관리자: 발행 전엔 og/schedule 이 404, 발행 후엔 실제 PNG", a
   const pinned = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=${rev}`);
   expect(pinned.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
 
+  // 어긋난 rev 는 지금 데이터를 대신 내주지 않는다 — 그 스냅숏은 없다는 게 사실이다(적대적
+  // 리뷰 2라운드: "짧게 캐싱한 지금 데이터"조차 URL=콘텐츠 계약을 애매하게 남긴다는 지적).
   const wrongRev = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}&rev=999999999`);
-  expect(wrongRev.status()).toBe(200); // 데이터 자체는 항상 "지금" 값이라 화면은 안 틀린다.
-  expect(wrongRev.headers()["cache-control"]).toBe("public, max-age=300");
+  expect(wrongRev.status()).toBe(404);
+  expect(wrongRev.headers()["cache-control"]).toBe("no-store");
 
   const noRev = await request.get(`${baseURL}/api/og/schedule?week=${WEEK}`);
   expect(noRev.headers()["cache-control"]).toBe("public, max-age=300");

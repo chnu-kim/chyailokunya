@@ -122,19 +122,19 @@ export async function GET(request: Request) {
   // 포함한다. 404 다(500 아님) — "지금 이 주의 카드가 없다"가 사실이지 에러가 아니다.
   if (!week) return new Response(null, { status: 404 });
 
-  /* URL 이 **그 주의 지금 리비전을 정확히 가리킬 때만** 영구 캐싱을 준다. `rev` 가 있다는
-   * 사실만으로 영원히 캐싱하면(이전 구현), 편집과 요청이 겹치는 좁은 창에서 이 URL 이 실제로
-   * 담보하지 않는 걸 약속하게 된다 — `/schedule` 이 rev=100 을 박아 og:image 태그를 낸 직후
-   * 누군가 그 주를 다시 저장해 rev=105 가 되면, 그 사이 아무 캐시도 아직 안 가진 `?rev=100`
-   * URL 을 처음 요청한 쪽은 (이 라우트가 리비전과 무관하게 항상 "지금" 데이터를 그리므로)
-   * rev=105 의 내용을 받는다 — 그런데 그걸 rev=100 이라는 이름 아래 "영원히 안 바뀐다"고
-   * 캐싱해 버리면, 그 뒤 또 저장(rev=110)이 나가도 그 캐시는 rev=105 짜리 낡은 내용을 계속
-   * 내준다. 콘텐츠 주소화(URL=콘텐츠) 계약을 라우트가 실제로 검증하지 않고 말로만 하던
-   * 자리다(적대적 리뷰가 잡음). 그래서 `rev` 를 지금 리비전과 대조해, 맞을 때만(우리
-   * generateMetadata 가 방금 그 순간의 리비전을 실어 만든 URL 일 때만) 영구 캐싱하고, 어긋나면
-   * (레이스에 걸렸거나 손으로 조작한 값) 그냥 짧게만 잡는다 — 데이터 자체는 항상 "지금"
-   * 값이라 틀린 화면이 나가진 않는다. */
-  const isPinnedToCurrentRevision = url.searchParams.get("rev") === String(week.revision);
+  /* `rev` 가 있는데 지금 리비전과 어긋나면 **아무것도 안 준다.** 첫 시도는 "어긋나면 캐시만
+   * 짧게"였는데(적대적 리뷰 1라운드 대응), 그래도 그 요청 자체엔 여전히 **지금** 데이터를
+   * 내주고 있었다 — `?rev=100` 이라는 이름의 URL 인데 실제로는 rev=105 의 내용을 돌려주는
+   * 셈이라, URL=콘텐츠 계약이 애매한 채로 남았다(2라운드 지적). 이 스키마엔 과거 리비전을
+   * 다시 그릴 이력이 없어서(schedule_entries 는 "지금" 상태만 든다) `rev=100` 짜리 스냅샷을
+   * 실제로 복원해 줄 방법이 없다 — 그러니 흉내 내지 않는다. 어긋난 rev 는 404 다(캐시하지
+   * 않는다: no-store) — "이 URL 이 가리키던 스냅숏은 없다"가 "다른 걸 준다"보다 정직하다.
+   * `rev` 자체가 없는 요청(수동 확인 등)은 이 판정 밖이다 — 애초에 무엇과도 대조할 게
+   * 없으니 지금 값을 그냥 준다(아래 캐시 헤더 분기). */
+  const revParam = url.searchParams.get("rev");
+  if (revParam !== null && revParam !== String(week.revision)) {
+    return new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
+  }
 
   const card = buildWeekCard(weekStart, week);
   const { penText, bodyText } = collectFontText(card);
@@ -339,14 +339,13 @@ export async function GET(request: Request) {
       ],
       /* `/schedule`(generateMetadata)이 og:image 를 지을 때 `rev`(주 메타의 last_updated_at)를
          항상 실어 보낸다 — 그 주가 바뀌면(saveWeek·claimWeek 모두 이 값을 단조 증가시킨다) URL
-         자체가 달라지므로, 지금 리비전과 맞는 `rev` 는 내용이 절대 안 바뀔 URL 이라 영구 캐싱이
-         안전하다(결정적 렌더는 스파이크가 이미 확인했다. 검증은 위
-         `isPinnedToCurrentRevision`). `rev` 없이 두드리거나 리비전이 어긋나면(수동 확인·레이스·
-         조작) 내용이 그 순간의 최신값이라 짧게만 잡는다. */
+         자체가 달라지므로, `rev` 가 있는 요청은(위에서 이미 지금 리비전과 일치한다고 확인했다 —
+         안 맞으면 여기 오기 전에 404) 내용이 절대 안 바뀔 URL 이라 영구 캐싱이 안전하다
+         (결정적 렌더는 스파이크가 이미 확인했다). `rev` 없이 두드리면(수동 확인 등) 내용이 그
+         순간의 최신값이라 짧게만 잡는다. */
       headers: {
-        "Cache-Control": isPinnedToCurrentRevision
-          ? "public, max-age=31536000, immutable"
-          : "public, max-age=300",
+        "Cache-Control":
+          revParam !== null ? "public, max-age=31536000, immutable" : "public, max-age=300",
       },
     },
   );
