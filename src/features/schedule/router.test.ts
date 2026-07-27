@@ -464,9 +464,34 @@ describe("일정 라우터", () => {
       expect(published.entries.map((e) => e.title)).toEqual(["젤다"]);
     });
 
-    it("재발행해도 최초 발행 시각이 유지된다", async () => {
+    /* 적대적 리뷰 지적(2026-07-28, PR #114) — 편집기의 disabled 버튼·머신 가드(canPublish)는
+       편의일 뿐 유일한 방어선이 아니다. schedule:write 권한자가 이 뮤테이션을 직접 불러
+       우회하면(포지드/스테일 클라이언트) 항목이 0개인 주도 발행돼 공개 화면에 빈 "발행됨"
+       상태가 샐 수 있었다 — 실제로 이 테스트를 추가하기 전엔 통과했다(entries:[] 로 저장한 뒤
+       바로 publishWeek 호출이 성공). 서버가 정본으로 다시 막는다(불변식 2·3). */
+    it("빈 주는 발행이 거절된다 — UI 가드를 우회한 직접 호출도 서버가 막는다", async () => {
       const caller = createCaller(makeCtx({ authorities: admin }));
       const saved = await saveWeekAsEditor(caller, { weekStartDate: MON, entries: [] });
+      await expect(
+        caller.schedule.publishWeek({
+          weekStartDate: MON,
+          revision: saved.revision!,
+          published: true,
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      // 거절됐으면 revision 도 발행 상태도 안 바뀐다 — 실패가 아무 흔적을 안 남긴다.
+      const after = await caller.schedule.getWeek({ weekStartDate: MON });
+      expect(after.publishedAt).toBeNull();
+      expect(after.revision).toBe(saved.revision);
+    });
+
+    it("재발행해도 최초 발행 시각이 유지된다", async () => {
+      const caller = createCaller(makeCtx({ authorities: admin }));
+      // 빈 주는 발행 자체가 거절되므로(아래 "빈 주는 발행이 거절된다") 항목 하나를 채운다.
+      const saved = await saveWeekAsEditor(caller, {
+        weekStartDate: MON,
+        entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      });
       const first = await caller.schedule.publishWeek({
         weekStartDate: MON,
         revision: saved.revision!,

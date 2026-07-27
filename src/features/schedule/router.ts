@@ -6,6 +6,7 @@ import { TRPCError } from "@trpc/server";
 import { authorizedProcedure, router } from "../trpc/init";
 import { getWeekInput, publishWeekInput, saveWeekInput } from "./schema";
 import {
+  EmptyWeekCannotPublish,
   getWeekForEdit,
   publishWeek,
   ReferencedGameMissing,
@@ -57,6 +58,13 @@ export const scheduleRouter = router({
           throw new TRPCError({
             code: "CONFLICT",
             message: "다른 곳에서 이 주를 먼저 저장했습니다.",
+          });
+        }
+        // UI 는 이미 막지만(canPublish) 그건 편의일 뿐 유일한 방어선이 아니다 — 서버가 다시 확인한다.
+        if (e instanceof EmptyWeekCannotPublish) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "항목이 있어야 발행할 수 있습니다.",
           });
         }
         throw e;

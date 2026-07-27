@@ -97,6 +97,17 @@ export class ReferencedGameMissing extends Error {
   }
 }
 
+/* 빈 주는 발행할 수 없다(이슈 #56 결정 22). 편집기의 disabled 버튼·머신 가드(canPublish)는
+   편의일 뿐 유일한 방어선이 아니다 — schedule:write 권한자가 tRPC 를 직접 불러 이 검사를
+   우회할 수 있어서 서버가 정본으로 다시 확인한다(불변식 2·3, 적대적 리뷰 지적: 실제로 이
+   경로가 열려 있었다). */
+export class EmptyWeekCannotPublish extends Error {
+  constructor() {
+    super("empty week cannot be published");
+    this.name = "EmptyWeekCannotPublish";
+  }
+}
+
 /* 다음 revision. revision 은 그 주 메타의 last_updated_at 이지만 **단조 증가가 정본이다** —
    벽시계 ms 를 그대로 쓰면 같은 ms 에 두 번 저장될 때 새 값이 옛 값과 같아져(now === oldRevision),
    그 옛 revision 을 든 stale 요청이 CAS(WHERE last_updated_at = revision)를 통과해 남의 저장을
@@ -312,6 +323,22 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
    saveWeek 의 1단계 claim 과 같은 CAS. */
 export async function publishWeek(db: Db, input: PublishWeekInput): Promise<WeekView> {
   const now = Date.now();
+
+  /* 발행(공개 전환)만 항목이 있어야 한다 — 비공개 전환은 반대 방향이라 이 검사가 없다
+     (canUnpublish 와 같은 비대칭, schedule-save.machine.ts 주석). CAS 를 걸기 **전에** 본다 —
+     빈 주 거절이 revision 을 안 건드려야 다음 정상 요청이 안 막힌다(saveWeek 의 prevalidate와
+     같은 자리). */
+  if (input.published) {
+    const { monday, sunday } = weekBounds(input.weekStartDate);
+    const [row] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(scheduleEntries)
+      .where(
+        and(gte(scheduleEntries.scheduledDate, monday), lte(scheduleEntries.scheduledDate, sunday)),
+      );
+    if (!row || row.count === 0) throw new EmptyWeekCannotPublish();
+  }
+
   const claimed = await db
     .update(scheduleWeeks)
     .set(

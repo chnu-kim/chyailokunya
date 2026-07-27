@@ -362,12 +362,41 @@ export function ScheduleGameSearch({
           </div>
         )}
 
+      {/* 치지직 결과는 확인 없이 바로 추가되므로(choose) 평소엔 "추가 중…" 한 줄이 곧 성공으로
+          끝난다(addState.matches("done") 이 onClose 를 부른다). 실패했을 때만 에러 + 되돌아갈
+          길을 보여준다 — 적대적 리뷰 지적: 실패해도 이 줄이 그냥 비워져 사용자가 무슨 일이
+          있었는지도, 다시 시도할 길도 없었다. */}
       {step === "detail" &&
         state.context.selected &&
         state.context.selected.categoryId !== null && (
-          <p className="sched-picker__hint" role="status">
-            {adding ? `‘${state.context.selected.categoryValue}’ 추가 중…` : ""}
-          </p>
+          <div className="sched-picker__confirm" data-od-id={idPrefix + "confirm"}>
+            <p className="sched-picker__hint" role="status">
+              {adding ? `‘${state.context.selected.categoryValue}’ 추가 중…` : ""}
+            </p>
+            {!adding && addState.context.error && (
+              <>
+                <p className="sched-err" role="alert">
+                  {addState.context.error}
+                </p>
+                <div className="sched-picker__confirm-actions">
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => send({ type: "back" })}
+                  >
+                    뒤로
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => addGame(state.context.selected!)}
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         )}
 
       <button
