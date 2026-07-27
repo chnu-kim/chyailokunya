@@ -13,7 +13,7 @@
    그대로 겹쳐, 스크린리더가 같은 일정을 두 번 낭독하게 된다(적대적 리뷰 지적). 카드는
    "다운로드될 그림"이지 새 정보가 아니므로 버튼 이름만 남긴다. */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type RefObject } from "react";
 import { useMachine } from "@xstate/react";
 import { isAborted } from "@/core/error-message";
 import { createSubmitMachine } from "@/core/submit.machine";
@@ -53,6 +53,40 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
   });
 }
 
+/* 물리적으로 진행 중인 캡처를 딱 하나로 묶는다(적대적 리뷰 지적) — 위 Promise.race 는 화면을
+   제때 풀어 재시도할 수 있게 하지만, 진 쪽(html-to-image 내부 작업)을 취소하지는 않는다. 그
+   상태에서 재시도가 매번 새 toPng() 를 또 부르면, 폰트 임베드가 막힌 환경(느린 fetch 폴백 —
+   아래 capture 주석)에서 재시도할 때마다 1200×630 캔버스 작업 + cross-origin 요청이 쌓인다.
+   `startCapture` 는 이미 도는 프라미스가 있으면 그걸 그대로 돌려줘 — 몇 번을 재시도하든 실제
+   작업은 항상 하나뿐이다. 컴포넌트 인스턴스의 ref 에 두는 이유(모듈 스코프가 아니라): 읽기
+   화면은 WeekNav 로 주가 바뀌어도 리마운트가 안 되므로(위 run 주석) 같은 인스턴스 안에서
+   재시도가 이어져야 하고, ref 는 정확히 그 수명을 따라간다 — 리마운트되면(편집기의 key 교체)
+   새 ref 로 새로 시작하는 것도 맞다(언마운트된 옛 노드의 캡처를 기다릴 이유가 없다). */
+function startCapture(
+  node: HTMLDivElement,
+  inFlightRef: RefObject<Promise<string> | null>,
+): Promise<string> {
+  if (!inFlightRef.current) {
+    const p = (async () => {
+      const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
+      return toPng(node, { pixelRatio: PIXEL_RATIO });
+    })();
+    inFlightRef.current = p;
+    /* 이 프라미스가 아직도 "그 진행 중인 캡처"일 때만 지운다 — 이론적으로 지나치게 방어적이지만
+       (이 함수는 ref.current 가 null 일 때만 새로 만드므로 항상 참이다) 실수로 다른 곳에서
+       ref 를 갈아 끼우는 변경이 생겨도 옛 캡처가 새 캡처의 자리를 지우지 않게 한다.
+
+       `.finally()`는 새 프라미스를 반환하고 그 프라미스는 `p`가 거절되면 같이 거절된다 —
+       실패 자체는 아래에서 반환하는 `p`(= inFlightRef.current)를 기다리는 쪽(race)이 이미
+       처리하지만, 여기서 만든 이 파생 프라미스는 아무도 안 기다리므로 그대로 두면 처리 안 된
+       거절로 잡힌다. 진짜 실패 전파와 무관한 부수 효과일 뿐이라 조용히 삼킨다. */
+    p.finally(() => {
+      if (inFlightRef.current === p) inFlightRef.current = null;
+    }).catch(() => {});
+  }
+  return inFlightRef.current;
+}
+
 /* 캡처 대상은 항상 스케일 없는 원본 1200×630 노드다(week-card.tsx 주석 — 조상의 transform 은
    복제 대상 노드의 computed style 에 안 들어오므로 미리보기 축소와 무관하게 항상 실제 크기로
    찍힌다). fontEmbedCSS 를 직접 만들지 않고 기본 임베딩에 맡긴다 — 이 사이트 폰트는 구글
@@ -68,20 +102,19 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
    signal 을 반드시 받아 경주 붙인다(적대적 리뷰 지적) — 서버 요청과 달리 fetch 기반이 아니라
    신호를 그냥 무시해도 타입은 통과하지만, 폰트 임베드가 위 SecurityError 폴백 경로처럼 느려지거나
    막히면 toPng 이 영영 안 끝나 버튼이 "만드는 중…"에 붙박인다 — 새로고침 말고는 빠져나갈 길이
-   없다. Promise.race 는 진 쪽 프라미스를 취소하지 않지만(html-to-image 내부 작업은 계속 돈다),
-   화면은 제때 idle 로 돌아가 재시도할 수 있다. */
+   없다. `toPng` 에 `fetchRequestInit: {signal}` 을 넘겨 라이브러리 차원의 취소를 시키는 대신
+   race 로 화면만 풀어 주는 이유: 실측(html-to-image embed-webfonts.js `fetchCSS`)으로 확인한
+   바, 이 앱이 실제로 타는 느린 경로(cross-origin CSS 텍스트 자체를 fetch 로 받는 폴백)는 애초에
+   그 옵션을 안 받는 plain `fetch(url)` 라 신호를 넘겨도 그 단계는 안 끊긴다 — 부분적으로만
+   먹는 보호로 안전하다고 착각하는 것보다, race + 위 in-flight 재사용으로 화면 복구와 작업
+   상한을 각각 확실히 보장하는 쪽을 택했다. */
 async function capture(
   node: HTMLDivElement,
   weekStartDate: string,
   signal: AbortSignal,
+  inFlightRef: RefObject<Promise<string> | null>,
 ): Promise<void> {
-  const dataUrl = await Promise.race([
-    (async () => {
-      const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
-      return toPng(node, { pixelRatio: PIXEL_RATIO });
-    })(),
-    rejectOnAbort(signal),
-  ]);
+  const dataUrl = await Promise.race([startCapture(node, inFlightRef), rejectOnAbort(signal)]);
   const a = document.createElement("a");
   a.href = dataUrl;
   a.download = downloadFileName(weekStartDate);
@@ -103,6 +136,7 @@ export function WeekCardDownload({
   stale?: boolean;
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
+  const inFlightRef = useRef<Promise<string> | null>(null);
   const [scale, setScale] = useState(1);
 
   /* 미리보기를 컨테이너 폭에 맞춰 축소한다(1200px 는 안 넘김 — 확대는 안 한다). useEffect
@@ -132,7 +166,7 @@ export function WeekCardDownload({
       run: async (values, signal) => {
         const node = nodeRef.current;
         if (!node) throw new Error("week-card 노드가 아직 마운트되지 않았습니다");
-        await capture(node, values, signal);
+        await capture(node, values, signal, inFlightRef);
       },
       mapError: downloadErrorMessage,
     },

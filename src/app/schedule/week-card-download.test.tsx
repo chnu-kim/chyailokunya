@@ -162,4 +162,25 @@ describe("WeekCardDownload", () => {
     expect(screen.getByTestId("week-card-download-btn")).toBeEnabled();
     expect(capturedAnchor).toBeNull();
   });
+
+  it("첫 캡처가 아직 도는 동안 시간 초과로 재시도해도 toPng 을 새로 부르지 않는다", async () => {
+    // 적대적 리뷰가 잡은 자리 — 시간 초과는 화면만 풀 뿐 진 쪽(html-to-image 작업)을 취소하지
+    // 않는다. 재시도가 그 위에 매번 새 toPng() 를 얹으면 폰트 임베드가 막힌 환경에서 재시도할
+    // 때마다 작업이 쌓인다 — startCapture 의 in-flight 재사용이 그걸 막는지 여기서 못박는다.
+    vi.mocked(toPng).mockImplementation(() => new Promise(() => {})); // 이 테스트 안에서 안 끝남
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
+    expect(toPng).toHaveBeenCalledTimes(1);
+
+    // 재시도 — 첫 toPng 호출은 여전히 안 끝난 채다.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
+    expect(toPng).toHaveBeenCalledTimes(1); // 두 번째 클릭이 새 toPng 을 안 불렀다.
+  });
 });

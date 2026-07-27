@@ -166,7 +166,10 @@ test("공개 읽기: WeekNav 로 주를 넘겨도(리마운트 없이) 다운로
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
 
   // 비로그인 컨텍스트로 공개 읽기 화면에서 실제 WeekNav 클라이언트 네비게이션(리마운트 없음)을 탄다.
-  const anon = await browser.newContext();
+  // baseURL 을 명시한다 — browser.newContext() 는 이 프로젝트에서 실측으로 config 의 baseURL 을
+  // 이어받는 걸 확인했지만(fixture 로 만든 page 와 달리 보장이 문서화돼 있지 않다), 상대 경로
+  // goto 가 이 컨텍스트에서도 반드시 서게 명시적으로 못박는다(codex review 지적).
+  const anon = await browser.newContext({ baseURL });
   const pub = await anon.newPage();
   await pub.goto("/schedule?week=2031-06-02");
   await expect(pub.locator('[data-od-id="week-card"]')).toBeVisible();
