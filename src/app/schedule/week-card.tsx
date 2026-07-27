@@ -8,30 +8,14 @@
    평범한 CSS 로 이식했다 — Satori 는 CSS 변수를 못 읽어 색을 hex 로 복사해 썼지만, 이건 진짜
    DOM 이라 globals.css 토큰을 var() 로 그대로 참조한다(CSS 는 schedule.css).
 
-   데이터 변환(7일 폴딩·하루 상한)은 이 컴포넌트의 일이 아니다 — 작업순서 2 에서 짤
-   `buildWeekCard` 가 이미 자른 값을 준다. 여기선 받은 대로 그린다. */
+   데이터 변환(7일 폴딩·하루 상한)은 이 컴포넌트의 일이 아니다 — `@/features/schedule/card`
+   의 `buildWeekCard`(작업순서 2)가 이미 자른 값을 준다. 여기선 받은 대로 그린다. 타입도 그
+   모듈이 정본이다 — features 는 app 을 모르므로(레이어 경계) 여기서 다시 정의하지 않고
+   가져와 쓴다. */
+
+import type { WeekCardData } from "@/features/schedule/card";
 
 const EMPTY_DAY_MARK = "—";
-
-export type WeekCardEntry = {
-  time: string | null;
-  title: string;
-};
-
-export type WeekCardDay = {
-  dow: string;
-  date: string;
-  entries: WeekCardEntry[];
-  /* 하루 상한을 넘겨 안 그린 항목 수. 0 이면 칩을 안 그린다 — "+0개"는 있으나 마나가 아니라
-     없는 게 맞다(빈 상태를 굳이 표기하지 않는 관례). */
-  overflow: number;
-};
-
-export type WeekCardData = {
-  rangeLabel: string;
-  note: string | null;
-  days: WeekCardDay[];
-};
 
 export function WeekCard({ card }: { card: WeekCardData }) {
   return (
