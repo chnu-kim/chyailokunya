@@ -68,6 +68,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ key: str
   headers.set("etag", object.httpEtag);
   headers.set("cache-control", CACHE_CONTROL);
 
+  /* **조건부 요청을 실제로 처리한다.** 위 CACHE_CONTROL 주석이 "만료 뒤엔 ETag 재검증(304)에
+     맡긴다"고 약속했는데, `If-None-Match` 를 안 보면 그 약속이 코드에 없는 것이다 — 만료된
+     캐시가 되물을 때마다 전체 바이트가 다시 나간다(코드 리뷰 지적). 여기서 끊으면 그 왕복이
+     헤더만으로 끝난다.
+
+     `body` 를 안 만지므로 R2 스트림은 소비되지 않는다 — get 호출 자체는 이미 했지만 바이트는
+     안 흐른다. `onlyIf` 로 R2 에 조건을 맡기지 않는 이유: 그건 `Headers` 나 etag 문자열의
+     따옴표 규약에 기대는데, 이 경계는 dev 에서 Miniflare 프록시 직렬화에 한 번 물린 자리라
+     (위 writeHttpMetadata 주석) 우리가 이미 들고 있는 값을 직접 비교하는 쪽이 확실하다. */
+  if (req.headers.get("if-none-match") === object.httpEtag) {
+    return new Response(null, { status: 304, headers });
+  }
+
   const res = new Response(object.body, { headers });
   /* 응답을 먼저 돌려주고 캐시 쓰기는 뒤에 흘린다. OpenNext 의 waitUntil 래핑은 ISR 전용이라
      여기선 Cloudflare ctx 를 직접 부른다. clone 하는 이유: put 이 본문을 소비한다. */

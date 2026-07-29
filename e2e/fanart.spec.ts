@@ -80,6 +80,16 @@ test("관리자: PNG 를 올리고 그 키로 되받는다", async ({ browser, b
   expect(got.headers()["cache-control"]).toBe("public, max-age=3600");
   expect(Buffer.from(await got.body()).subarray(0, 8)).toEqual(PNG_BYTES.subarray(0, 8));
 
+  /* 만료된 캐시가 되물으면 바이트를 다시 안 보낸다. 이걸 안 재면 CACHE_CONTROL 주석이 약속한
+     재검증 경로가 코드에 없어도 게이트가 전부 초록이다(실제로 그랬다 — 코드 리뷰가 잡았다). */
+  const etag = got.headers()["etag"];
+  expect(etag).toBeTruthy();
+  const revalidated = await context.request.get(`/api/fanart/${key}`, {
+    headers: { "if-none-match": etag! },
+  });
+  expect(revalidated.status()).toBe(304);
+  expect(Buffer.from(await revalidated.body()).byteLength).toBe(0);
+
   await context.close();
 });
 
