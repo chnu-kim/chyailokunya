@@ -33,6 +33,8 @@ export function ScheduleReadView({
 }) {
   const days = weekDates(toIsoDate(weekStartDate));
   const gamesById = new Map(games.map((g) => [g.id, g]));
+  /* 하루 속성은 기본값이 아닌 날만 내려온다 — 없으면 "시각 미정 · 휴방 아님"이다(db/schema.ts). */
+  const dayByDate = new Map((week?.days ?? []).map((d) => [d.scheduledDate, d]));
 
   return (
     <section className="sched" data-od-id="schedule">
@@ -71,7 +73,11 @@ export function ScheduleReadView({
 
             <ol className="sched__days" data-od-id="schedule-days">
               {days.map((date, i) => {
-                const entries = week.entries.filter((e) => e.scheduledDate === date);
+                const day = dayByDate.get(date);
+                const rest = day?.rest ?? false;
+                /* 휴방인 날은 항목을 안 그린다 — 표시에서 휴방이 이긴다(이슈 #117 결정 5).
+                   두 테이블이라 DB CHECK 로 공존을 못 막으므로 화면이 규칙을 세운다. */
+                const entries = rest ? [] : week.entries.filter((e) => e.scheduledDate === date);
                 const isToday = date === today;
                 return (
                   <li
@@ -89,17 +95,28 @@ export function ScheduleReadView({
                       {isToday && <span className="chip chip--ink sched-day__today">오늘</span>}
                     </div>
                     <div className="sched-day__entries">
-                      {entries.length === 0 ? (
+                      {rest ? (
+                        /* "휴방"과 "아직 미정"은 다른 사실이다(이슈 #117 결정 4) — 전에는 둘 다
+                           "—" 라 팬이 구분을 못 했다. 값 칸이라 문장이 아니라 표기다(AGENTS). */
+                        <p className="sched-day__off" data-od-id={`schedule-day-rest-${date}`}>
+                          휴방
+                        </p>
+                      ) : entries.length === 0 ? (
                         <p className="sched-day__rest">
                           <span aria-hidden="true">—</span>
                           <span className="sr-only">일정 없음</span>
                         </p>
                       ) : (
-                        entries.map((e) => {
+                        entries.map((e, j) => {
                           const g = e.gameId != null ? gamesById.get(e.gameId) : undefined;
                           return (
                             <div key={e.id} className="sched-entry">
-                              <span className="sched-entry__time">{timeLabel(e.startTime)}</span>
+                              {/* 시각은 그날 **첫 줄에만** 선다 — 하루의 속성이라 항목마다
+                                  반복하면 같은 값이 세로로 늘어선다. 뒷줄은 자리만 비워 제목이
+                                  세로로 정렬되게 둔다(빈 span 이 그 폭을 지킨다). */}
+                              <span className="sched-entry__time">
+                                {j === 0 ? timeLabel(day?.startTime ?? null) : ""}
+                              </span>
                               {g?.posterImageUrl && (
                                 <img
                                   className="sched-entry__poster"

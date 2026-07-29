@@ -109,16 +109,14 @@ describe("일정 스키마 (D1 마이그레이션 스모크)", () => {
       .values({ scheduledDate: "2026-07-20", title: "젤다 방송", gameId: g!.id })
       .returning();
     expect(entry!.scheduledDate).toBe("2026-07-20");
-    expect(entry!.startTime).toBeNull(); // 시각 미정 편성 허용(결정 8)
     expect(entry!.gameId).toBe(g!.id);
 
     // 자유 제목 항목(게임 없는 편성) — game_id 없이도 선다.
     const [free] = await db
       .insert(scheduleEntries)
-      .values({ scheduledDate: "2026-07-21", startTime: "20:00", title: "저챗" })
+      .values({ scheduledDate: "2026-07-21", title: "저챗" })
       .returning();
     expect(free!.gameId).toBeNull();
-    expect(free!.startTime).toBe("20:00");
   });
 
   it("하루에 항목이 여럿 설 수 있다 — UNIQUE 없음(오후 저챗 + 밤 게임)", async () => {

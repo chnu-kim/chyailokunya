@@ -156,9 +156,30 @@ test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 �
      버튼이 서로 다른 이유로 막힌다). */
   await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("비공개");
   await expect(page.locator('[data-od-id="schedule-publish-toggle"]')).toBeDisabled();
+  /* 안내 문구가 "항목이나 휴방이 있어야"로 바뀌었다(이슈 #117 결정 9) — 전부 휴방인 주도
+     발행할 수 있게 되면서 "빈 주"의 정의가 넓어졌기 때문이다. */
   await expect(page.locator('[data-od-id="schedule-publish-status"]')).toContainText(
-    "항목이 있어야",
+    "항목이나 휴방이 있어야",
   );
+});
+
+test("관리자: 휴방만 정한 주도 발행할 수 있다(이슈 #117 결정 9)", async ({ page, baseURL }) => {
+  /* 옛 규칙(항목 0 = 빈 주)이면 화면은 7일이 정해진 주를 보여주는데 발행 버튼만 잠긴다 —
+     이 저장소가 반복해 밟은 "게이트는 초록인데 라이브에서 막힌다" 모양이다. 서버·머신·화면
+     세 자리의 가드가 같은 규칙을 쓰는지 여기서 한 번에 본다. */
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2036-06-02");
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+
+  await page.locator('[data-od-id="schedule-day-rest-2036-06-02"]').check();
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toBeDisabled();
+
+  // 항목이 0개인데도 발행이 열린다.
+  await expect(page.locator('[data-od-id="schedule-publish-toggle"]')).toBeEnabled();
+  await page.locator('[data-od-id="schedule-publish-toggle"]').click();
+  await page.locator('[data-od-id="schedule-publish-confirm-confirm"]').click();
+  await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("공개 중");
 });
 
 /* 공개 읽기의 PNG 다운로드 회귀(적대적 리뷰 지적, PR #112). WeekCardDownload 의 submit 머신

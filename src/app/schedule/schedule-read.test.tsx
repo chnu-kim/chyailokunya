@@ -17,11 +17,11 @@ const WEEK: WeekView = {
   publishedAt: 1753600000000,
   draft: false,
   revision: 1753600000000,
+  days: [],
   entries: [
     {
       id: 1,
       scheduledDate: "2026-07-27",
-      startTime: "19:00",
       title: "겟 투 워크 켠왕",
       gameId: null,
       createdAt: 1753600000000,

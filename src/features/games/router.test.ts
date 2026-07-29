@@ -312,7 +312,6 @@ describe("games 라우터", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.scheduledDate).toBe("2026-07-22");
     expect(entries[0]!.title).toBe("엘든링"); // NOT NULL 이라 게임 제목을 싣는다
-    expect(entries[0]!.startTime).toBeNull(); // 시각은 /schedule 소관
   });
 
   /* last_insert_rowid() 회귀. **이 가정이 깨지면 항목이 엉뚱한 게임에 붙는 조용한 오염이라**
@@ -356,7 +355,7 @@ describe("games 라우터", () => {
     const db = makeDb(env.DB);
     await db
       .update(scheduleEntries)
-      .set({ startTime: "20:00", title: "엘든링 2회차" })
+      .set({ title: "엘든링 2회차" })
       .where(eq(scheduleEntries.gameId, row.id));
 
     const moved = await authed.games.update({
@@ -371,7 +370,6 @@ describe("games 라우터", () => {
     const entries = await db.select().from(scheduleEntries);
     expect(entries).toHaveLength(1); // 새로 만든 게 아니라 옮긴 것
     expect(entries[0]!.scheduledDate).toBe("2026-07-23");
-    expect(entries[0]!.startTime).toBe("20:00");
     expect(entries[0]!.title).toBe("엘든링 2회차");
   });
 
@@ -406,7 +404,7 @@ describe("games 라우터", () => {
     const db = makeDb(env.DB);
     await db
       .update(scheduleEntries)
-      .set({ startTime: "20:00", title: "엘든링 2회차 · 마지막 보스" })
+      .set({ title: "엘든링 2회차 · 마지막 보스" })
       .where(eq(scheduleEntries.gameId, row.id));
 
     await authed.games.update({
@@ -419,7 +417,6 @@ describe("games 라우터", () => {
 
     const entries = await db.select().from(scheduleEntries);
     expect(entries).toHaveLength(1);
-    expect(entries[0]!.startTime).toBe("20:00");
     expect(entries[0]!.title).toBe("엘든링 2회차 · 마지막 보스");
     expect(entries[0]!.gameId).toBeNull();
   });
@@ -571,7 +568,6 @@ describe("games 라우터", () => {
        두는 건 유출됐을 때 **무엇이** 새는지를 그대로 드러내기 위해서다. */
     await db.insert(scheduleEntries).values({
       scheduledDate: "2026-05-13",
-      startTime: "20:00",
       title: "레거시 방송 제목",
       gameId: row.id,
     });

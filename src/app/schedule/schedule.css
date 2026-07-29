@@ -169,6 +169,57 @@
   padding: 6px 0;
 }
 
+/* 휴방(읽기). "아직 미정"(위 —)과 **다른 사실**이라 글자로 말한다(이슈 #117 결정 4) — 전에는
+   둘 다 "—" 라 팬이 "정해지면 올라오겠지"와 "이번 주는 쉰다"를 구분할 수 없었다. 값 칸이라
+   문장이 아니라 표기다(AGENTS 코드 컨벤션). --fg 로 세우는 이유: --fg-muted 로 두면 바로 위
+   "—"와 같은 무게가 되어 "정해진 사실"이라는 차이가 색에서 사라진다. */
+.sched-day__off {
+  margin: 0;
+  padding: 6px 0;
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--fg);
+}
+
+/* 하루의 속성 줄(편집기) — 시작 시각 + 휴방. 항목 행 위에 한 번만 선다(이슈 #117). */
+.sched-day__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.sched-day__time {
+  flex: 0 1 128px;
+  min-width: 0;
+}
+/* 체크박스는 라벨과 함께 44 를 세운다 — 네이티브 체크박스 자체는 16px 안팎이라, 라벨을 감싸
+   히트 영역을 넓히지 않으면 터치 타깃이 조용히 미달한다(kunya-design §4·§5 의 상습범). */
+.sched-day__rest-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.sched-day__rest-toggle:hover {
+  color: var(--fg);
+}
+.sched-day__rest-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand-ink);
+  cursor: pointer;
+}
+.sched-day__rest-toggle:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
 /* ── 읽기 항목: 시각 · 표지 · 제목 ─────────────────────────────────────────── */
 .sched-entry {
   display: flex;
@@ -639,6 +690,25 @@ dialog.sched-confirm::backdrop {
   font-size: 16px;
   color: var(--fg-muted);
 }
+/* 그날 방송 시작 시각 — 요일 옆에 **한 번만** 선다(이슈 #117). 전에는 항목마다 배지로 붙어
+   같은 값이 칸 안에서 반복됐다. 항목 배지(옛 week-card__entry-time)와 같은 핑크 알약을 그대로
+   물려받아 카드의 색 어휘를 안 늘린다 — 자리만 옮겼다는 사실이 모양으로도 읽힌다. */
+.week-card__time {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 13px;
+  color: var(--brand-brown-deep);
+  background-color: var(--brand-pink-soft);
+  border-radius: 999px;
+}
+/* 휴방 — 빈 칸("—")과 다른 사실이라 글자로 말한다. 브라운 딥은 크림 위에서 본문 대비를 넘고
+   (주말 요일 색과 같은 토큰), 카드가 항상 라이트라 다크 재선언이 따로 필요 없다. */
+.week-card__rest {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--brand-brown-deep);
+}
 .week-card__day-rule {
   height: 1px;
   margin: 8px 0 10px;
@@ -673,14 +743,6 @@ dialog.sched-confirm::backdrop {
      제목이 두 줄 칸만큼 억지로 늘어나 하루 여러 항목 사이가 듬성듬성해지는 걸 막는다. */
   max-height: 42px;
   overflow: hidden;
-}
-.week-card__entry-time {
-  align-self: flex-start;
-  padding: 2px 8px;
-  font-size: 13px;
-  color: var(--brand-brown-deep);
-  background-color: var(--brand-pink-soft);
-  border-radius: 999px;
 }
 .week-card__overflow {
   margin: 0;

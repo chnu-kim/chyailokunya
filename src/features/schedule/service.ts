@@ -2,8 +2,17 @@
    컴포넌트가 재사용한다. 쓰기는 주 단위 일괄 저장 하나 — 한 주를 통째로 교체한다. */
 
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { toIsoDate, weekDates, weekStartOf } from "@/core/calendar";
-import { games, scheduleEntries, scheduleWeeks, type Db, type ScheduleEntry } from "@/db";
+import {
+  games,
+  scheduleDays,
+  scheduleEntries,
+  scheduleWeeks,
+  type Db,
+  type ScheduleDay,
+  type ScheduleEntry,
+} from "@/db";
 import type { PublishWeekInput, SaveWeekInput } from "./schema";
 
 /* 한 주의 뷰 — 메타(공지·발행) + 그 주 7일의 항목들. 편집 화면이 불러오고, 저장이 되돌려준다.
@@ -27,7 +36,22 @@ export type WeekView = {
      이라 같은 사실을 두 곳에 적을 필요가 없다. */
   revision: number | null;
   entries: ScheduleEntry[];
+  /* 그 주 7일 중 **기본값이 아닌 날만**(시각이 있거나 휴방인 날). 행이 없는 날은 "시각 미정 ·
+     휴방 아님"과 같은 뜻이라 목록에 안 실린다(db/schema.ts 의 "행이 없는 것 = 기본값").
+     화면은 날짜로 찾아 쓰고, 없으면 기본값으로 그린다. */
+  days: ScheduleDay[];
 };
+
+/* 이 주에 **관리자가 무언가 정해 뒀는가**. 항목이 하나라도 있거나, 하루라도 휴방이면 참이다.
+   전에는 "항목 0 = 빈 주"였는데, 휴방이 생기면서 그 등식이 깨졌다(이슈 #117 결정 9): 7일을
+   전부 휴방으로 정한 주는 항목이 0개지만 **짠 결과**이고 발행할 만하다. 옛 규칙을 그대로 두면
+   화면은 꽉 찬 주를 보여주는데 발행만 서버에서 거절당한다.
+
+   이 판정이 세 자리에서 같이 쓰인다 — 발행 가드(saveWeek·publishWeek)와 draft 유도. 한 함수로
+   두는 이유가 그것이다: 갈라 두면 한쪽만 고쳐지는 날 화면과 서버가 어긋난다. */
+export function weekHasContent(entryCount: number, restCount: number): boolean {
+  return entryCount > 0 || restCount > 0;
+}
 
 /* 그 주 7일의 날짜 경계 [월, 일]. text 'YYYY-MM-DD' 는 사전순 = 시간순이라 범위 비교가 그대로
    선다(BETWEEN 대신 gte/lte). */
@@ -37,34 +61,43 @@ function weekBounds(weekStartDate: string): { monday: string; sunday: string } {
 }
 
 /* 편집용 읽기 — 발행 여부와 무관하게 그 주를 통째로 준다(초안도 편집자는 봐야 한다). 공개
-   읽기(발행된 주만)는 읽기 페이지가 서는 작업순서 5 에서 별도 경로로 붙는다(그때 published_at
-   필터). 정렬: 날짜 오름차순, 하루 안에서는 시각 있는 항목 먼저(IS NULL 이 뒤로), 같은 시각은
-   id 순 — start_time 이 null 인 항목은 그날의 끝에 몰아 시간표가 위에서 아래로 읽히게 한다. */
+   읽기(발행된 주만)는 getPublishedWeek 이 published_at 으로 거른다.
+
+   ── 정렬이 바뀌었다(이슈 #117) ────────────────────────────────────────────────────
+   전에는 "하루 안에서 시각 있는 항목 먼저, 같은 시각은 id 순"이었다. 시각이 항목에서 하루로
+   올라가면서 그 1·2차 키가 사라져 **날짜 · id(= 입력 순)** 만 남는다. 이 규칙은
+   `core/schedule-editor.ts` 의 `entriesForDate` 와 **일부러 거울**이다 — 갈리면 저장하는
+   순간 항목이 눈에 띄게 재배열된다(그 파일 주석). 한쪽을 고치면 반드시 다른 쪽도 고친다. */
 export async function getWeekForEdit(db: Db, weekStartDate: string): Promise<WeekView> {
   const { monday, sunday } = weekBounds(weekStartDate);
   const [meta] = await db
     .select()
     .from(scheduleWeeks)
     .where(eq(scheduleWeeks.weekStartDate, weekStartDate));
-  const entries = await db
-    .select()
-    .from(scheduleEntries)
-    .where(
-      and(gte(scheduleEntries.scheduledDate, monday), lte(scheduleEntries.scheduledDate, sunday)),
-    )
-    .orderBy(
-      asc(scheduleEntries.scheduledDate),
-      sql`${scheduleEntries.startTime} IS NULL`,
-      asc(scheduleEntries.startTime),
-      asc(scheduleEntries.id),
-    );
+  const [entries, days] = await db.batch([
+    db
+      .select()
+      .from(scheduleEntries)
+      .where(
+        and(gte(scheduleEntries.scheduledDate, monday), lte(scheduleEntries.scheduledDate, sunday)),
+      )
+      .orderBy(asc(scheduleEntries.scheduledDate), asc(scheduleEntries.id)),
+    db
+      .select()
+      .from(scheduleDays)
+      .where(and(gte(scheduleDays.scheduledDate, monday), lte(scheduleDays.scheduledDate, sunday)))
+      .orderBy(asc(scheduleDays.scheduledDate)),
+  ]);
   return {
     weekStartDate,
     note: meta?.note ?? null,
     publishedAt: meta?.publishedAt ?? null,
-    draft: meta?.draft ?? entries.length === 0,
+    /* 메타가 없는 주의 draft 는 "관리자가 뭔가 정해 뒀나"로 가른다 — 휴방만 있는 주도 정해 둔
+       주다(결정 9). 항목 수만 보면 그런 주가 "아직 아무도 안 짠 새 주"로 읽혀 보드에서 사라진다. */
+    draft: meta?.draft ?? !weekHasContent(entries.length, days.filter((d) => d.rest).length),
     revision: meta?.lastUpdatedAt ?? null,
     entries,
+    days,
   };
 }
 
@@ -196,12 +229,25 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
   const { monday, sunday } = weekBounds(input.weekStartDate);
   const now = Date.now();
 
+  /* 저장 후에 남을 하루 행 — **기본값인 날은 뺀다.** "시각 없음 · 휴방 아님"은 행이 없는 것과
+     같은 뜻이라(db/schema.ts), 그런 행을 만들면 기대고 있는 불변만 흐려진다. 클라이언트가 7일을
+     다 보내도 여기서 걸러지므로 UI 는 그 규칙을 몰라도 된다. */
+  const dayRows = input.days.filter((d) => d.startTime !== null || d.rest);
+
   /* 빈 주는 발행할 수 없다(publishWeek 과 같은 규칙, 결정 22) — saveWeek 은 전체 교체라
-     `input.entries` 가 곧 저장 후의 항목 전체다(DB 조회 없이 입력만으로 판정된다). publishWeek
-     에만 이 검사를 걸면 이 뮤테이션(schedule:write 권한자가 여전히 직접 부를 수 있는 노출된
-     경로)으로 그대로 우회된다 — 적대적 리뷰가 실제로 이 자리를 잡았다. DB 를 하나도 안 건드린
-     시점에 거절해 실패가 아무 흔적도 안 남긴다. */
-  if (input.published && input.entries.length === 0) throw new EmptyWeekCannotPublish();
+     입력이 곧 저장 후의 상태다(DB 조회 없이 입력만으로 판정된다). publishWeek 에만 이 검사를
+     걸면 이 뮤테이션(schedule:write 권한자가 여전히 직접 부를 수 있는 노출된 경로)으로 그대로
+     우회된다 — 적대적 리뷰가 실제로 이 자리를 잡았다. DB 를 하나도 안 건드린 시점에 거절해
+     실패가 아무 흔적도 안 남긴다.
+
+     **"비었다"의 정의가 바뀌었다**(이슈 #117 결정 9): 7일을 전부 휴방으로 정한 주는 항목이
+     0개지만 관리자가 짠 결과이고 발행할 만하다. 옛 규칙(항목 0 = 빈 주)을 두면 화면은 꽉 찬
+     주를 보여주는데 발행만 서버에서 거절당한다. */
+  const willHaveContent = weekHasContent(
+    input.entries.length,
+    dayRows.filter((d) => d.rest).length,
+  );
+  if (input.published && !willHaveContent) throw new EmptyWeekCannotPublish();
 
   /* ── 0단계: 참조 게임을 **메타를 건드리기 전에** 검증한다 ─────────────────────────
      gameId 가 없는 게임을 가리키면 2단계 INSERT 가 FK 로 실패한다. 그 실패를 메타 이전으로 옮겨,
@@ -220,7 +266,7 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      주를 못 바꿨으므로(모든 저장이 revision 을 바꾸고, 바꿨으면 아래 청구가 0행이 된다) 이 값은
      2단계까지 유효하다. 메타와 "이미 있던 항목"을 한 batch(왕복 1회)로 묶는다 — 둘째는 메타가
      없는 주의 draft 기본값을 가르는 데만 쓰인다(아래). */
-  const [metaRows, priorEntries] = await db.batch([
+  const [metaRows, priorEntries, priorRestDays] = await db.batch([
     db
       .select({ publishedAt: scheduleWeeks.publishedAt, draft: scheduleWeeks.draft })
       .from(scheduleWeeks)
@@ -232,9 +278,25 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
         and(gte(scheduleEntries.scheduledDate, monday), lte(scheduleEntries.scheduledDate, sunday)),
       )
       .limit(1),
+    /* 휴방한 날이 이미 있었는가 — 메타 없는 주의 draft 를 가르는 데 항목과 **함께** 쓰인다
+       (결정 9). 이게 없으면 "전부 휴방"인 레거시 주가 아직 아무도 안 짠 새 주로 읽힌다. */
+    db
+      .select({ id: scheduleDays.id })
+      .from(scheduleDays)
+      .where(
+        and(
+          gte(scheduleDays.scheduledDate, monday),
+          lte(scheduleDays.scheduledDate, sunday),
+          eq(scheduleDays.rest, true),
+        ),
+      )
+      .limit(1),
   ]);
   const existing = metaRows[0];
   const publishedAt = input.published ? (existing?.publishedAt ?? now) : null;
+  /* 저장 **전**의 주가 내용이 있었는가. claim placeholder 와 draft 유도가 같은 값을 봐야 한다
+     — 갈리면 2단계 실패 시 placeholder 가 "행 없음"과 다른 뜻이 된다(아래 claim 주석). */
+  const hadContent = weekHasContent(priorEntries.length, priorRestDays.length);
 
   /* draft 는 **서버가 정한다** — 클라이언트는 "공개할까"만 보낸다(published). 두 축을 UI 가
      따로 쥐면 도메인 규칙이 브라우저로 새고, 위조 클라이언트가 초안을 보드에 띄울 수 있다.
@@ -244,11 +306,12 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      - 메타가 있으면 그 값을 **유지한다.** 그래서 발행을 내려도 draft 로 안 돌아간다 — 공개
        철회는 "공개를 거둔다"이지 "안 짠 것으로 되돌린다"가 아니고, 되돌리면 그 주에 플레이한
        게임의 보드 날짜가 함께 사라진다(ADR-0022 가 (−)로 안고 있던 함정).
-     - 메타가 없으면 그 주에 항목이 이미 있었는지로 가른다. 있으면 이관된 과거 아카이브라
-       확정(false) — 레거시 주를 열어 발행 없이 저장해도 보드 날짜가 안 사라진다(손실 0,
-       결정 16). 비어 있으면 아직 아무도 안 짠 새 주라 초안(true). getWeekForEdit 이 편집기에
-       주는 draft 와 같은 규칙이라, 화면이 보여 준 상태 그대로 저장된다. */
-  const draft = input.published ? false : (existing?.draft ?? priorEntries.length === 0);
+     - 메타가 없으면 그 주에 **내용이** 이미 있었는지로 가른다(항목 또는 휴방 — 결정 9).
+       있으면 이관된 과거 아카이브라 확정(false) — 레거시 주를 열어 발행 없이 저장해도 보드
+       날짜가 안 사라진다(손실 0, 결정 16). 비어 있으면 아직 아무도 안 짠 새 주라 초안(true).
+       getWeekForEdit 이 편집기에 주는 draft 와 같은 규칙이라, 화면이 보여 준 상태 그대로
+       저장된다. */
+  const draft = input.published ? false : (existing?.draft ?? !hadContent);
 
   /* ── 1단계: 청구(claim) ───────────────────────────────────────────────────────────
      revision 이 있으면 UPDATE … WHERE last_updated_at = revision(그 주가 안 바뀌었을 때만 매치),
@@ -266,9 +329,11 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
        잡은 자리 — 코드 경로만으로 성립하는 지적이라 타당하다).
 
        그래서 청구 행은 **"메타 행이 아예 없던 상태"와 정확히 같은 뜻**으로 채운다 — `note`·
-       `publishedAt` 은 null(행이 없었으면 공지도 발행도 없었다), `draft` 는 `priorEntries.length
-       === 0`(getWeekForEdit·보드의 `coalesce(draft,0)=0`과 같은 유도식 — 이관된 레거시 주(항목
-       있음)는 false, 아직 아무도 안 짠 새 주는 true). **`draft` 를 무조건 `true`로 두면 안 되는
+       `publishedAt` 은 null(행이 없었으면 공지도 발행도 없었다), `draft` 는 `!hadContent`
+       (getWeekForEdit·보드의 `coalesce(draft,0)=0`과 같은 유도식 — 이관된 레거시 주(내용
+       있음)는 false, 아직 아무도 안 짠 새 주는 true). **휴방도 그 "내용"에 든다**(결정 9) —
+       안 그러면 전부 휴방인 주에서 저장이 실패할 때 그 순간만 보드 상태가 뒤집힌다.
+       **`draft` 를 무조건 `true`로 두면 안 되는
        이유**(4라운드 지적) — 레거시 주는 메타 행이 없어도 이미 보드에 날짜가 뜨고 있었는데
        (coalesce 가 행 없음을 draft=0 으로 접는다), 여기서 무조건 true 로 청구하면 2단계가
        실패했을 때 **그 순간만 보드에서 날짜가 사라진다** — 저장이 실패했을 뿐인데 이미 공개돼
@@ -283,7 +348,7 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
           .values({
             weekStartDate: input.weekStartDate,
             note: null,
-            draft: priorEntries.length === 0,
+            draft: !hadContent,
             publishedAt: null,
           })
           .onConflictDoNothing({ target: scheduleWeeks.weekStartDate })
@@ -314,20 +379,39 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
     .where(
       and(gte(scheduleEntries.scheduledDate, monday), lte(scheduleEntries.scheduledDate, sunday)),
     );
+  /* 하루 행도 **같은 batch 에서 전체 교체**한다(항목과 같은 규율, 결정 14). 갈라 두면 시각·휴방만
+     바뀐 저장이 항목과 다른 원자 단위로 나가, 한쪽만 반영된 주가 남을 수 있다. 이 주 7일 범위
+     밖은 안 건드린다 — 다른 주의 하루 속성은 이 저장의 관심사가 아니다. */
+  const clearDays = db
+    .delete(scheduleDays)
+    .where(and(gte(scheduleDays.scheduledDate, monday), lte(scheduleDays.scheduledDate, sunday)));
 
+  /* 배열 타입을 명시한다 — 안 적으면 첫 요소(UPDATE)로 좁혀져 뒤의 INSERT 를 못 받는다.
+     아래 캐스팅은 "비어 있지 않다"만 주장하는 것이고, setMeta 가 항상 첫 줄이라 참이다. */
+  const writes: BatchItem<"sqlite">[] = [setMeta, clearEntries, clearDays];
   if (input.entries.length) {
-    const insertEntries = db.insert(scheduleEntries).values(
-      input.entries.map((e) => ({
-        scheduledDate: e.scheduledDate,
-        startTime: e.startTime,
-        title: e.title,
-        gameId: e.gameId,
-      })),
+    writes.push(
+      db.insert(scheduleEntries).values(
+        input.entries.map((e) => ({
+          scheduledDate: e.scheduledDate,
+          title: e.title,
+          gameId: e.gameId,
+        })),
+      ),
     );
-    await db.batch([setMeta, clearEntries, insertEntries]);
-  } else {
-    await db.batch([setMeta, clearEntries]);
   }
+  if (dayRows.length) {
+    writes.push(
+      db.insert(scheduleDays).values(
+        dayRows.map((d) => ({
+          scheduledDate: d.scheduledDate,
+          startTime: d.startTime,
+          rest: d.rest,
+        })),
+      ),
+    );
+  }
+  await db.batch(writes as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
 
   return getWeekForEdit(db, input.weekStartDate);
 }
@@ -366,14 +450,34 @@ export async function publishWeek(db: Db, input: PublishWeekInput): Promise<Week
       .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
     if ((current?.lastUpdatedAt ?? null) !== input.revision) throw new WeekRevisionConflict();
 
+    /* "비었다"는 항목 0 **그리고** 휴방 0 이다(이슈 #117 결정 9) — 7일을 전부 휴방으로 정한
+       주는 항목이 없어도 관리자가 짠 결과라 발행할 만하다. saveWeek 의 같은 가드와 한 함수
+       (weekHasContent)를 공유한다: 갈라 두면 한쪽만 고쳐지는 날 두 경로가 다르게 판정한다. */
     const { monday, sunday } = weekBounds(input.weekStartDate);
-    const [row] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(scheduleEntries)
-      .where(
-        and(gte(scheduleEntries.scheduledDate, monday), lte(scheduleEntries.scheduledDate, sunday)),
-      );
-    if (!row || row.count === 0) throw new EmptyWeekCannotPublish();
+    const [entryRow, restRow] = await db.batch([
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(scheduleEntries)
+        .where(
+          and(
+            gte(scheduleEntries.scheduledDate, monday),
+            lte(scheduleEntries.scheduledDate, sunday),
+          ),
+        ),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(scheduleDays)
+        .where(
+          and(
+            gte(scheduleDays.scheduledDate, monday),
+            lte(scheduleDays.scheduledDate, sunday),
+            eq(scheduleDays.rest, true),
+          ),
+        ),
+    ]);
+    if (!weekHasContent(entryRow[0]?.count ?? 0, restRow[0]?.count ?? 0)) {
+      throw new EmptyWeekCannotPublish();
+    }
   }
 
   const claimed = await db

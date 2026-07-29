@@ -9,7 +9,6 @@ let nextId = 1;
 function entry(over: Partial<ScheduleEntry> & { scheduledDate: string }): ScheduleEntry {
   return {
     id: nextId++,
-    startTime: null,
     title: "제목",
     gameId: null,
     createdAt: 0,
@@ -24,6 +23,7 @@ function week(over: Partial<WeekView> = {}): WeekView {
     note: null,
     publishedAt: null,
     draft: false,
+    days: [],
     revision: 1,
     entries: [],
     ...over,
@@ -61,15 +61,12 @@ describe("buildWeekCard", () => {
 
   it("하루 여러 항목 — 정렬은 입력 순서를 그대로 믿는다(SQL 이 이미 정렬)", () => {
     const entries = [
-      entry({ scheduledDate: "2026-07-21", startTime: "21:00", title: "저챗" }),
-      entry({ scheduledDate: "2026-07-21", startTime: null, title: "심야 게임" }),
+      entry({ scheduledDate: "2026-07-21", title: "저챗" }),
+      entry({ scheduledDate: "2026-07-21", title: "심야 게임" }),
     ];
     const card = buildWeekCard(week({ entries }));
     const tue = card.days[1]!;
-    expect(tue.entries).toEqual([
-      { time: "21:00", title: "저챗" },
-      { time: null, title: "심야 게임" },
-    ]);
+    expect(tue.entries).toEqual([{ title: "저챗" }, { title: "심야 게임" }]);
     expect(tue.overflow).toBe(0);
   });
 
@@ -79,8 +76,8 @@ describe("buildWeekCard", () => {
       entry({ scheduledDate: "2026-07-26", title: "일요일 것" }),
     ];
     const card = buildWeekCard(week({ entries }));
-    expect(card.days[0]!.entries).toEqual([{ time: null, title: "월요일 것" }]);
-    expect(card.days[6]!.entries).toEqual([{ time: null, title: "일요일 것" }]);
+    expect(card.days[0]!.entries).toEqual([{ title: "월요일 것" }]);
+    expect(card.days[6]!.entries).toEqual([{ title: "일요일 것" }]);
     for (const i of [1, 2, 3, 4, 5]) expect(card.days[i]!.entries).toEqual([]);
   });
 
@@ -120,6 +117,6 @@ describe("buildWeekCard", () => {
       "7.25",
       "7.26",
     ]);
-    expect(card.days[0]!.entries).toEqual([{ time: null, title: "월요일 것" }]);
+    expect(card.days[0]!.entries).toEqual([{ title: "월요일 것" }]);
   });
 });

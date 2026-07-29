@@ -45,3 +45,4 @@ ADR 이 그 맥락을 붙박는다. 규칙(불변식·경계·플레이북)의 �
 | [0024](./0024-week-state-two-axes.md)                        | 주 상태 = draft × published 두 축 (부재를 상태로 안 쓴다)            | Accepted                                                   |
 | [0025](./0025-fan-suggestions.md)                            | 팬 제안 = 로그인의 첫 대가 (반영은 기존 쓰기 경로가 한다)            | Accepted                                                   |
 | [0026](./0026-xstate-unifies-client-state.md)                | 클라이언트 상태 = XState 단일 표현 (Zustand·Jotai·Query 기각)        | Accepted                                                   |
+| [0027](./0027-time-and-rest-belong-to-the-day.md)            | 방송 시각·휴방 = 하루의 속성 (#56 결정 8 을 뒤집는다)                | Accepted                                                   |

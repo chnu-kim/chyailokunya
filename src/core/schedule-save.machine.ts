@@ -2,13 +2,17 @@ import { assign, sendTo, setup } from "xstate";
 import { formatMD, toIsoDate, WEEKDAY_LABELS, weekDates, weekStartOf } from "./calendar";
 import {
   addEntry,
+  draftDayInputs,
   draftEntryInputs,
+  draftHasContent,
   firstBlankTitleEntry,
   isWeekDirty,
   makeDraftEntry,
   newEntryKey,
   removeEntry,
+  setDay,
   updateEntry,
+  type DraftDayInput,
   type DraftEntry,
   type DraftEntryInput,
   type WeekDraft,
@@ -87,6 +91,9 @@ export type SaveWeekValues = {
   note: string;
   published: boolean;
   entries: DraftEntryInput[];
+  /* 하루의 속성(이슈 #117). 기본값인 날은 draftDayInputs 가 이미 접어 낸다 — 서버도 같은
+     필터를 다시 걸지만, 여기서 접어야 dirty 판정과 저장 페이로드가 같은 정규형을 본다. */
+  days: DraftDayInput[];
 };
 
 /* run 의 반환 shape. 실제 tRPC 응답(WeekView, features 타입)을 core 가 못 보므로, 호출자가
@@ -142,6 +149,9 @@ type ScheduleSaveEvent =
   | { type: "ENTRY_ADDED"; date: string }
   | { type: "ENTRY_REMOVED"; key: string }
   | { type: "ENTRY_PATCHED"; key: string; patch: Parameters<typeof updateEntry>[2] }
+  /* 하루의 속성(시각·휴방, 이슈 #117). 항목 이벤트와 갈라 두는 이유는 대상이 다르기 때문이다 —
+     항목은 key 로, 하루는 날짜로 지목한다. */
+  | { type: "DAY_PATCHED"; date: string; patch: Parameters<typeof setDay>[2] }
   | { type: "SAVE" }
   | { type: "PUBLISH" }
   | { type: "UNPUBLISH" };
@@ -155,6 +165,7 @@ function saveValues(context: ScheduleSaveContext): SaveWeekValues {
     note: context.draft.note,
     published: context.draft.published,
     entries: draftEntryInputs(context.draft),
+    days: draftDayInputs(context.draft),
   };
 }
 
@@ -294,6 +305,11 @@ export const scheduleSaveMachine = setup({
         draft: ({ context, event }) => updateEntry(context.draft, event.key, event.patch),
       }),
     },
+    DAY_PATCHED: {
+      actions: assign({
+        draft: ({ context, event }) => setDay(context.draft, event.date, event.patch),
+      }),
+    },
   },
   initial: "ready",
   states: {
@@ -324,7 +340,9 @@ export const scheduleSaveMachine = setup({
           },
         ],
         PUBLISH: {
-          guard: ({ context }) => canPublish(context) && context.baseline.entries.length > 0,
+          /* 항목이 아니라 **내용**이 있어야 한다(이슈 #117 결정 9) — 전부 휴방인 주는 항목이
+             0개여도 짠 결과라 발행할 만하다. 서버의 weekHasContent 와 같은 규칙이다. */
+          guard: ({ context }) => canPublish(context) && draftHasContent(context.baseline),
           target: "publishing",
           actions: [
             assign({ publishError: "" }),

@@ -16,7 +16,7 @@ const isoDate = z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 
 
 /* 하루 중 시각 'HH:MM'(KST 라벨, 24시간). 빈 문자열은 null 로 접는다 — "시각 미정"의 표현이
    ""와 null 둘이 되면 정렬·표시 분기가 갈린다(games 날짜 입력과 같은 패턴). 시각은 선택이다
-   (결정 8: 시각 미정 편성 허용). */
+   (미정 편성 허용 — 몇 시인지 아직 안 정한 정상 상태다). */
 const startTime = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? null : v),
   z
@@ -28,12 +28,22 @@ const startTime = z.preprocess(
 
 /* 항목 하나. title 은 자유 제목(항목 종류 컬럼을 안 둔다 — 결정 9). gameId 는 게임에 이어
    붙이는 선택 연결(null = 게임 없는 자유 편성). scheduledDate 가 주에 속하는지는 아래 객체
-   레벨 refine 이 본다(항목 단위론 주를 모른다). max(200) 은 게임 제목 상한과 같은 자리. */
+   레벨 refine 이 본다(항목 단위론 주를 모른다). max(200) 은 게임 제목 상한과 같은 자리.
+
+   **시각은 여기 없다 — 하루의 속성이다**(이슈 #117, 결정 8 을 뒤집었다). 아래 dayInput 참조. */
 const entryInput = z.object({
   scheduledDate: isoDate,
-  startTime,
   title: z.string().trim().min(1).max(200),
   gameId: z.number().int().positive().nullable().default(null),
+});
+
+/* 하루의 속성 — 방송 시작 시각과 휴방(이슈 #117). 클라이언트는 7일을 다 보내도 되고 일부만
+   보내도 된다: 서버가 **기본값인 날(시각 없음 · 휴방 아님)은 행으로 안 만든다**(saveWeek).
+   그래야 "행이 없는 것 = 기본값"이라는 스키마 불변이 유지된다(db/schema.ts). */
+const dayInput = z.object({
+  scheduledDate: isoDate,
+  startTime,
+  rest: z.boolean().default(false),
 });
 
 /* 주 단위 일괄 저장. weekStartDate 는 그 주의 월요일이어야 하고(주는 날짜에서 유도하므로
@@ -55,6 +65,10 @@ export const saveWeekInput = z
     ),
     published: z.boolean().default(false),
     entries: z.array(entryInput).max(60),
+    /* 하루 속성. 한 주는 7일이라 상한이 7 이고, 같은 날이 두 번 오면 어느 쪽이 이길지가
+       입력 순서에 달리므로 아래 refine 이 중복을 거절한다(UNIQUE 제약이 최종 방어선이지만
+       거기까지 가면 저장이 통째로 실패한다 — 경계에서 먼저 거른다). */
+    days: z.array(dayInput).max(7).default([]),
   })
   .superRefine((v, ctx) => {
     // weekStartDate 가 월요일인가 — weekStartOf 가 자기 자신이면 그 주의 시작이다.
@@ -77,6 +91,28 @@ export const saveWeekInput = z
           message: "그 주에 속한 날짜여야 합니다",
         });
       }
+    });
+    // 하루 속성도 같은 두 규칙을 받는다 — 그 주에 속할 것, 그리고 날짜가 겹치지 않을 것.
+    const seen = new Set<string>();
+    v.days.forEach((d, i) => {
+      if (
+        isIsoDate(d.scheduledDate) &&
+        weekStartOf(toIsoDate(d.scheduledDate)) !== v.weekStartDate
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["days", i, "scheduledDate"],
+          message: "그 주에 속한 날짜여야 합니다",
+        });
+      }
+      if (seen.has(d.scheduledDate)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["days", i, "scheduledDate"],
+          message: "같은 날짜가 두 번 올 수 없습니다",
+        });
+      }
+      seen.add(d.scheduledDate);
     });
   });
 export type SaveWeekInput = z.infer<typeof saveWeekInput>;

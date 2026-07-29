@@ -173,7 +173,6 @@ export async function addGame(db: Db, input: AddGameInput): Promise<GameCard> {
 
   const insertEntry = db.insert(scheduleEntries).values({
     scheduledDate: input.playedDate,
-    startTime: null,
     title: input.categoryValue,
     gameId: sql<number>`last_insert_rowid()`,
   });
@@ -293,7 +292,6 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
               .where(eq(scheduleEntries.id, current.id))
           : db.insert(scheduleEntries).values({
               scheduledDate: input.playedDate!,
-              startTime: null,
               title: rows[0].categoryValue,
               gameId: input.id,
             });

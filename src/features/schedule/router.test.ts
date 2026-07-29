@@ -66,6 +66,7 @@ describe("일정 라우터", () => {
       // 메타도 항목도 없는 주 = 아직 아무도 안 짠 새 주라 초안으로 연다.
       draft: true,
       revision: null,
+      days: [],
       entries: [],
     });
   });
@@ -75,36 +76,76 @@ describe("일정 라우터", () => {
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       note: "이번 주는 젤다 위주",
+      days: [],
       entries: [
-        { scheduledDate: "2026-07-20", startTime: "20:00", title: "젤다" },
-        { scheduledDate: "2026-07-22", startTime: null, title: "저챗" },
+        { scheduledDate: "2026-07-20", title: "젤다" },
+        { scheduledDate: "2026-07-22", title: "저챗" },
       ],
     });
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
     expect(week.note).toBe("이번 주는 젤다 위주");
     expect(week.entries.map((e) => e.title)).toEqual(["젤다", "저챗"]);
-    expect(week.entries[0]!.startTime).toBe("20:00");
-    expect(week.entries[1]!.startTime).toBeNull();
+    // 시각은 항목이 아니라 하루에 달린다(이슈 #117) — 기본값인 날은 아예 안 실려 온다.
+    expect(week.days).toEqual([]);
   });
 
-  it("하루 안에서는 시각 있는 항목이 먼저, 시각 없는 항목은 끝으로", async () => {
+  it("하루 안 항목은 넣은 순서를 지킨다 — core 의 entriesForDate 와 같은 규칙", async () => {
+    /* 시각이 하루로 올라가(이슈 #117) 항목별 정렬 키가 사라졌다. 남은 규칙은 id 순(= 넣은 순)
+       하나이고, 편집기의 entriesForDate 가 그 거울이다 — 갈리면 저장 순간 화면이 재배열된다. */
     const caller = createCaller(makeCtx({ authorities: admin }));
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
+      days: [],
       entries: [
-        { scheduledDate: "2026-07-20", startTime: null, title: "미정" },
-        { scheduledDate: "2026-07-20", startTime: "20:00", title: "밤 게임" },
-        { scheduledDate: "2026-07-20", startTime: "14:00", title: "오후 저챗" },
+        { scheduledDate: "2026-07-20", title: "먼저" },
+        { scheduledDate: "2026-07-20", title: "다음" },
+        { scheduledDate: "2026-07-20", title: "마지막" },
       ],
     });
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
-    expect(week.entries.map((e) => e.title)).toEqual(["오후 저챗", "밤 게임", "미정"]);
+    expect(week.entries.map((e) => e.title)).toEqual(["먼저", "다음", "마지막"]);
+  });
+
+  it("하루 시각과 휴방을 저장하고 되읽는다 — 기본값인 날은 행을 안 만든다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [
+        { scheduledDate: "2026-07-20", startTime: "21:00", rest: false },
+        { scheduledDate: "2026-07-21", startTime: null, rest: true },
+        // 기본값(시각 없음·휴방 아님) — 서버가 걸러 행을 안 만든다.
+        { scheduledDate: "2026-07-22", startTime: null, rest: false },
+      ],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+    });
+    const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(
+      week.days.map((d) => ({ date: d.scheduledDate, time: d.startTime, rest: d.rest })),
+    ).toEqual([
+      { date: "2026-07-20", time: "21:00", rest: false },
+      { date: "2026-07-21", time: null, rest: true },
+    ]);
+  });
+
+  it("휴방만 있는 주도 발행할 수 있다 — 항목 0 이 곧 빈 주는 아니다(결정 9)", async () => {
+    /* 옛 규칙(항목 0 = 빈 주)이면 이 저장이 EmptyWeekCannotPublish 로 거절된다. 화면은 7일이
+       다 정해진 주를 보여주는데 발행만 서버에서 막히는, 이 저장소가 반복해 밟은 모양이다. */
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const saved = await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      published: true,
+      days: [{ scheduledDate: "2026-07-20", startTime: null, rest: true }],
+      entries: [],
+    });
+    expect(saved.publishedAt).not.toBeNull();
+    expect(await getPublishedWeek(makeDb(env.DB), MON)).not.toBeNull();
   });
 
   it("일괄 저장은 그 주를 전체 교체한다 — 뺀 항목은 사라진다", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
+      days: [],
       entries: [
         { scheduledDate: "2026-07-20", title: "A" },
         { scheduledDate: "2026-07-21", title: "B" },
@@ -113,6 +154,7 @@ describe("일정 라우터", () => {
     // 다시 저장하며 B 를 뺀다 — 전체 교체라 B 는 사라지고 C 가 생긴다.
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
+      days: [],
       entries: [
         { scheduledDate: "2026-07-20", title: "A" },
         { scheduledDate: "2026-07-22", title: "C" },
@@ -127,11 +169,13 @@ describe("일정 라우터", () => {
     const nextMon = "2026-07-27";
     await saveWeekAsEditor(caller, {
       weekStartDate: nextMon,
+      days: [],
       entries: [{ scheduledDate: "2026-07-28", title: "다음 주 항목" }],
     });
     // MON 주를 저장(교체)해도 다음 주는 그대로여야 한다.
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
+      days: [],
       entries: [{ scheduledDate: "2026-07-20", title: "이번 주 항목" }],
     });
     const next = await caller.schedule.getWeek({ weekStartDate: nextMon });
@@ -145,6 +189,7 @@ describe("일정 라우터", () => {
     const first = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: true,
+      days: [],
       entries: [entry],
     });
     expect(typeof first.publishedAt).toBe("number");
@@ -152,6 +197,7 @@ describe("일정 라우터", () => {
     const again = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: true,
+      days: [],
       entries: [entry],
     });
     expect(again.publishedAt).toBe(first.publishedAt);
@@ -159,6 +205,7 @@ describe("일정 라우터", () => {
     const unpublished = await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: false,
+      days: [],
       entries: [entry],
     });
     expect(unpublished.publishedAt).toBeNull();
@@ -175,6 +222,7 @@ describe("일정 라우터", () => {
         weekStartDate: MON,
         revision: null,
         published: true,
+        days: [],
         entries: [],
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -222,7 +270,8 @@ describe("일정 라우터", () => {
         revision: null,
         note: "저장이 거절됐다는데 남으면 안 되는 공지",
         published: true,
-        entries: [{ scheduledDate: toIsoDate(MON), startTime: null, title: "젤다", gameId: null }],
+        days: [],
+        entries: [{ scheduledDate: toIsoDate(MON), title: "젤다", gameId: null }],
       }),
     ).rejects.toThrow();
 
@@ -253,9 +302,8 @@ describe("일정 라우터", () => {
         revision: null, // 메타가 없으니 편집기가 읽는 revision 도 null 이다.
         note: null,
         published: false,
-        entries: [
-          { scheduledDate: toIsoDate(MON), startTime: null, title: "레거시 항목", gameId: null },
-        ],
+        days: [],
+        entries: [{ scheduledDate: toIsoDate(MON), title: "레거시 항목", gameId: null }],
       }),
     ).rejects.toThrow();
 
@@ -283,6 +331,7 @@ describe("일정 라우터", () => {
     const after = await saveWeekAsEditor(authed, {
       weekStartDate: MON,
       published: false,
+      days: [],
       entries: [entry],
     });
     expect(after.draft).toBe(false); // 확정 상태는 유지
@@ -304,6 +353,7 @@ describe("일정 라우터", () => {
     const saved = await saveWeekAsEditor(authed, {
       weekStartDate: MON,
       published: false,
+      days: [],
       entries: [{ scheduledDate: "2026-07-22", title: "엘든링", gameId: game.id }],
     });
     expect(saved.draft).toBe(true);
@@ -341,6 +391,7 @@ describe("일정 라우터", () => {
       caller.schedule.saveWeek({
         weekStartDate: MON,
         revision: null,
+        days: [],
         entries: [{ scheduledDate: "2026-07-27", title: "다음 주로 샌 항목" }],
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -352,6 +403,7 @@ describe("일정 라우터", () => {
       caller.schedule.saveWeek({
         weekStartDate: MON,
         revision: null,
+        days: [],
         entries: [{ scheduledDate: "2026-07-20", title: "유령 게임", gameId: 9999 }],
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -374,6 +426,7 @@ describe("일정 라우터", () => {
       weekStartDate: MON,
       note: "지켜야 할 공지",
       published: true,
+      days: [],
       entries: [{ scheduledDate: "2026-07-20", title: "젤다", gameId: game.id }],
     });
     expect(before.publishedAt).not.toBeNull();
@@ -387,6 +440,7 @@ describe("일정 라우터", () => {
         revision: before.revision,
         note: "덮어써지면 안 되는 새 공지",
         published: false,
+        days: [],
         entries: [
           { scheduledDate: "2026-07-20", title: "젤다", gameId: game.id },
           { scheduledDate: "2026-07-21", title: "유령", gameId: 9999 },
@@ -409,6 +463,7 @@ describe("일정 라우터", () => {
     // 그 사이 관리자 B 가 먼저 저장한다.
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
+      days: [],
       entries: [{ scheduledDate: "2026-07-20", title: "B 가 넣은 항목" }],
     });
 
@@ -418,6 +473,7 @@ describe("일정 라우터", () => {
       caller.schedule.saveWeek({
         weekStartDate: MON,
         revision: opened.revision,
+        days: [],
         entries: [{ scheduledDate: "2026-07-21", title: "A 가 넣은 항목" }],
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
@@ -431,6 +487,7 @@ describe("일정 라우터", () => {
     const ok = await caller.schedule.saveWeek({
       weekStartDate: MON,
       revision: reopened.revision,
+      days: [],
       entries: [{ scheduledDate: "2026-07-21", title: "A 가 다시 넣은 항목" }],
     });
     expect(ok.entries.map((e) => e.title)).toEqual(["A 가 다시 넣은 항목"]);
@@ -448,11 +505,13 @@ describe("일정 라우터", () => {
       caller.schedule.saveWeek({
         weekStartDate: MON,
         revision: opened.revision,
+        days: [],
         entries: [{ scheduledDate: "2026-07-20", title: "A" }],
       }),
       caller.schedule.saveWeek({
         weekStartDate: MON,
         revision: opened.revision,
+        days: [],
         entries: [{ scheduledDate: "2026-07-21", title: "B" }],
       }),
     ]);
@@ -506,7 +565,6 @@ describe("일정 라우터", () => {
       published: false,
       entries: loaded.entries.map((e) => ({
         scheduledDate: e.scheduledDate,
-        startTime: e.startTime,
         title: e.title,
         gameId: e.gameId,
       })),
@@ -523,6 +581,7 @@ describe("일정 라우터", () => {
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       note: "짜는 중",
+      days: [],
       entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
     });
     expect(await getPublishedWeek(db, MON)).toBeNull();
@@ -531,6 +590,7 @@ describe("일정 라우터", () => {
       weekStartDate: MON,
       note: "짜는 중",
       published: true,
+      days: [],
       entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
     });
     const published = await getPublishedWeek(db, MON);
@@ -551,6 +611,7 @@ describe("일정 라우터", () => {
       const saved = await saveWeekAsEditor(caller, {
         weekStartDate: MON,
         note: "이번 주는 젤다 위주",
+        days: [],
         entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
       });
       expect(saved.publishedAt).toBeNull(); // saveWeek 은 published 를 안 실어 보냈다(기본 false)
@@ -593,6 +654,7 @@ describe("일정 라우터", () => {
       // 빈 주는 발행 자체가 거절되므로(아래 "빈 주는 발행이 거절된다") 항목 하나를 채운다.
       const saved = await saveWeekAsEditor(caller, {
         weekStartDate: MON,
+        days: [],
         entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
       });
       const first = await caller.schedule.publishWeek({
@@ -612,6 +674,7 @@ describe("일정 라우터", () => {
       const caller = createCaller(makeCtx({ authorities: admin }));
       const saved = await saveWeekAsEditor(caller, {
         weekStartDate: MON,
+        days: [],
         entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
       });
       const published = await caller.schedule.publishWeek({
@@ -635,6 +698,7 @@ describe("일정 라우터", () => {
       // 다른 곳에서 먼저 저장해 revision 이 이미 올라갔다.
       await saveWeekAsEditor(caller, {
         weekStartDate: MON,
+        days: [],
         entries: [{ scheduledDate: "2026-07-20", title: "새로 넣은 항목" }],
       });
       await expect(
@@ -654,6 +718,7 @@ describe("일정 라우터", () => {
       const caller = createCaller(makeCtx({ authorities: admin }));
       const saved = await saveWeekAsEditor(caller, {
         weekStartDate: MON,
+        days: [],
         entries: [{ scheduledDate: "2026-07-20", title: "곧 지워질 항목" }],
       });
       // 다른 곳에서 그 사이 항목을 전부 지우고 저장했다 — 지금 이 주는 실제로 비어 있다.
@@ -694,6 +759,7 @@ describe("일정 라우터", () => {
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       published: true,
+      days: [],
       entries: [{ scheduledDate: "2026-07-20", title: "젤다", gameId: game.id }],
     });
     const [card] = await createCaller(makeCtx()).games.list();
