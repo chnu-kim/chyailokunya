@@ -191,7 +191,7 @@ describe("draftHasContent — 발행 가능 여부의 판단축", () => {
 });
 
 describe("isWeekDirty — 저장하면 달라지는가", () => {
-  it("같은 값이면 깨끗(순서·key 무관, 빈 항목 무시)", () => {
+  it("같은 값이면 깨끗(key 무관, 빈 항목 무시)", () => {
     const a = draft({
       note: "공지",
       entries: [
@@ -202,12 +202,32 @@ describe("isWeekDirty — 저장하면 달라지는가", () => {
     const b = draft({
       note: "공지",
       entries: [
-        entry("new-9", { title: "저챗", scheduledDate: WED }), // 순서 뒤바뀜·다른 key
-        entry("new-8", { title: "젤다", scheduledDate: MON }),
+        entry("new-8", { title: "젤다", scheduledDate: MON }), // 다른 key, 같은 순서
+        entry("new-9", { title: "저챗", scheduledDate: WED }),
         entry("new-7", { title: "  " }), // 빈 항목 — 저장에 안 실려 무시
       ],
     });
     expect(isWeekDirty(a, b)).toBe(false);
+  });
+
+  it("같은 날 항목의 순서만 바뀌어도 dirty — 순서가 저장되는 값이다", () => {
+    /* 시각이 하루로 올라가기 전에는 하루 안 정렬을 시각이 결정해 배열 순서가 저장 결과에
+       안 남았다. 이제는 순서가 곧 표시·저장 순서라(entriesForDate·서버 ORDER BY 가 둘 다
+       입력 순), 순서만 바꾼 편집이 dirty 로 안 잡히면 저장 버튼이 잠긴 채 새 순서를 영영
+       못 남긴다(코드 리뷰 지적). */
+    const a = draft({
+      entries: [
+        entry("a", { title: "저챗", scheduledDate: MON }),
+        entry("b", { title: "젤다", scheduledDate: MON }),
+      ],
+    });
+    const b = draft({
+      entries: [
+        entry("b", { title: "젤다", scheduledDate: MON }),
+        entry("a", { title: "저챗", scheduledDate: MON }),
+      ],
+    });
+    expect(isWeekDirty(a, b)).toBe(true);
   });
 
   it("note·published·항목 내용이 바뀌면 dirty", () => {

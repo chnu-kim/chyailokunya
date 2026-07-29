@@ -65,6 +65,35 @@ describe("ScheduleReadView 의 오늘 표시", () => {
     expect(screen.queryByText("오늘")).not.toBeInTheDocument();
   });
 
+  it("항목이 없어도 그날 시각은 보인다 — 공유 카드와 같은 값을 말한다", () => {
+    /* 시각을 항목 행 안에 두면 "시각은 정했는데 뭘 할지 아직 안 정한 날"에서 화면이 그 값을
+       통째로 숨긴다. 공유 카드는 요일 옆에 그리므로 두 화면이 어긋난다(코드 리뷰 지적). */
+    render(
+      <ScheduleReadView
+        weekStartDate={WEEK_START}
+        week={{
+          ...WEEK,
+          entries: [],
+          days: [
+            {
+              id: 1,
+              scheduledDate: "2026-07-30",
+              startTime: "21:00",
+              rest: false,
+              createdAt: 0,
+              lastUpdatedAt: 0,
+            },
+          ],
+        }}
+        games={[]}
+        currentWeek={WEEK_START}
+        today="2026-07-29"
+      />,
+    );
+    const day = screen.getByTestId("schedule-day-2026-07-30");
+    expect(within(day).getByText("21:00")).toBeInTheDocument();
+  });
+
   it("공지는 카드 미리보기보다 앞에 온다", () => {
     /* 순서가 뒤집히면 카드 안 공지(week-card__note)와 같은 문장이 200px 안에서 두 번 보인다
        — 그 중복을 없애려고 정한 순서라 문서 순서로 못박는다(schedule-read.tsx 주석). */

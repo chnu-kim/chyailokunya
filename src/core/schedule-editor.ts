@@ -180,9 +180,9 @@ export function draftHasContent(draft: WeekDraft): boolean {
 }
 
 /* 저장하면 달라지는가 — 미저장 이탈 경고와 "저장" 버튼 활성의 판단축이다. **저장될 값**끼리
-   비교한다: key·항목 배열 순서·빈 항목은 저장에 안 실리므로 무시하고, note·published 와
-   draftEntryInputs 의 정규형(제목 trim·시각 접힘)만 본다. 순서 무관이라 같은 날 두 항목의
-   입력 순서가 달라도 같은 주로 저장되면 dirty 가 아니다 — 정규 직렬화를 정렬해 비교한다. */
+   비교한다: key 와 빈 항목은 저장에 안 실리므로 무시하고, note·published·하루 속성과
+   draftEntryInputs 의 정규형(제목 trim)만 본다. **항목 순서는 이제 저장될 값이다** —
+   시각이 하루로 올라가며 배열 순서가 곧 표시·저장 순서가 됐다(canonicalEntries 주석). */
 export function isWeekDirty(a: WeekDraft, b: WeekDraft): boolean {
   if (a.note.trim() !== b.note.trim()) return true;
   if (a.published !== b.published) return true;
@@ -192,11 +192,14 @@ export function isWeekDirty(a: WeekDraft, b: WeekDraft): boolean {
   return canonicalEntries(a) !== canonicalEntries(b);
 }
 
+/* **순서를 지켜 비교한다.** 시각이 하루로 올라가기 전에는 하루 안 정렬이 시각으로 결정돼
+   배열 순서가 저장 결과에 안 남았고, 그래서 여기서 정렬해 "같은 날 두 항목의 입력 순서가 달라도
+   같은 주"로 봤다. 이제는 **배열 순서가 곧 표시 순서이자 저장 순서**다(entriesForDate·서버
+   ORDER BY 가 둘 다 입력 순) — 정렬해서 비교하면 순서만 바꾼 편집이 dirty 로 안 잡혀 저장
+   버튼이 잠긴 채 새 순서를 영영 못 남긴다(코드 리뷰 지적). */
 function canonicalEntries(draft: WeekDraft): string {
   return JSON.stringify(
-    draftEntryInputs(draft)
-      .map((e) => [e.scheduledDate, e.title, e.gameId] as const)
-      .sort((x, y) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1)),
+    draftEntryInputs(draft).map((e) => [e.scheduledDate, e.title, e.gameId] as const),
   );
 }
 

@@ -12,7 +12,7 @@ import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
 import type { GameOption } from "@/features/games/service";
 import { buildWeekCard } from "@/features/schedule/card";
 import type { WeekView } from "@/features/schedule/service";
-import { formatMD, timeLabel, WeekNav } from "./schedule-shared";
+import { formatMD, WeekNav } from "./schedule-shared";
 import { WeekCardDownload } from "./week-card-download";
 
 export function ScheduleReadView({
@@ -95,6 +95,16 @@ export function ScheduleReadView({
                       {isToday && <span className="chip chip--ink sched-day__today">오늘</span>}
                     </div>
                     <div className="sched-day__entries">
+                      {/* 하루 시각은 **항목 유무와 무관하게** 선다(코드 리뷰 지적) — 항목 행
+                          안에 두면 "시각은 정했는데 뭘 할지 아직 안 정한 날"에서 화면이 그 시각을
+                          통째로 숨겨, 같은 값을 요일 옆에 그리는 공유 카드와 어긋난다. 휴방인
+                          날엔 안 그린다(쉬는 날의 시작 시각은 뜻이 안 맞는다 — 편집기도 그때
+                          입력을 잠근다). */}
+                      {!rest && day?.startTime && (
+                        <p className="sched-day__time" data-od-id={`schedule-day-time-${date}`}>
+                          {day.startTime}
+                        </p>
+                      )}
                       {rest ? (
                         /* "휴방"과 "아직 미정"은 다른 사실이다(이슈 #117 결정 4) — 전에는 둘 다
                            "—" 라 팬이 구분을 못 했다. 값 칸이라 문장이 아니라 표기다(AGENTS). */
@@ -107,16 +117,10 @@ export function ScheduleReadView({
                           <span className="sr-only">일정 없음</span>
                         </p>
                       ) : (
-                        entries.map((e, j) => {
+                        entries.map((e) => {
                           const g = e.gameId != null ? gamesById.get(e.gameId) : undefined;
                           return (
                             <div key={e.id} className="sched-entry">
-                              {/* 시각은 그날 **첫 줄에만** 선다 — 하루의 속성이라 항목마다
-                                  반복하면 같은 값이 세로로 늘어선다. 뒷줄은 자리만 비워 제목이
-                                  세로로 정렬되게 둔다(빈 span 이 그 폭을 지킨다). */}
-                              <span className="sched-entry__time">
-                                {j === 0 ? timeLabel(day?.startTime ?? null) : ""}
-                              </span>
                               {g?.posterImageUrl && (
                                 <img
                                   className="sched-entry__poster"
