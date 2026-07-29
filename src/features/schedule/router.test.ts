@@ -818,10 +818,19 @@ describe("팬아트", () => {
   const KEY_A = "0189d1f0-3a4b-7c8d-9e0f-1a2b3c4d5e6f.png";
   const KEY_B = "0189d1f0-3a4b-7c8d-9e0f-aaaabbbbcccc.webp";
 
-  // R2 대신 지운 키를 모으는 스텁. 구조적 타이핑이라 어댑터가 필요 없다(service 의 FanartObjectStore).
-  function fanartSpy() {
+  /* R2 대신 "무엇이 올라와 있나"를 집합으로 들고 지운 키를 모으는 스텁. 구조적 타이핑이라
+     어댑터가 필요 없다(service 의 FanartObjectStore). 기본은 **아무거나 있다고 답한다** —
+     대부분의 테스트가 재려는 건 존재 확인이 아니라 조합·정리라, 매번 업로드를 흉내 내게 하면
+     의도가 흐려진다. 존재 확인을 재는 테스트만 `present` 를 좁혀 준다. */
+  function fanartSpy(present?: Set<string>) {
     const deleted: string[] = [];
-    return { deleted, store: { delete: async (key: string) => void deleted.push(key) } };
+    return {
+      deleted,
+      store: {
+        delete: async (key: string) => void deleted.push(key),
+        head: async (key: string) => (present ? (present.has(key) ? {} : null) : {}),
+      },
+    };
   }
 
   it("키와 표기를 저장하고 되읽는다", async () => {
@@ -1036,6 +1045,67 @@ describe("팬아트", () => {
         fanartCredit: "그린 사람",
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("올라와 있지 않은 그림은 못 건다 — 형식만 맞는 키를 믿지 않는다", async () => {
+    /* 형식 검증만 하고 저장하면 **발행된 주가 404 나는 그림을 영구히 가리킨다**(적대적 리뷰
+       no-ship). 위조 클라이언트뿐 아니라, ADR-0028 이 후속으로 적어 둔 고아 정리가 "업로드했지만
+       아직 저장 안 한" 객체를 지우는 순간 평범한 조작에서도 열리는 상태다.
+
+       거절이 **revision 을 안 올리는지**도 함께 잰다 — 청구 뒤로 미루면 실패가 그 주를 stale 하게
+       만들어 편집기가 멀쩡한 폼을 들고도 다음 저장에서 CONFLICT 를 받는다. */
+    const spy = fanartSpy(new Set([`fanart/${KEY_A}`])); // A 만 올라와 있다
+    const caller = createCaller(makeCtx({ authorities: admin, fanart: spy.store }));
+    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
+    await saveWeekAsEditor(caller, { weekStartDate: MON, days: [], entries });
+    const before = await caller.schedule.getWeek({ weekStartDate: MON });
+
+    await expect(
+      caller.schedule.saveWeek({
+        weekStartDate: MON,
+        revision: before.revision,
+        days: [],
+        entries,
+        fanartImageKey: KEY_B, // 형식은 완벽하지만 올린 적이 없다
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect((await caller.schedule.getWeek({ weekStartDate: MON })).revision).toBe(before.revision);
+
+    // 올라와 있는 키는 그대로 통과한다 — 확인이 정상 경로를 막지 않는다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+    });
+    expect((await caller.schedule.getWeek({ weekStartDate: MON })).fanartImageKey).toBe(KEY_A);
+  });
+
+  it("이미 걸린 키를 다시 보내면 저장소에 다시 묻지 않는다", async () => {
+    /* 편집기는 전체 교체라 같은 키를 매 저장마다 다시 싣는다 — 그때마다 R2 왕복을 더하면
+       평범한 저장이 비싸진다. 그 사이 객체가 사라졌다면 화면이 깨진 것으로 드러나고, 그건
+       이 검사가 막으려던 "우리가 방금 만든 잘못된 참조"와는 다른 사고다. */
+    const present = new Set([`fanart/${KEY_A}`]);
+    const spy = fanartSpy(present);
+    const caller = createCaller(makeCtx({ authorities: admin, fanart: spy.store }));
+    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+    });
+
+    // 객체가 사라져도(정리·수동 삭제) 같은 키를 다시 보내는 저장은 통과한다.
+    present.clear();
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+      fanartCredit: "그린 사람",
+    });
+    expect((await caller.schedule.getWeek({ weekStartDate: MON })).fanartCredit).toBe("그린 사람");
   });
 
   it("업로드가 낸 키가 아닌 값은 거절한다 — 외부 주소가 이 칸에 못 들어온다", async () => {

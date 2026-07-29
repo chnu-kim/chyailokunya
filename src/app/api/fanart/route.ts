@@ -32,6 +32,37 @@ function tooLarge(): Response {
   );
 }
 
+/* 본문을 **읽으면서** 상한을 건다 — `arrayBuffer()` 로 통째로 받으면 안 되는 이유가 있다:
+   Content-Length 가 없는 요청(청크 전송)은 위 헤더 검사를 그냥 지나치므로, 그때는 상한이
+   "R2 에 안 넣는다"만 보장하고 **메모리 보호로는 무의미해진다**(코드 리뷰 지적). 상한을 넘는
+   순간 읽기를 끊어 그 뒤 바이트를 아예 안 받는다.
+
+   넘으면 null 을 돌려준다(호출자가 413). 본문이 없으면 빈 배열이다 — "비어 있다"의 판정은
+   호출자가 한다(형식 판정과 같은 자리에서 갈려야 문구가 안 갈린다). */
+async function readCapped(req: Request): Promise<Uint8Array | null> {
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (isOverFanartLimit(total)) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
+}
+
 export async function POST(req: Request) {
   /* 크로스사이트 차단 → Origin 검증. tRPC 라우트와 같은 순서·같은 함수를 쓴다(request-guard 가
      정본) — 여기만 규칙이 다르면 "쓰기 경로 하나가 CSRF 방어에서 빠진" 상태가 된다. */
@@ -55,12 +86,12 @@ export async function POST(req: Request) {
   // 헤더로 먼저 거른다 — 상한을 넘는 요청의 바이트를 메모리에 올리지 않는다.
   if (isOverFanartLimit(Number(req.headers.get("content-length")))) return tooLarge();
 
-  const bytes = new Uint8Array(await req.arrayBuffer());
+  // 헤더는 클라이언트의 주장이다 — 실제로 읽으면서 다시 본다(그것만 믿으면 상한이 통째로 뚫린다).
+  const bytes = await readCapped(req);
+  if (bytes === null) return tooLarge();
   if (bytes.byteLength === 0) {
     return Response.json({ error: "파일이 비어 있습니다" }, { status: 400 });
   }
-  // 헤더는 클라이언트의 주장이다 — 실제 길이로 다시 본다(그것만 믿으면 상한이 통째로 뚫린다).
-  if (isOverFanartLimit(bytes.byteLength)) return tooLarge();
 
   /* **확장자도 Content-Type 도 안 믿는다** — 실제 바이트 앞머리로 판정한다(core/fanart.ts).
      그래서 우리 origin 에서 서빙되는 Content-Type 은 클라이언트가 보낸 값이 아니라 이 판정의

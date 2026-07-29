@@ -8,6 +8,7 @@ import { getWeekInput, publishWeekInput, saveWeekInput } from "./schema";
 import {
   EmptyWeekCannotPublish,
   FanartCreditWithoutImage,
+  FanartImageMissing,
   getWeekForEdit,
   publishWeek,
   ReferencedGameMissing,
@@ -59,6 +60,14 @@ export const scheduleRouter = router({
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "그림 없이 작가 표기만 넣을 수 없습니다.",
+          });
+        }
+        /* 올린 그림이 저장소에 없다. 사용자가 할 수 있는 일이 "다시 올린다" 하나뿐이라 문구도
+           그것만 말한다 — 원인(키 위조·정리된 객체)은 화면에서 구분할 수단이 없다. */
+        if (e instanceof FanartImageMissing) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "올린 그림을 찾을 수 없습니다. 다시 올려 주십시오.",
           });
         }
         throw e;

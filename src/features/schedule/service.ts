@@ -18,9 +18,12 @@ import type { PublishWeekInput, SaveWeekInput } from "./schema";
 
 /* 팬아트 객체 저장소로 난 좁은 창(ADR-0028). R2Bucket 이 구조적으로 이걸 만족하므로 별도
    어댑터가 필요 없고, 테스트는 스텁 하나를 준다 — 이 서비스가 R2 전역 타입에 매이지 않는다.
-   `delete` 하나뿐인 이유: 이 레이어가 바이트에 대해 할 일이 "버려진 것을 치운다" 뿐이다.
-   업로드는 Route Handler 가 맡는다(파일 바이트는 tRPC 경계를 안 건넌다). */
-export type FanartObjectStore = { delete(key: string): Promise<void> };
+   바이트를 읽고 쓰는 일은 없다(업로드·서빙은 Route Handler 가 맡는다) — 이 레이어는 참조가
+   가리키는 객체가 **있는지 묻고**(head), 아무도 안 가리키게 된 것을 **치운다**(delete). */
+export type FanartObjectStore = {
+  delete(key: string): Promise<void>;
+  head(key: string): Promise<unknown | null>;
+};
 
 /* 한 주의 뷰 — 메타(공지·발행) + 그 주 7일의 항목들. 편집 화면이 불러오고, 저장이 되돌려준다.
    주 자체는 저장하지 않고 날짜에서 유도하므로(결정 2) 항목은 week_id FK 가 아니라 scheduled_date
@@ -164,6 +167,18 @@ export class FanartCreditWithoutImage extends Error {
   constructor() {
     super("fanart credit without image");
     this.name = "FanartCreditWithoutImage";
+  }
+}
+
+/* 걸려는 그림이 R2 에 없다. 형식만 맞는 키를 그대로 저장하면 **발행된 주가 404 나는 그림을
+   영구히 가리킨다** — DB 는 멀쩡해 보이고 되돌릴 자리도 없다(적대적 리뷰가 no-ship 으로 잡은
+   자리). 도달 경로는 위조 클라이언트만이 아니다: ADR-0028 이 후속으로 적어 둔 "아무도 안
+   가리키는 객체 정리"가 바로 **업로드했지만 아직 저장 안 한** 객체를 지우므로, 그 작업이
+   생기는 순간 평범한 조작에서도 이 상태가 열린다. */
+export class FanartImageMissing extends Error {
+  constructor() {
+    super("fanart image missing");
+    this.name = "FanartImageMissing";
   }
 }
 
@@ -359,6 +374,15 @@ export async function saveWeek(
   /* **청구 전에** 계산한다 — 이게 던지면 revision 이 아직 안 올라 편집기가 멀쩡한 상태로
      오류만 받는다(nextFanart 주석). 청구 뒤로 미루면 거절이 그 주를 stale 하게 만든다. */
   const fanartNext = nextFanart(input, existing);
+  /* 새로 거는 그림은 **실제로 R2 에 있어야 한다.** 0단계의 gameId 확인과 같은 규율이다 —
+     참조 무결성을 경계에서 먼저 보고, 여기서 거절하면 청구 전이라 revision 이 안 오른다.
+
+     **키가 바뀔 때만** 묻는다: 이미 걸려 있던 키는 저장되던 시점에 확인됐으므로, 매 저장마다
+     R2 왕복을 하나씩 더할 이유가 없다(편집기는 전체 교체라 같은 키를 매번 다시 보낸다).
+     바인딩이 없으면(단위 테스트 기본값) 건너뛴다 — 확인할 저장소 자체가 없다. */
+  if (fanart && fanartNext.key !== null && fanartNext.key !== (existing?.fanartImageKey ?? null)) {
+    if (!(await fanart.head(fanartObjectKey(fanartNext.key)))) throw new FanartImageMissing();
+  }
   const publishedAt = input.published ? (existing?.publishedAt ?? now) : null;
   /* 저장 **전**의 주가 내용이 있었는가. claim placeholder 와 draft 유도가 같은 값을 봐야 한다
      — 갈리면 2단계 실패 시 placeholder 가 "행 없음"과 다른 뜻이 된다(아래 claim 주석). */
