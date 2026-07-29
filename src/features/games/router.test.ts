@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { authoritiesFor, type Authority } from "@/core/authorities";
-import { makeDb, scheduleEntries, scheduleWeeks } from "@/db";
+import { games, makeDb, scheduleDays, scheduleEntries, scheduleWeeks, type Db } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import { getPublishedWeek } from "@/features/schedule/service";
@@ -312,7 +312,6 @@ describe("games 라우터", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.scheduledDate).toBe("2026-07-22");
     expect(entries[0]!.title).toBe("엘든링"); // NOT NULL 이라 게임 제목을 싣는다
-    expect(entries[0]!.startTime).toBeNull(); // 시각은 /schedule 소관
   });
 
   /* last_insert_rowid() 회귀. **이 가정이 깨지면 항목이 엉뚱한 게임에 붙는 조용한 오염이라**
@@ -356,7 +355,7 @@ describe("games 라우터", () => {
     const db = makeDb(env.DB);
     await db
       .update(scheduleEntries)
-      .set({ startTime: "20:00", title: "엘든링 2회차" })
+      .set({ title: "엘든링 2회차" })
       .where(eq(scheduleEntries.gameId, row.id));
 
     const moved = await authed.games.update({
@@ -371,7 +370,6 @@ describe("games 라우터", () => {
     const entries = await db.select().from(scheduleEntries);
     expect(entries).toHaveLength(1); // 새로 만든 게 아니라 옮긴 것
     expect(entries[0]!.scheduledDate).toBe("2026-07-23");
-    expect(entries[0]!.startTime).toBe("20:00");
     expect(entries[0]!.title).toBe("엘든링 2회차");
   });
 
@@ -406,7 +404,7 @@ describe("games 라우터", () => {
     const db = makeDb(env.DB);
     await db
       .update(scheduleEntries)
-      .set({ startTime: "20:00", title: "엘든링 2회차 · 마지막 보스" })
+      .set({ title: "엘든링 2회차 · 마지막 보스" })
       .where(eq(scheduleEntries.gameId, row.id));
 
     await authed.games.update({
@@ -419,7 +417,6 @@ describe("games 라우터", () => {
 
     const entries = await db.select().from(scheduleEntries);
     expect(entries).toHaveLength(1);
-    expect(entries[0]!.startTime).toBe("20:00");
     expect(entries[0]!.title).toBe("엘든링 2회차 · 마지막 보스");
     expect(entries[0]!.gameId).toBeNull();
   });
@@ -571,7 +568,6 @@ describe("games 라우터", () => {
        두는 건 유출됐을 때 **무엇이** 새는지를 그대로 드러내기 위해서다. */
     await db.insert(scheduleEntries).values({
       scheduledDate: "2026-05-13",
-      startTime: "20:00",
       title: "레거시 방송 제목",
       gameId: row.id,
     });
@@ -866,5 +862,63 @@ describe("games 라우터", () => {
     expect(await authed.games.remove({ id: row.id })).toEqual({ deleted: true });
     expect(await createCaller(makeCtx()).games.list()).toEqual([]);
     expect(await authed.games.remove({ id: 9999 })).toEqual({ deleted: false });
+  });
+});
+
+describe("휴방인 날엔 플레이 날짜를 못 붙인다(ADR-0027)", () => {
+  /* 막지 않으면 쓰기는 성공하는데 보드가 그 날짜를 안 센다(lastPlayedExpr 가 휴방을 제외한다) —
+     관리자는 날짜를 넣었는데 화면엔 아무 일도 안 일어난 것처럼 보인다. AGENTS 의 "보드를 안
+     바꾸는 쓰기는 성공 신호가 하나도 없다"와 같은 자리라 이유를 말하고 거절한다. */
+  async function markRest(db: Db, date: string) {
+    await db.insert(scheduleDays).values({ scheduledDate: date, rest: true });
+  }
+
+  it("추가: 휴방인 날짜면 BAD_REQUEST 이고 게임 행도 안 생긴다", async () => {
+    const db = makeDb(env.DB);
+    await markRest(db, "2026-07-22");
+    const caller = createCaller(makeCtx({ authorities: admin }));
+
+    await expect(
+      caller.games.add({
+        categoryId: "c-rest",
+        categoryType: "GAME",
+        categoryValue: "휴방 게임",
+        posterImageUrl: null,
+        cleared: false,
+        clearedDate: null,
+        playedDate: "2026-07-22",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // 실패가 흔적을 안 남긴다 — 게임 행을 만들기 전에 막았다.
+    expect(await db.select().from(games)).toHaveLength(0);
+  });
+
+  it("수정: 휴방인 날짜로 옮기려 하면 BAD_REQUEST 이고 일정도 안 바뀐다", async () => {
+    const db = makeDb(env.DB);
+    await markRest(db, "2026-07-23");
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const added = await caller.games.add({
+      categoryId: "c-move",
+      categoryType: "GAME",
+      categoryValue: "옮길 게임",
+      posterImageUrl: null,
+      cleared: false,
+      clearedDate: null,
+      playedDate: "2026-07-22",
+    });
+
+    await expect(
+      caller.games.update({
+        id: added.id,
+        cleared: false,
+        clearedDate: null,
+        playedDate: "2026-07-23",
+        playedDateWas: "2026-07-22",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const entries = await db.select().from(scheduleEntries);
+    expect(entries.map((e) => e.scheduledDate)).toEqual(["2026-07-22"]);
   });
 });

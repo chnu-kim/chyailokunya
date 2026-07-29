@@ -17,11 +17,11 @@ const WEEK: WeekView = {
   publishedAt: 1753600000000,
   draft: false,
   revision: 1753600000000,
+  days: [],
   entries: [
     {
       id: 1,
       scheduledDate: "2026-07-27",
-      startTime: "19:00",
       title: "겟 투 워크 켠왕",
       gameId: null,
       createdAt: 1753600000000,
@@ -63,6 +63,35 @@ describe("ScheduleReadView 의 오늘 표시", () => {
     // 지난주·다음주를 열어 보는 흔한 조작에서 엉뚱한 칸이 오늘로 서면 안 된다.
     renderRead("2026-08-05");
     expect(screen.queryByText("오늘")).not.toBeInTheDocument();
+  });
+
+  it("항목이 없어도 그날 시각은 보인다 — 공유 카드와 같은 값을 말한다", () => {
+    /* 시각을 항목 행 안에 두면 "시각은 정했는데 뭘 할지 아직 안 정한 날"에서 화면이 그 값을
+       통째로 숨긴다. 공유 카드는 요일 옆에 그리므로 두 화면이 어긋난다(코드 리뷰 지적). */
+    render(
+      <ScheduleReadView
+        weekStartDate={WEEK_START}
+        week={{
+          ...WEEK,
+          entries: [],
+          days: [
+            {
+              id: 1,
+              scheduledDate: "2026-07-30",
+              startTime: "21:00",
+              rest: false,
+              createdAt: 0,
+              lastUpdatedAt: 0,
+            },
+          ],
+        }}
+        games={[]}
+        currentWeek={WEEK_START}
+        today="2026-07-29"
+      />,
+    );
+    const day = screen.getByTestId("schedule-day-2026-07-30");
+    expect(within(day).getByText("21:00")).toBeInTheDocument();
   });
 
   it("공지는 카드 미리보기보다 앞에 온다", () => {

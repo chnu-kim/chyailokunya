@@ -641,6 +641,18 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
 
       expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
       await expectTouchTarget(page.locator('[data-od-id="schedule-save"]'), "저장");
+      /* 하루의 속성 조작(이슈 #117) — 시각 입력과 휴방 토글. 이 스펙은 셀렉터를 **손으로**
+         열거하므로 본문에 인터랙티브 요소를 더하면 여기 같이 적어야 검사에 든다(AGENTS).
+         체크박스는 네이티브 상자가 18px 이라 라벨이 감싸 44 를 세운다 — 그 라벨을 재야 실제
+         히트 영역이 잡힌다(상자만 재면 늘 미달로 보인다). */
+      await expectTouchTarget(
+        page.locator('[data-od-id^="schedule-day-time-"]').first(),
+        "하루 시작 시각",
+      );
+      await expectTouchTarget(
+        page.locator('[data-od-id^="schedule-day-rest-"]').first().locator("xpath=.."),
+        "휴방 토글",
+      );
       await expectTouchTarget(
         page.locator('[data-od-id="schedule-publish-toggle"]'),
         "발행 상태 전환",

@@ -167,8 +167,13 @@ export const games = sqliteTable(
    scheduled_date 는 "달력의 하루"라 text 'YYYY-MM-DD'(순간이 아니다 — AGENTS.md 명명 규약,
    games.cleared_date 와 같은 근거). 주(week)는 저장하지 않고 이 날짜에서 유도한다(결정 2,
    core/calendar.weekStartOf) — 항목에 week_id FK 를 두면 날짜와 어긋난 주가 저장 가능해진다.
-   start_time 은 'HH:MM' KST 라벨이고 nullable(시각 미정 편성 허용, 결정 8). 하루에 항목이
-   여럿 설 수 있다(UNIQUE 없음 — "오후 저챗 + 밤 게임"을 그대로).
+   하루에 항목이 여럿 설 수 있다(UNIQUE 없음).
+
+   **start_time 은 여기 없다 — 시각은 하루의 속성이다**(이슈 #117, #56 결정 8 을 뒤집었다).
+   옛 근거는 "오후 저챗 + 밤 게임" 편성을 담는 것이었는데 그런 편성이 실재하지 않는 것으로
+   확인됐다(2026-07-29). 하루에 방송은 하나고 항목은 그 방송에서 할 것들의 목록이라, 항목마다
+   시각을 두면 같은 값을 하루 안에서 반복해 적고 서로 다른 값이 들어갈 자리가 열린다.
+   시각의 새 자리는 아래 schedule_days 다.
 
    game_id → games.id ON DELETE SET NULL: 게임을 보드에서 떼도 그날 방송이 있었다는 사실은
    남는다(항목은 자유 제목 title 로 자립한다). 항목 종류 컬럼은 두지 않는다(결정 9) —
@@ -177,9 +182,39 @@ export const games = sqliteTable(
 export const scheduleEntries = sqliteTable("schedule_entries", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   scheduledDate: text("scheduled_date").notNull(),
-  startTime: text("start_time"),
   title: text("title").notNull(),
   gameId: integer("game_id").references(() => games.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+  lastUpdatedAt: lastUpdatedAt(),
+});
+
+/* 하루의 속성(이슈 #117). 방송 시작 시각과 휴방 여부 — 둘 다 **항목이 아니라 하루**에 달린
+   사실이다. 항목 테이블에 두면 하루 안에서 같은 값이 반복되고, 주 메타에 두면 7일치 컬럼이
+   필요하다. 그래서 하루가 개체가 된다.
+
+   scheduled_date 는 형제(schedule_entries)와 같은 이름·같은 타입이다 — 계속 조인할 자리라
+   이름이 갈리면 매번 매핑을 기억해야 한다. UNIQUE: 하루 = 한 행.
+
+   start_time 은 'HH:MM' KST 라벨이고 nullable(NULL = 시각 미정 — 편성은 있는데 몇 시인지 아직
+   안 정한 정상 상태다). rest 는 휴방(쉬기로 정한 날).
+
+   ── **행이 없는 것 = 기본값**(결정 3) ─────────────────────────────────────────────
+   `start_time NULL` + `rest 0` 은 행이 아예 없는 것과 **같은 뜻**이고, 그래서 서비스는 기본값인
+   날의 행을 아예 안 만든다. ADR-0024 가 비싸게 배운 규율이다(#64): 부재를 도메인 상태로 쓰면
+   그 행이 다른 이유로 필요해지는 순간 겸직이 터진다 — 여기선 그 반대로 **기본값이 부재와 같은
+   뜻이 되게** 컬럼을 잡아, 행을 언제 만들든 도메인이 안 흔들리게 한다.
+
+   ── 휴방과 항목의 공존은 CHECK 로 못 막는다 ────────────────────────────────────────
+   둘이 다른 테이블이라 SQLite 제약이 닿지 않는다. **표시에서 휴방이 이긴다**(결정 5) — 저장은
+   그대로 두고 화면에서만 가리므로, 실수로 휴방을 켰다 꺼면 항목이 그대로 돌아온다. 지우는
+   쪽을 택하면 그 실수가 복구 불가가 된다. 알고 수용한 한계라 여기 적어 둔다. */
+export const scheduleDays = sqliteTable("schedule_days", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  scheduledDate: text("scheduled_date").notNull().unique(),
+  startTime: text("start_time"),
+  // boolean 모드 — 0/1 로 저장하되 타입은 boolean 으로 흐른다(games.cleared 와 같은 컨벤션).
+  // 기본 false 가 "행 없음"과 같은 뜻이라, 행 생성이 도메인 상태를 안 흔든다.
+  rest: integer("rest", { mode: "boolean" }).notNull().default(false),
   createdAt: createdAt(),
   lastUpdatedAt: lastUpdatedAt(),
 });
@@ -357,6 +392,8 @@ export type GameRow = typeof games.$inferSelect;
 export type NewGameRow = typeof games.$inferInsert;
 export type ScheduleEntry = typeof scheduleEntries.$inferSelect;
 export type NewScheduleEntry = typeof scheduleEntries.$inferInsert;
+export type ScheduleDay = typeof scheduleDays.$inferSelect;
+export type NewScheduleDay = typeof scheduleDays.$inferInsert;
 export type ScheduleWeek = typeof scheduleWeeks.$inferSelect;
 export type NewScheduleWeek = typeof scheduleWeeks.$inferInsert;
 export type GameSuggestionRow = typeof gameSuggestions.$inferSelect;

@@ -5,6 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
 import { isAborted } from "@/core/error-message";
 import {
+  dayOf,
+  draftDayInputs,
+  draftHasContent,
   entriesForDate,
   isWeekDirty,
   type DraftEntry,
@@ -53,10 +56,15 @@ function weekToDraft(week: WeekView): WeekDraft {
     entries: week.entries.map((e) => ({
       key: `db-${e.id}`,
       scheduledDate: e.scheduledDate,
-      startTime: e.startTime ?? "",
       title: e.title,
       gameId: e.gameId,
     })),
+    /* 서버는 기본값이 아닌 날만 준다 — 나머지는 키가 없는 채로 두면 dayOf 가 기본값을 준다
+       (core 의 EMPTY_DAY). 여기서 7일을 다 채우면 dirty 비교가 "{}"와 달라져 아무것도 안 바꾼
+       주가 저장 가능해 보인다. */
+    days: Object.fromEntries(
+      week.days.map((d) => [d.scheduledDate, { startTime: d.startTime ?? "", rest: d.rest }]),
+    ),
   };
 }
 
@@ -136,7 +144,10 @@ export function ScheduleEditor({
      canUnpublish 는 **dirty 를 안 본다** — 공개를 거두는 건 저장된 값을 새로 공개하는 게
      아니라서 그 원칙이 적용될 대상이 없다(머신의 canUnpublish 와 같은 비대칭, 그 파일 주석
      참고). 급히 공개를 내려야 하는데 마침 다른 걸 고치던 중이라 막히면 안전이 아니라 방해다. */
-  const canPublish = !dirty && revision !== null && baseline.entries.length > 0;
+  /* "빈 주"는 항목 0 **그리고** 휴방 0 이다(이슈 #117 결정 9) — 7일을 전부 휴방으로 정한 주는
+     항목이 없어도 관리자가 짠 결과라 발행할 만하다. 서버의 같은 가드(weekHasContent)와 규칙을
+     맞춘다: 갈리면 화면은 버튼을 열어 주는데 서버가 거절한다. */
+  const canPublish = !dirty && revision !== null && draftHasContent(baseline);
   const canUnpublish = revision !== null;
 
   /* 다운로드 카드는 **저장된 상태**(baseline)에서만 만든다 — draft(화면에 입력 중인, 아직
@@ -155,7 +166,12 @@ export function ScheduleEditor({
   const card = useMemo(
     () =>
       baseline.published
-        ? buildWeekCard({ weekStartDate, note: baseline.note, entries: baseline.entries })
+        ? buildWeekCard({
+            weekStartDate,
+            note: baseline.note,
+            entries: baseline.entries,
+            days: draftDayInputs(baseline),
+          })
         : null,
     [weekStartDate, baseline],
   );
@@ -248,6 +264,7 @@ export function ScheduleEditor({
         <ol className="sched__days" data-od-id="schedule-days">
           {days.map((date, i) => {
             const dayEntries = entriesForDate(draft, date);
+            const day = dayOf(draft, date);
             return (
               <li key={date} className="sched-day" data-od-id={`schedule-day-${date}`}>
                 <div className="sched-day__label">
@@ -255,6 +272,37 @@ export function ScheduleEditor({
                   <span className="sched-day__md">{formatMD(date)}</span>
                 </div>
                 <div className="sched-day__entries">
+                  {/* 하루의 속성(이슈 #117) — 시각과 휴방. 항목 행이 아니라 여기 한 번만 선다.
+                      휴방이면 시각 입력을 잠근다: 쉬는 날에 시작 시각을 붙이는 건 뜻이 안 맞고,
+                      잠가 두면 그 조합을 만들 길 자체가 없어진다(표시에서 휴방이 이긴다는
+                      결정 5 를 입력 단계에서 미리 지킨다). */}
+                  <div className="sched-day__meta">
+                    <label className="sr-only" htmlFor={`${date}-time`}>
+                      {formatMD(date)} 방송 시작 시각
+                    </label>
+                    <input
+                      id={`${date}-time`}
+                      className="sched-field sched-day__time"
+                      type="time"
+                      value={day.startTime}
+                      disabled={day.rest}
+                      data-od-id={`schedule-day-time-${date}`}
+                      onChange={(ev) =>
+                        send({ type: "DAY_PATCHED", date, patch: { startTime: ev.target.value } })
+                      }
+                    />
+                    <label className="sched-day__rest-toggle">
+                      <input
+                        type="checkbox"
+                        checked={day.rest}
+                        data-od-id={`schedule-day-rest-${date}`}
+                        onChange={(ev) =>
+                          send({ type: "DAY_PATCHED", date, patch: { rest: ev.target.checked } })
+                        }
+                      />
+                      휴방
+                    </label>
+                  </div>
                   {dayEntries.map((e) => (
                     <div
                       className="sched-entry-block"
@@ -311,18 +359,6 @@ export function ScheduleEditor({
                           value={e.title}
                           data-od-id={`schedule-entry-title-${e.key}`}
                           onChange={(ev) => patch(e.key, { title: ev.target.value })}
-                        />
-
-                        <label className="sr-only" htmlFor={`${e.key}-time`}>
-                          시각 (선택)
-                        </label>
-                        <input
-                          id={`${e.key}-time`}
-                          className="sched-field sched-row__time"
-                          type="time"
-                          value={e.startTime}
-                          data-od-id={`schedule-entry-time-${e.key}`}
-                          onChange={(ev) => patch(e.key, { startTime: ev.target.value })}
                         />
 
                         <button
@@ -406,14 +442,14 @@ export function ScheduleEditor({
                 저장하지 않은 변경이 있어 발행할 수 없습니다. 먼저 저장해 주십시오.
               </p>
             )}
-            {!baseline.published && !dirty && baseline.entries.length === 0 && (
-              <p className="sched-status__hint">항목이 있어야 발행할 수 있습니다.</p>
+            {!baseline.published && !dirty && !draftHasContent(baseline) && (
+              <p className="sched-status__hint">항목이나 휴방이 있어야 발행할 수 있습니다.</p>
             )}
             {/* 이관된 레거시 주(항목은 있지만 schedule_weeks 메타가 없어 revision 이 null)가
                이 경로다 — dirty 도 아니고 entries 도 있지만 저장된 적이 없어 발행 대상이 될
                revision 자체가 없다(canPublish 가드와 같은 조건, 그 주석 참고). 무언가 고쳐 한 번
                저장해야 다음부터 발행할 수 있다. */}
-            {!baseline.published && !dirty && baseline.entries.length > 0 && revision === null && (
+            {!baseline.published && !dirty && draftHasContent(baseline) && revision === null && (
               <p className="sched-status__hint">
                 이 주는 아직 저장된 적이 없습니다. 무언가 고친 뒤 저장하면 발행할 수 있습니다.
               </p>

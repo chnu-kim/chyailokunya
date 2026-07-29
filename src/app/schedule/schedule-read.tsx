@@ -12,7 +12,7 @@ import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
 import type { GameOption } from "@/features/games/service";
 import { buildWeekCard } from "@/features/schedule/card";
 import type { WeekView } from "@/features/schedule/service";
-import { formatMD, timeLabel, WeekNav } from "./schedule-shared";
+import { formatMD, WeekNav } from "./schedule-shared";
 import { WeekCardDownload } from "./week-card-download";
 
 export function ScheduleReadView({
@@ -33,6 +33,8 @@ export function ScheduleReadView({
 }) {
   const days = weekDates(toIsoDate(weekStartDate));
   const gamesById = new Map(games.map((g) => [g.id, g]));
+  /* 하루 속성은 기본값이 아닌 날만 내려온다 — 없으면 "시각 미정 · 휴방 아님"이다(db/schema.ts). */
+  const dayByDate = new Map((week?.days ?? []).map((d) => [d.scheduledDate, d]));
 
   return (
     <section className="sched" data-od-id="schedule">
@@ -71,7 +73,11 @@ export function ScheduleReadView({
 
             <ol className="sched__days" data-od-id="schedule-days">
               {days.map((date, i) => {
-                const entries = week.entries.filter((e) => e.scheduledDate === date);
+                const day = dayByDate.get(date);
+                const rest = day?.rest ?? false;
+                /* 휴방인 날은 항목을 안 그린다 — 표시에서 휴방이 이긴다(이슈 #117 결정 5).
+                   두 테이블이라 DB CHECK 로 공존을 못 막으므로 화면이 규칙을 세운다. */
+                const entries = rest ? [] : week.entries.filter((e) => e.scheduledDate === date);
                 const isToday = date === today;
                 return (
                   <li
@@ -89,7 +95,23 @@ export function ScheduleReadView({
                       {isToday && <span className="chip chip--ink sched-day__today">오늘</span>}
                     </div>
                     <div className="sched-day__entries">
-                      {entries.length === 0 ? (
+                      {/* 하루 시각은 **항목 유무와 무관하게** 선다(코드 리뷰 지적) — 항목 행
+                          안에 두면 "시각은 정했는데 뭘 할지 아직 안 정한 날"에서 화면이 그 시각을
+                          통째로 숨겨, 같은 값을 요일 옆에 그리는 공유 카드와 어긋난다. 휴방인
+                          날엔 안 그린다(쉬는 날의 시작 시각은 뜻이 안 맞는다 — 편집기도 그때
+                          입력을 잠근다). */}
+                      {!rest && day?.startTime && (
+                        <p className="sched-day__time" data-od-id={`schedule-day-time-${date}`}>
+                          {day.startTime}
+                        </p>
+                      )}
+                      {rest ? (
+                        /* "휴방"과 "아직 미정"은 다른 사실이다(이슈 #117 결정 4) — 전에는 둘 다
+                           "—" 라 팬이 구분을 못 했다. 값 칸이라 문장이 아니라 표기다(AGENTS). */
+                        <p className="sched-day__off" data-od-id={`schedule-day-rest-${date}`}>
+                          휴방
+                        </p>
+                      ) : entries.length === 0 ? (
                         <p className="sched-day__rest">
                           <span aria-hidden="true">—</span>
                           <span className="sr-only">일정 없음</span>
@@ -99,7 +121,6 @@ export function ScheduleReadView({
                           const g = e.gameId != null ? gamesById.get(e.gameId) : undefined;
                           return (
                             <div key={e.id} className="sched-entry">
-                              <span className="sched-entry__time">{timeLabel(e.startTime)}</span>
                               {g?.posterImageUrl && (
                                 <img
                                   className="sched-entry__poster"

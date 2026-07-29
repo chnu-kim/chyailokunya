@@ -3,7 +3,7 @@
 
 import { asc, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { isPlayDateEditable } from "@/core/games";
-import { games, scheduleEntries, scheduleWeeks, type Db, type GameRow } from "@/db";
+import { games, scheduleDays, scheduleEntries, scheduleWeeks, type Db, type GameRow } from "@/db";
 import { claimWeek } from "@/features/schedule/service";
 import type { AddGameInput, UpdateGameInput } from "./schema";
 
@@ -18,7 +18,8 @@ export type GameCard = GameRow & { lastPlayed: string | null };
    의 SQL 짝). strftime('%w') 는 일=0‥토=6 이라 (dow+6)%7 일을 빼면 월요일이 나온다. */
 const entryWeekStart = sql`date(${scheduleEntries.scheduledDate}, '-' || ((strftime('%w', ${scheduleEntries.scheduledDate}) + 6) % 7) || ' days')`;
 
-/* 유도된 플레이 날짜 = **초안이 아닌 주**에 속한 항목들의 MAX(scheduled_date)다(ADR-0022).
+/* 유도된 플레이 날짜 = **초안이 아닌 주**에 속하고 **휴방이 아닌 날**의 항목들의
+   MAX(scheduled_date)다(ADR-0022 · ADR-0027).
    보드는 축 하나(draft)만 읽는다 — 공개 여부(published_at)는 /schedule 의 축이지 보드의 축이
    아니다. 짜는 중인 다음 주 편성의 게임이 보드에 미래 날짜로 새는 걸 여기서 막는다
    (이슈 #56 "놓치면 늦게 터지는 자리 1").
@@ -26,10 +27,17 @@ const entryWeekStart = sql`date(${scheduleEntries.scheduledDate}, '-' || ((strft
    coalesce 가 핵심이다: LEFT JOIN 미스(주 메타 행이 없는 이관된 과거 아카이브·직접 넣은 테스트
    데이터)가 기본값 0 과 **같은 뜻으로 접힌다.** 그래서 "행이 없다"는 인프라 사실이 도메인 규칙을
    겸직하지 않고, 청구(claimWeek)가 행을 만들어도 보드가 안 흔들린다 — 이슈 #64 가 연 자리다.
-   같은 SQL 을 select·orderBy·단건 유도가 공유해 세 자리의 경계가 갈리지 않게 한다. */
+   같은 SQL 을 select·orderBy·단건 유도가 공유해 세 자리의 경계가 갈리지 않게 한다.
+
+   **휴방인 날의 항목은 안 센다**(코드 리뷰가 잡은 자리). 휴방과 항목의 공존은 두 테이블이라
+   CHECK 로 못 막고, /schedule 은 "표시에서 휴방이 이긴다"로 항목을 가린다(ADR-0027 결정 5).
+   그 규칙을 여기서 안 따르면 **두 공개 화면이 서로 다른 말을 한다** — 주간표는 그날을 "휴방"
+   이라 하는데 게임 보드는 같은 날짜를 그 게임의 플레이 날짜로 띄운다. 관리자가 한 행동은
+   "그날 쉬기로 했다" 하나뿐인데. schedule_days 도 coalesce 로 접는다 — 행이 없으면 휴방이
+   아니다(기본값 = 부재, db/schema.ts). */
 const lastPlayedExpr = sql<
   string | null
->`max(case when coalesce(${scheduleWeeks.draft}, 0) = 0 then ${scheduleEntries.scheduledDate} end)`;
+>`max(case when coalesce(${scheduleWeeks.draft}, 0) = 0 and coalesce(${scheduleDays.rest}, 0) = 0 then ${scheduleEntries.scheduledDate} end)`;
 
 /* 공개 읽기. 보드는 "언제 플레이했나" 순이다 — 최근 플레이가 위로 온다. 일정 항목이 없는
    게임(lastPlayed null)은 시간축 위에 자리가 없으므로 뒤로 몰고, 그 안에서만 추가 순
@@ -49,6 +57,7 @@ export function listGames(db: Db): Promise<GameCard[]> {
     .from(games)
     .leftJoin(scheduleEntries, eq(scheduleEntries.gameId, games.id))
     .leftJoin(scheduleWeeks, eq(scheduleWeeks.weekStartDate, entryWeekStart))
+    .leftJoin(scheduleDays, eq(scheduleDays.scheduledDate, scheduleEntries.scheduledDate))
     .groupBy(games.id)
     .orderBy(sql`${lastPlayedExpr} IS NULL`, desc(lastPlayedExpr), desc(games.createdAt));
 }
@@ -78,6 +87,7 @@ async function gameCard(db: Db, row: GameRow): Promise<GameCard> {
     .select({ lastPlayed: lastPlayedExpr })
     .from(scheduleEntries)
     .leftJoin(scheduleWeeks, eq(scheduleWeeks.weekStartDate, entryWeekStart))
+    .leftJoin(scheduleDays, eq(scheduleDays.scheduledDate, scheduleEntries.scheduledDate))
     .where(eq(scheduleEntries.gameId, row.id));
   return { ...row, lastPlayed: agg?.lastPlayed ?? null };
 }
@@ -102,6 +112,22 @@ export class MultiDayScheduleLocked extends Error {
   }
 }
 
+/* 게임 폼이 **휴방으로 표시된 날**에 플레이 날짜를 붙이려 했다. 라우터가 BAD_REQUEST 로 올린다.
+
+   막지 않으면 쓰기는 성공하는데 보드가 그 날짜를 안 센다(lastPlayedExpr 가 휴방을 제외한다) —
+   관리자는 날짜를 넣었는데 화면엔 아무 일도 안 일어난 것처럼 보인다. AGENTS 의 "보드를 안 바꾸는
+   쓰기는 성공 신호가 하나도 없다"와 정확히 같은 자리라, 조용한 무시 대신 이유를 말하고 거절한다.
+
+   자동으로 휴방을 풀지 않는 이유: 그러면 게임 폼의 저장이 **주간표를 바꾼다**(팬이 보는 화면에서
+   "휴방"이 사라진다). 게임 폼은 그 권한을 주장한 적이 없고, 되돌릴 곳도 여기가 아니다 —
+   사용자가 /schedule 에서 먼저 결정하게 한다(적대적 리뷰 지적). */
+export class PlayDateOnRestDay extends Error {
+  constructor() {
+    super("play date falls on a rest day");
+    this.name = "PlayDateOnRestDay";
+  }
+}
+
 /* 폼이 열린 뒤 그 게임의 일정 날짜가 딴 데서 바뀌었다. 라우터가 CONFLICT 로 올린다.
    덮어쓰지 않고 거절하는 게 핵심이다 — 그냥 쓰면 남의 일정 작업이 조용히 되돌아간다
    (적대적 리뷰 6라운드). saveWeek 의 revision CONFLICT 와 같은 처방: 새로고침해서 지금 값
@@ -111,6 +137,15 @@ export class PlayDateChangedElsewhere extends Error {
     super("play date changed after the form was opened");
     this.name = "PlayDateChangedElsewhere";
   }
+}
+
+/* 그 날짜가 휴방으로 표시돼 있나. 행이 없으면 휴방이 아니다(기본값 = 부재, db/schema.ts). */
+async function isRestDay(db: Db, date: string): Promise<boolean> {
+  const [row] = await db
+    .select({ rest: scheduleDays.rest })
+    .from(scheduleDays)
+    .where(eq(scheduleDays.scheduledDate, date));
+  return row?.rest === true;
 }
 
 /* 이 게임에 걸린 일정 항목 — **발행 경계를 걸지 않는다.** lastPlayedExpr 와 일부러 다르다:
@@ -171,9 +206,12 @@ export async function addGame(db: Db, input: AddGameInput): Promise<GameCard> {
     return { ...row!, lastPlayed: null };
   }
 
+  /* 휴방인 날엔 못 붙인다 — 붙여도 보드가 그 날짜를 안 세서(lastPlayedExpr) 관리자에겐 저장이
+     조용히 무시된 것처럼 보인다. 게임 행을 만들기 **전에** 막아 실패가 흔적을 안 남긴다. */
+  if (await isRestDay(db, input.playedDate)) throw new PlayDateOnRestDay();
+
   const insertEntry = db.insert(scheduleEntries).values({
     scheduledDate: input.playedDate,
-    startTime: null,
     title: input.categoryValue,
     gameId: sql<number>`last_insert_rowid()`,
   });
@@ -251,6 +289,14 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
     throw new PlayDateChangedElsewhere();
   }
 
+  /* 휴방인 날로 옮기려는 저장도 막는다(addGame 과 같은 이유·같은 문구) — 통과시키면 쓰기는
+     성공하는데 보드가 그 날짜를 안 세, 관리자가 넣은 값이 화면에서 사라진 것처럼 보인다.
+     CAS 뒤에 두는 이유는 오류 우선순위다: 이미 stale 해진 요청이라면 "휴방이라 안 된다"가
+     아니라 "다른 곳에서 먼저 바꿨다"가 진짜 원인이다(publishWeek 의 같은 배치와 같은 판단). */
+  if (touchesSchedule && input.playedDate != null && (await isRestDay(db, input.playedDate))) {
+    throw new PlayDateOnRestDay();
+  }
+
   const updateRow = db
     .update(games)
     .set({ cleared: input.cleared, clearedDate: input.clearedDate })
@@ -293,7 +339,6 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
               .where(eq(scheduleEntries.id, current.id))
           : db.insert(scheduleEntries).values({
               scheduledDate: input.playedDate!,
-              startTime: null,
               title: rows[0].categoryValue,
               gameId: input.id,
             });

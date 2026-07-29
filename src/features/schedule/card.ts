@@ -17,7 +17,11 @@ import { formatMD, toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar"
 export type WeekCardSource = {
   weekStartDate: string;
   note: string | null;
-  entries: { scheduledDate: string; startTime: string | null; title: string }[];
+  entries: { scheduledDate: string; title: string }[];
+  /* 하루의 속성(이슈 #117). 기본값인 날은 안 실려 오므로 날짜로 찾아 없으면 기본값으로 그린다 —
+     "행이 없는 것 = 시각 미정 · 휴방 아님"(db/schema.ts). 여기서도 부분집합 구조 타입이라
+     WeekView.days(ScheduleDay[])도 WeekDraft 쪽 조립본도 그대로 만족한다. */
+  days: { scheduledDate: string; startTime: string | null; rest: boolean }[];
 };
 
 /* 한 칸에 다 못 그리는 날의 상한. 실사용은 하루 1~2건(결정 8 의 예 — "오후 저챗 + 밤 게임")
@@ -29,11 +33,17 @@ export type WeekCardSource = {
    같이 물려받는다. 이 DOM 렌더에서 다시 눈으로 확인해 바뀔 수 있다. */
 const MAX_ENTRIES_PER_DAY = 4;
 
-export type WeekCardEntry = { time: string | null; title: string };
+export type WeekCardEntry = { title: string };
 
 export type WeekCardDay = {
   dow: string;
   date: string;
+  /* 그날 방송 시작 시각(없으면 미정). 항목이 아니라 **하루**에 달린다(이슈 #117) — 카드도 요일
+     옆에 한 번만 그린다. */
+  time: string | null;
+  /* 쉬기로 정한 날. "아직 미정"(항목 0 · rest false)과 다른 사실이라 카드가 달리 그린다 —
+     빈 칸은 "아직 안 정함", 휴방은 "안 합니다"다. */
+  rest: boolean;
   entries: WeekCardEntry[];
   /* 위 상한을 넘겨 안 그린 항목 수. 0 이면 칩을 안 그린다 — "+0개"는 있으나 마나가 아니라
      없는 게 맞다(빈 상태를 굳이 표기하지 않는 관례, schedule-read 의 "—"와 다른 결). */
@@ -58,17 +68,22 @@ export type WeekCardData = {
    (서버의 weekBounds)와 여기의 days 가 같은 정규화를 거쳐 항상 같은 7일을 가리킨다. */
 export function buildWeekCard(source: WeekCardSource): WeekCardData {
   const days = weekDates(toIsoDate(source.weekStartDate));
+  const dayByDate = new Map(source.days.map((d) => [d.scheduledDate, d]));
   return {
     rangeLabel: `${formatMD(days[0]!)} – ${formatMD(days[6]!)}`,
     note: source.note,
     days: days.map((date, i) => {
-      const dayEntries = source.entries.filter((e) => e.scheduledDate === date);
+      const day = dayByDate.get(date);
+      /* 휴방인 날은 항목을 **안 그린다**(이슈 #117 결정 5 — 표시에서 휴방이 이긴다). 두 테이블
+         이라 DB CHECK 로는 공존을 못 막으므로 화면이 규칙을 세운다. 저장은 그대로 두므로 휴방을
+         껐다 켜도 항목이 돌아온다 — 지우는 쪽을 택하면 그 실수가 복구 불가가 된다. */
+      const dayEntries = day?.rest ? [] : source.entries.filter((e) => e.scheduledDate === date);
       return {
         dow: WEEKDAY_LABELS[i]!,
         date: formatMD(date),
-        entries: dayEntries
-          .slice(0, MAX_ENTRIES_PER_DAY)
-          .map((e) => ({ time: e.startTime, title: e.title })),
+        time: day?.rest ? null : (day?.startTime ?? null),
+        rest: day?.rest ?? false,
+        entries: dayEntries.slice(0, MAX_ENTRIES_PER_DAY).map((e) => ({ title: e.title })),
         overflow: Math.max(0, dayEntries.length - MAX_ENTRIES_PER_DAY),
       };
     }),

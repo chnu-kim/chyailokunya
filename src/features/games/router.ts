@@ -8,6 +8,7 @@ import {
   addGame,
   listGames,
   MultiDayScheduleLocked,
+  PlayDateOnRestDay,
   playEntriesOf,
   PlayDateChangedElsewhere,
   removeGame,
@@ -38,6 +39,14 @@ export const gamesRouter = router({
         if (isUniqueViolation(e)) {
           throw new TRPCError({ code: "CONFLICT", message: "이미 보드에 있는 게임입니다." });
         }
+        /* 추가에도 같은 거절이 있어야 한다 — update 에만 두면 "새 게임 + 휴방인 날짜"가 그대로
+           통과해 보드가 안 세는 항목이 생긴다(서비스 쪽 addGame 이 이미 던진다). */
+        if (e instanceof PlayDateOnRestDay) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "그날은 휴방으로 표시돼 있습니다 — 일정에서 휴방을 먼저 풀어 주십시오.",
+          });
+        }
         throw e;
       }
     }),
@@ -62,6 +71,14 @@ export const gamesRouter = router({
         /* 폼이 열린 뒤 일정이 딴 데서 바뀌었다. **저장되지 않았다고 단정할 수 있다** — 서버가
            쓰기 전에 막았다. 그냥 재시도하면 같은 stale 값이라 또 걸리므로 새로고침을 시킨다
            (schedule 편집기의 CONFLICT 문구와 같은 처방). */
+        /* 휴방으로 표시된 날엔 플레이 날짜를 못 붙인다. 사용자가 손쓸 곳은 /schedule 이라
+           그리로 가리킨다(MultiDayScheduleLocked 와 같은 결). */
+        if (e instanceof PlayDateOnRestDay) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "그날은 휴방으로 표시돼 있습니다 — 일정에서 휴방을 먼저 풀어 주십시오.",
+          });
+        }
         if (e instanceof PlayDateChangedElsewhere) {
           throw new TRPCError({
             code: "CONFLICT",

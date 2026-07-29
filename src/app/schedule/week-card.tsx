@@ -58,12 +58,19 @@ export function WeekCard({ card, ref }: { card: WeekCardData; ref?: React.Ref<HT
                   {day.dow}
                 </span>
                 <span className="week-card__date">{day.date}</span>
+                {/* 시각은 요일 옆에 **한 번만** 선다 — 하루의 속성이라(이슈 #117) 항목마다
+                    반복하면 같은 값이 칸 안에서 여러 번 나온다. */}
+                {day.time ? <span className="week-card__time">{day.time}</span> : null}
               </div>
 
               <div className="week-card__day-rule" aria-hidden="true" />
 
               <div className="week-card__entries">
-                {day.entries.length === 0 ? (
+                {day.rest ? (
+                  /* 휴방은 "아직 안 정함"(빈 칸)과 다른 사실이라 글자로 말한다 — 카페·트위터에
+                     올라간 카드에서 그 둘이 같은 모양이면 팬이 "정해지면 올라오겠지"로 읽는다. */
+                  <p className="week-card__rest">휴방</p>
+                ) : day.entries.length === 0 ? (
                   <p className="week-card__empty">
                     <span aria-hidden="true">{EMPTY_DAY_MARK}</span>
                     <span className="sr-only">일정 없음</span>
@@ -72,9 +79,6 @@ export function WeekCard({ card, ref }: { card: WeekCardData; ref?: React.Ref<HT
                   day.entries.map((entry, j) => (
                     <div key={j} className="week-card__entry">
                       <p className="week-card__entry-title">{entry.title}</p>
-                      {entry.time ? (
-                        <span className="week-card__entry-time">{entry.time}</span>
-                      ) : null}
                     </div>
                   ))
                 )}

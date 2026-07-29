@@ -14,7 +14,7 @@ import {
    정확히 부모에게 되돌리는가다. */
 
 function draft(over: Partial<WeekDraft> = {}): WeekDraft {
-  return { note: "", published: false, entries: [], ...over };
+  return { note: "", published: false, entries: [], days: {}, ...over };
 }
 
 function deferred<T>() {
@@ -150,7 +150,6 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
       entries: [makeDraftEntry("a", "2027-01-04")],
     });
     seeded.entries[0]!.title = "젤다";
-    seeded.entries[0]!.startTime = ""; // 시각 미정 경로도 이 테스트가 함께 본다(기본값 19:00 과 별개)
     let seen: SaveWeekValues | undefined;
     const actor = start({
       run: async (values) => {
@@ -169,7 +168,9 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
       // 의 원본 onSave 와 같다).
       note: "  공지  ",
       published: true,
-      entries: [{ scheduledDate: "2027-01-04", startTime: null, title: "젤다", gameId: null }],
+      entries: [{ scheduledDate: "2027-01-04", title: "젤다", gameId: null }],
+      // 하루 속성도 같은 페이로드로 나간다(이슈 #117) — 기본값인 날은 draftDayInputs 가 접는다.
+      days: [],
     });
   });
 
@@ -190,7 +191,7 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
   });
 
   it("성공하면 draft·baseline 을 서버 응답으로 통째로 교체하고 announcement 를 세운다(발행)", async () => {
-    const saved: WeekDraft = { note: "공지", published: true, entries: [] };
+    const saved: WeekDraft = { note: "공지", published: true, entries: [], days: {} };
     const actor = start({ run: async () => ({ draft: saved, revision: 42 }) });
     actor.send({ type: "SAVE" });
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 42);
@@ -203,7 +204,7 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
   });
 
   it("초안으로 저장하면 announcement 가 초안 문구다", async () => {
-    const saved: WeekDraft = { note: "", published: false, entries: [] };
+    const saved: WeekDraft = { note: "", published: false, entries: [], days: {} };
     const actor = start({ run: async () => ({ draft: saved, revision: 1 }) });
     actor.send({ type: "SAVE" });
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 1);
@@ -274,7 +275,7 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
 
   it("실패는 이전 성공의 announcement 를 지우지 않는다(원본이 실패 시 announcement 를 안 건드리던 것과 같다)", async () => {
     let attempt = 0;
-    const savedOnce: WeekDraft = { note: "", published: false, entries: [] };
+    const savedOnce: WeekDraft = { note: "", published: false, entries: [], days: {} };
     const actor = start({
       run: async () => {
         attempt += 1;
@@ -301,7 +302,12 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
     actor.send({ type: "NOTE_CHANGED", note: "저장 중에 고친 공지" });
     expect(actor.getSnapshot().context.draft.note).toBe("저장 중에 고친 공지");
 
-    const fromServer: WeekDraft = { note: "서버가 되돌린 값", published: false, entries: [] };
+    const fromServer: WeekDraft = {
+      note: "서버가 되돌린 값",
+      published: false,
+      entries: [],
+      days: {},
+    };
     resolve({ draft: fromServer, revision: 2 });
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 2);
     // 저장 중 편집("저장 중에 고친 공지")은 서버 응답에 덮인다.
@@ -310,9 +316,12 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
 });
 
 describe("scheduleSaveMachine — PUBLISH·UNPUBLISH 계약(이슈 #56 결정 14 개정)", () => {
+  /* 제목을 채워 둔다 — draftHasContent(발행 가드)는 **저장에 실릴 값**만 센다(빈 제목 항목은
+     draftEntryInputs 가 버린다). 서버의 weekHasContent 와 같은 기준이라, 제목 없는 항목만 있는
+     주는 양쪽 모두에서 "빈 주"다(이슈 #117 결정 9). */
   const savedDraft = draft({
     note: "공지",
-    entries: [makeDraftEntry("db-1", "2027-01-04")],
+    entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
   });
 
   it("PUBLISH 는 dirty 하면 가드가 막는다 — publishRun 이 안 불리고 상태도 그대로다", () => {

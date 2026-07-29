@@ -23,13 +23,13 @@ const CARD: WeekCardData = {
   rangeLabel: "7.20 – 7.26",
   note: null,
   days: [
-    { dow: "월", date: "7.20", entries: [], overflow: 0 },
-    { dow: "화", date: "7.21", entries: [], overflow: 0 },
-    { dow: "수", date: "7.22", entries: [], overflow: 0 },
-    { dow: "목", date: "7.23", entries: [], overflow: 0 },
-    { dow: "금", date: "7.24", entries: [], overflow: 0 },
-    { dow: "토", date: "7.25", entries: [], overflow: 0 },
-    { dow: "일", date: "7.26", entries: [], overflow: 0 },
+    { dow: "월", date: "7.20", time: null, rest: false, entries: [], overflow: 0 },
+    { dow: "화", date: "7.21", time: null, rest: false, entries: [], overflow: 0 },
+    { dow: "수", date: "7.22", time: null, rest: false, entries: [], overflow: 0 },
+    { dow: "목", date: "7.23", time: null, rest: false, entries: [], overflow: 0 },
+    { dow: "금", date: "7.24", time: null, rest: false, entries: [], overflow: 0 },
+    { dow: "토", date: "7.25", time: null, rest: false, entries: [], overflow: 0 },
+    { dow: "일", date: "7.26", time: null, rest: false, entries: [], overflow: 0 },
   ],
 };
 

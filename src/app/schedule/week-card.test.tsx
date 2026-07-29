@@ -11,18 +11,41 @@ const CARD: WeekCardData = {
   rangeLabel: "7.20 – 7.26",
   note: "임시 휴방 있습니다",
   days: [
-    { dow: "월", date: "7.20", entries: [{ time: "21:00", title: "저챗" }], overflow: 0 },
-    { dow: "화", date: "7.21", entries: [{ time: null, title: "심야 게임" }], overflow: 0 },
-    { dow: "수", date: "7.22", entries: [], overflow: 0 },
+    {
+      dow: "월",
+      date: "7.20",
+      time: "21:00",
+      rest: false,
+      entries: [{ title: "저챗" }],
+      overflow: 0,
+    },
+    {
+      dow: "화",
+      date: "7.21",
+      time: null,
+      rest: false,
+      entries: [{ title: "심야 게임" }],
+      overflow: 0,
+    },
+    { dow: "수", date: "7.22", time: null, rest: false, entries: [], overflow: 0 },
     {
       dow: "목",
       date: "7.23",
-      entries: [{ time: "20:00", title: "항목 1" }],
+      time: null,
+      rest: false,
+      entries: [{ title: "항목 1" }],
       overflow: 2,
     },
-    { dow: "금", date: "7.24", entries: [], overflow: 0 },
-    { dow: "토", date: "7.25", entries: [{ time: "19:00", title: "주말 방송" }], overflow: 0 },
-    { dow: "일", date: "7.26", entries: [], overflow: 0 },
+    { dow: "금", date: "7.24", time: null, rest: false, entries: [], overflow: 0 },
+    {
+      dow: "토",
+      date: "7.25",
+      time: null,
+      rest: true,
+      entries: [],
+      overflow: 0,
+    },
+    { dow: "일", date: "7.26", time: null, rest: false, entries: [], overflow: 0 },
   ],
 };
 
@@ -44,15 +67,27 @@ describe("WeekCard", () => {
     expect(within(wed).getByText("일정 없음")).toBeInTheDocument();
   });
 
-  it("항목이 있으면 제목을 그리고, 시각이 있을 때만 시각 배지를 그린다", () => {
+  it("시각은 요일 옆에 한 번만 선다 — 항목마다 반복하지 않는다", () => {
+    /* 시각이 하루의 속성이 되면서(이슈 #117) 배지 자리가 항목에서 요일 라벨로 옮겼다.
+       시각 없는 날은 배지 자체가 없다(미정을 빈칸으로 두는 게 이 카드의 표기다). */
     render(<WeekCard card={CARD} />);
     const mon = screen.getByTestId("week-card-day-7.20");
     expect(within(mon).getByText("저챗")).toBeInTheDocument();
     expect(within(mon).getByText("21:00")).toBeInTheDocument();
+    expect(mon.querySelectorAll(".week-card__time")).toHaveLength(1);
 
     const tue = screen.getByTestId("week-card-day-7.21");
     expect(within(tue).getByText("심야 게임")).toBeInTheDocument();
-    expect(tue.querySelector(".week-card__entry-time")).toBeNull();
+    expect(tue.querySelector(".week-card__time")).toBeNull();
+  });
+
+  it("휴방인 날은 항목 대신 휴방이라고 말한다", () => {
+    /* "아직 미정"(—)과 다른 사실이라 카드가 달리 그린다 — 카페·트위터에 올라간 그림에서 둘이
+       같은 모양이면 팬이 "정해지면 올라오겠지"로 읽는다(이슈 #117 결정 4). */
+    render(<WeekCard card={CARD} />);
+    const rest = screen.getByTestId("week-card-day-7.25");
+    expect(within(rest).getByText("휴방")).toBeInTheDocument();
+    expect(within(rest).queryByText("주말 방송")).not.toBeInTheDocument();
   });
 
   it("overflow 가 0 보다 클 때만 '+N개' 칩을 그린다", () => {
