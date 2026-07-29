@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FANART_MAX_BYTES,
+  fanartCacheKey,
   fanartContentType,
   fanartKey,
   fanartObjectKey,
@@ -84,6 +85,34 @@ describe("키 형식", () => {
 
   it("R2 객체 키는 prefix 를 붙인다", () => {
     expect(fanartObjectKey(`${UUID}.png`)).toBe(`fanart/${UUID}.png`);
+  });
+});
+
+describe("fanartCacheKey", () => {
+  /* **e2e 가 못 보는 규칙이다** — `next dev` 는 Node 라 `caches` 자체가 없어 프로덕션 캐시 키
+     동작을 재현하지 않는다(그래서 이 결함이 게이트 전부 초록인 채 살아 있었다). */
+  const base = `https://chyailokunya.com/api/fanart/${UUID}.png`;
+
+  it("쿼리스트링이 뭐든 같은 키가 된다 — 공개 URL 이 R2 재읽기로 증폭되지 않는다", () => {
+    expect(fanartCacheKey(base)).toBe(base);
+    expect(fanartCacheKey(`${base}?n=1`)).toBe(base);
+    expect(fanartCacheKey(`${base}?n=2&x=y`)).toBe(base);
+    // 캐시를 우회하려는 임의 파라미터 100개가 전부 같은 엔트리로 접힌다.
+    const keys = new Set(
+      Array.from({ length: 100 }, (_, i) => fanartCacheKey(`${base}?bust=${i}`)),
+    );
+    expect(keys.size).toBe(1);
+  });
+
+  it("경로가 다르면 키도 다르다 — 서로 다른 그림이 한 엔트리를 공유하지 않는다", () => {
+    const other = `https://chyailokunya.com/api/fanart/${UUID}.webp`;
+    expect(fanartCacheKey(other)).not.toBe(fanartCacheKey(base));
+  });
+
+  it("origin 을 유지한다 — 키가 호스트를 잃으면 환경 간 캐시가 섞인다", () => {
+    expect(fanartCacheKey(`http://localhost:3100/api/fanart/${UUID}.png?n=1`)).toBe(
+      `http://localhost:3100/api/fanart/${UUID}.png`,
+    );
   });
 });
 

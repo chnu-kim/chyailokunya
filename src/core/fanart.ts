@@ -96,3 +96,17 @@ export function fanartKey(type: FanartImageType, uuid: string): string {
 export function fanartObjectKey(key: string): string {
   return `fanart/${key}`;
 }
+
+/* 엣지 캐시 키. **쿼리스트링을 떼어 낸다.**
+
+   Cache API 는 요청 URL 전체를 키로 쓰는데 우리 R2 조회는 경로의 key 만 본다 — 그대로 두면
+   `/api/fanart/<키>?n=1`, `?n=2` … 가 전부 캐시 미스가 되면서 **같은 객체를 매번 다시 읽는다.**
+   인증이 없는 공개 경로라 누구나 그 증폭을 만들 수 있다(적대적 리뷰 지적). 응답이 쿼리에
+   따라 달라질 여지가 애초에 없으므로, 키에서 지우는 것이 정확한 표현이기도 하다.
+
+   순수 함수로 둔 이유: 이 규칙을 e2e 가 못 본다 — `next dev` 는 Node 라 `caches` 자체가 없어
+   프로덕션 캐시 키 동작을 재현하지 않는다. 규칙만이라도 단위 테스트가 못박는다. */
+export function fanartCacheKey(requestUrl: string): string {
+  const url = new URL(requestUrl);
+  return `${url.origin}${url.pathname}`;
+}

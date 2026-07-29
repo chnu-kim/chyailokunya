@@ -18,7 +18,7 @@
    R2 get 의 range 옵션으로 연다(ADR-0010 JIT). */
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { fanartObjectKey, isFanartKey } from "@/core/fanart";
+import { fanartCacheKey, fanartObjectKey, isFanartKey } from "@/core/fanart";
 
 /* **`immutable` 도 1년도 쓰지 않는다.** 키가 유일해 같은 주소의 *내용*은 안 바뀌므로 얼핏
    immutable 이 맞아 보이는데, 그건 이 자원이 **삭제된다**는 사실을 빠뜨린 판단이다(적대적
@@ -37,6 +37,18 @@ import { fanartObjectKey, isFanartKey } from "@/core/fanart";
    캐시에만 통한다. 아래 waitUntil 이 그 자리를 채운다. */
 const CACHE_CONTROL = "public, max-age=3600";
 
+/* 조건부 요청 판정. **두 경로가 같은 규칙을 써야 한다** — 엣지 캐시 히트와 R2 조회 양쪽에서
+   재검증이 성립해야 위 CACHE_CONTROL 이 약속한 것이 실제로 지켜진다. 한쪽에만 두면 캐시가 선
+   순간(또는 비는 순간) 계약이 갈린다. */
+function notModified(req: Request, etag: string | null): boolean {
+  return etag !== null && req.headers.get("if-none-match") === etag;
+}
+
+// 304 는 본문이 없다. 헤더는 그대로 실어 클라이언트가 캐시 항목의 수명을 갱신할 수 있게 한다.
+function notModifiedResponse(headers: Headers): Response {
+  return new Response(null, { status: 304, headers });
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
   /* 키 형식이 곧 방어선이다(core/fanart.ts) — `<uuid>.<ext>` 만 통과하므로 `..`·`/` 가 애초에
@@ -49,8 +61,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ key: str
      500 이 난다(실측). 이 저장소가 반복해 밟은 "로컬과 배포의 런타임 계약이 다르다"의 반대
      방향이다 — 여기선 로컬이 더 좁다. 없으면 캐시 없이 R2 를 매번 읽는다(로컬에선 그게 맞다). */
   const cache = typeof caches === "undefined" ? null : caches.default;
-  const hit = await cache?.match(req);
-  if (hit) return hit;
+  /* 요청 그대로가 아니라 **정규화한 키**로 찾는다 — 쿼리스트링이 붙으면 Cache API 는 다른
+     엔트리로 보는데 R2 조회는 경로만 보므로, 그대로 두면 공개 URL 하나가 무한한 R2 재읽기로
+     증폭된다(core/fanart 의 fanartCacheKey 주석). */
+  const cacheKey = fanartCacheKey(req.url);
+  const hit = await cache?.match(cacheKey);
+  /* 캐시에 있어도 **조건부 요청을 먼저 본다.** 그냥 돌려주면 만료돼 되묻는 클라이언트가 304 대신
+     전체 바이트를 받는다 — 아래 R2 경로에만 재검증을 두면 엣지 캐시가 선 순간 그 계약이 조용히
+     깨진다(코드 리뷰 지적). 이 분기 역시 e2e 가 못 본다(`next dev` 엔 caches 가 없다). */
+  if (hit)
+    return notModified(req, hit.headers.get("etag")) ? notModifiedResponse(hit.headers) : hit;
 
   const object = await env.FANART.get(fanartObjectKey(key));
   // 404 는 캐시하지 않는다 — 고아 정리·재업로드가 지나간 뒤에도 "없음"이 1년간 굳으면 안 된다.
@@ -68,22 +88,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ key: str
   headers.set("etag", object.httpEtag);
   headers.set("cache-control", CACHE_CONTROL);
 
-  /* **조건부 요청을 실제로 처리한다.** 위 CACHE_CONTROL 주석이 "만료 뒤엔 ETag 재검증(304)에
-     맡긴다"고 약속했는데, `If-None-Match` 를 안 보면 그 약속이 코드에 없는 것이다 — 만료된
-     캐시가 되물을 때마다 전체 바이트가 다시 나간다(코드 리뷰 지적). 여기서 끊으면 그 왕복이
-     헤더만으로 끝난다.
-
-     `body` 를 안 만지므로 R2 스트림은 소비되지 않는다 — get 호출 자체는 이미 했지만 바이트는
-     안 흐른다. `onlyIf` 로 R2 에 조건을 맡기지 않는 이유: 그건 `Headers` 나 etag 문자열의
-     따옴표 규약에 기대는데, 이 경계는 dev 에서 Miniflare 프록시 직렬화에 한 번 물린 자리라
-     (위 writeHttpMetadata 주석) 우리가 이미 들고 있는 값을 직접 비교하는 쪽이 확실하다. */
-  if (req.headers.get("if-none-match") === object.httpEtag) {
-    return new Response(null, { status: 304, headers });
-  }
+  /* 캐시가 비었을 때의 재검증. `body` 를 안 만지므로 R2 스트림은 소비되지 않는다 — get 호출
+     자체는 이미 했지만 바이트는 안 흐른다. `onlyIf` 로 R2 에 조건을 맡기지 않는 이유: 그건
+     `Headers` 나 etag 문자열의 따옴표 규약에 기대는데, 이 경계는 dev 에서 Miniflare 프록시
+     직렬화에 한 번 물린 자리라(위 writeHttpMetadata 주석) 우리가 이미 들고 있는 값을 직접
+     비교하는 쪽이 확실하다. */
+  if (notModified(req, object.httpEtag)) return notModifiedResponse(headers);
 
   const res = new Response(object.body, { headers });
   /* 응답을 먼저 돌려주고 캐시 쓰기는 뒤에 흘린다. OpenNext 의 waitUntil 래핑은 ISR 전용이라
      여기선 Cloudflare ctx 를 직접 부른다. clone 하는 이유: put 이 본문을 소비한다. */
-  if (cache) ctx.waitUntil(cache.put(req, res.clone()));
+  if (cache) ctx.waitUntil(cache.put(cacheKey, res.clone()));
   return res;
 }
