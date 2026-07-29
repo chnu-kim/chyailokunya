@@ -26,6 +26,31 @@ const startTime = z.preprocess(
     .default(null),
 );
 
+/* 그 주에 걸어 둘 팬아트 주소(이슈 #117). **https 만 받는다** — 외부 주소를 그대로 <img src>
+   에 넣는 자리라 스킴을 좁혀 둔다(`javascript:` 는 img 에서 실행되진 않지만, 받아 둘 이유가
+   없는 값을 저장까지 하고 나면 다음에 그 값을 다른 자리에 쓰는 코드가 생겼을 때 방어가 하나도
+   없다). http 도 막는다: 사이트가 https 라 혼합 콘텐츠로 어차피 안 뜬다.
+
+   빈 문자열은 null 로 접는다(note·startTime 과 같은 정규화) — "" 와 null 이 둘 다 "없음"을
+   뜻하면 표시 분기가 갈린다. 길이 상한 2048 은 흔한 URL 상한이고, 위조 클라이언트가 거대한
+   문자열을 주 메타에 밀어 넣는 걸 막는다. */
+const fanartImageUrl = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+  z
+    .string()
+    .trim()
+    .max(2048)
+    .refine((v) => {
+      try {
+        return new URL(v).protocol === "https:";
+      } catch {
+        return false;
+      }
+    }, "https:// 로 시작하는 주소여야 합니다")
+    .nullable()
+    .default(null),
+);
+
 /* 항목 하나. title 은 자유 제목(항목 종류 컬럼을 안 둔다 — 결정 9). gameId 는 게임에 이어
    붙이는 선택 연결(null = 게임 없는 자유 편성). scheduledDate 가 주에 속하는지는 아래 객체
    레벨 refine 이 본다(항목 단위론 주를 모른다). max(200) 은 게임 제목 상한과 같은 자리.
@@ -69,6 +94,13 @@ export const saveWeekInput = z
        입력 순서에 달리므로 아래 refine 이 중복을 거절한다(UNIQUE 제약이 최종 방어선이지만
        거기까지 가면 저장이 통째로 실패한다 — 경계에서 먼저 거른다). */
     days: z.array(dayInput).max(7).default([]),
+    fanartImageUrl,
+    /* 작가 표기. 이름만 받는다(링크가 아니다 — db/schema.ts 주석). 그림 없이 표기만 오는
+       조합은 아래 refine 이 막는다(DB CHECK 와 같은 규칙, 경계에서 먼저 거른다). */
+    fanartCredit: z.preprocess(
+      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+      z.string().trim().max(100).nullable().default(null),
+    ),
   })
   .superRefine((v, ctx) => {
     // weekStartDate 가 월요일인가 — weekStartOf 가 자기 자신이면 그 주의 시작이다.
@@ -114,6 +146,15 @@ export const saveWeekInput = z
       }
       seen.add(d.scheduledDate);
     });
+    /* 작가 표기만 있고 그림이 없으면 화면에 아무것도 안 뜨는데 값만 남는다(DB CHECK 와 같은
+       규칙 — 제약이 최종 방어선이지만 거기까지 가면 저장이 통째로 실패한다). */
+    if (v.fanartCredit !== null && v.fanartImageUrl === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["fanartCredit"],
+        message: "그림 주소 없이 작가 표기만 넣을 수 없습니다",
+      });
+    }
   });
 export type SaveWeekInput = z.infer<typeof saveWeekInput>;
 

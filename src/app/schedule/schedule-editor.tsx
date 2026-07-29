@@ -65,6 +65,8 @@ function weekToDraft(week: WeekView): WeekDraft {
     days: Object.fromEntries(
       week.days.map((d) => [d.scheduledDate, { startTime: d.startTime ?? "", rest: d.rest }]),
     ),
+    fanartImageUrl: week.fanartImageUrl ?? "",
+    fanartCredit: week.fanartCredit ?? "",
   };
 }
 
@@ -260,6 +262,44 @@ export function ScheduleEditor({
             onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
           />
         </label>
+
+        {/* 팬아트(이슈 #117) — 주에 딸린 부가 정보라 공지 바로 아래다. 주소만 받고 파일은 안
+            갖는다(db/schema.ts). 작가 표기는 그림이 있을 때만 의미가 있어 그때만 연다 —
+            서버·DB 도 같은 조합을 거절하므로, 화면이 애초에 못 만들게 하는 게 가장 조용한
+            방어다(빈 칸을 두고 저장할 때 혼내는 것보다 낫다). */}
+        <div className="sched-fanart" data-od-id="schedule-fanart">
+          <label className="sched-note">
+            <span className="sched-note__label">팬아트 주소 (선택)</span>
+            <input
+              className="sched-field"
+              type="url"
+              inputMode="url"
+              maxLength={2048}
+              placeholder="https://…"
+              value={draft.fanartImageUrl}
+              data-od-id="schedule-fanart-url"
+              onChange={(e) =>
+                send({ type: "FANART_CHANGED", patch: { fanartImageUrl: e.target.value } })
+              }
+            />
+          </label>
+          {draft.fanartImageUrl.trim() !== "" && (
+            <label className="sched-note">
+              <span className="sched-note__label">작가 표기 (선택)</span>
+              <input
+                className="sched-field"
+                type="text"
+                maxLength={100}
+                placeholder="그린 사람"
+                value={draft.fanartCredit}
+                data-od-id="schedule-fanart-credit"
+                onChange={(e) =>
+                  send({ type: "FANART_CHANGED", patch: { fanartCredit: e.target.value } })
+                }
+              />
+            </label>
+          )}
+        </div>
 
         <ol className="sched__days" data-od-id="schedule-days">
           {days.map((date, i) => {

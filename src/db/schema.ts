@@ -250,10 +250,32 @@ export const scheduleWeeks = sqliteTable(
     // 기본 false 가 "메타 행 없음"과 같은 뜻이라, 새 행이 도메인 상태를 안 흔든다.
     draft: integer("draft", { mode: "boolean" }).notNull().default(false),
     publishedAt: integer("published_at"),
+    /* 그 주에 걸어 둘 팬아트(이슈 #117). 주에 딸린 부가 정보라 note 와 같은 자리다.
+
+       **URL 만 든다 — 파일은 우리가 안 갖는다.** 관리자가 트위터·치지직 등에 올라간 그림의
+       주소를 붙여넣는다. R2 를 안 붙인 이유는 스코프이기도 하지만, 그 선택이 **PNG 공유 카드에는
+       못 싣는다**는 결과를 낳는다는 걸 알고 받아들인 것이다: html-to-image 는 이미지를 fetch 해
+       dataURL 로 인라인하는데(resourceToDataURL), CORS 없는 외부 이미지는 실패를 빈 src 로
+       삼켜 캡처가 깨진다(실측). 카드에 실으려면 same-origin 바이트가 필요하고 그건 별도 결정이다.
+
+       credit 은 작가 표기 문자열이다. 링크가 아니라 이름만 받는다 — 링크를 받으면 그 URL 도
+       검증·새 창 처리·대비를 따로 져야 하는데, 팬아트 한 장에 그만한 배선을 붙일 근거가 아직
+       없다(ADR-0010 JIT). 필요해지면 그때 연다. */
+    fanartImageUrl: text("fanart_image_url"),
+    fanartCredit: text("fanart_credit"),
     createdAt: createdAt(),
     lastUpdatedAt: lastUpdatedAt(),
   },
-  (t) => [check("schedule_weeks_draft", sql`${t.draft} = 0 OR ${t.publishedAt} IS NULL`)],
+  (t) => [
+    check("schedule_weeks_draft", sql`${t.draft} = 0 OR ${t.publishedAt} IS NULL`),
+    /* 작가 표기만 있고 그림이 없는 조합을 막는다 — 그러면 화면에 아무것도 안 뜨는데 값만
+       남아, 다음 사람이 "왜 안 보이지"를 데이터에서 찾게 된다. 반대(그림만 있고 표기 없음)는
+       정상이다: 작가를 모르거나 본인이 그린 경우가 있다. */
+    check(
+      "schedule_weeks_fanart",
+      sql`${t.fanartCredit} IS NULL OR ${t.fanartImageUrl} IS NOT NULL`,
+    ),
+  ],
 );
 
 /* 팬 수정 제안(ADR-0025). 보드의 쓰기는 상승 역할 전용인데(ADR-0012), 방송을 실제로 본 팬이

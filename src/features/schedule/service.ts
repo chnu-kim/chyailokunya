@@ -35,6 +35,10 @@ export type WeekView = {
      별도 revision 컬럼을 안 두는 이유: last_updated_at 이 이미 "이 주가 마지막으로 바뀐 순간"
      이라 같은 사실을 두 곳에 적을 필요가 없다. */
   revision: number | null;
+  /* 그 주에 걸어 둔 팬아트(이슈 #117). 주에 딸린 부가 정보라 note 와 같은 자리다 —
+     공유 카드에는 안 실린다(CORS, db/schema.ts 주석). */
+  fanartImageUrl: string | null;
+  fanartCredit: string | null;
   entries: ScheduleEntry[];
   /* 그 주 7일 중 **기본값이 아닌 날만**(시각이 있거나 휴방인 날). 행이 없는 날은 "시각 미정 ·
      휴방 아님"과 같은 뜻이라 목록에 안 실린다(db/schema.ts 의 "행이 없는 것 = 기본값").
@@ -92,6 +96,8 @@ export async function getWeekForEdit(db: Db, weekStartDate: string): Promise<Wee
     weekStartDate,
     note: meta?.note ?? null,
     publishedAt: meta?.publishedAt ?? null,
+    fanartImageUrl: meta?.fanartImageUrl ?? null,
+    fanartCredit: meta?.fanartCredit ?? null,
     /* 메타가 없는 주의 draft 는 "관리자가 뭔가 정해 뒀나"로 가른다 — 휴방만 있는 주도 정해 둔
        주다(결정 9). 항목 수만 보면 그런 주가 "아직 아무도 안 짠 새 주"로 읽혀 보드에서 사라진다. */
     draft: meta?.draft ?? !weekHasContent(entries.length, days.filter((d) => d.rest).length),
@@ -370,9 +376,17 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      note·publishedAt 이 여기서만 쓰인다 — 이 batch 가 실패/중단되면 셋(메타 SET·삭제·삽입)이
      함께 롤백돼 발행 경계가 안 넘어간다. 0단계가 gameId 를 걸렀으므로 현실적으로 실패하지 않는다.
      setMeta 는 last_updated_at 을 안 건드린다(1단계가 이미 새 revision 을 박았다). */
+  /* 팬아트도 note 와 같은 user-visible 메타라 **2단계 batch 에서만** 쓴다(1단계 청구는 revision
+     만 만진다) — 이 batch 가 실패하면 함께 롤백돼 화면에 반쯤 반영된 상태가 안 남는다. */
   const setMeta = db
     .update(scheduleWeeks)
-    .set({ note: input.note, draft, publishedAt })
+    .set({
+      note: input.note,
+      draft,
+      publishedAt,
+      fanartImageUrl: input.fanartImageUrl,
+      fanartCredit: input.fanartCredit,
+    })
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const clearEntries = db
     .delete(scheduleEntries)

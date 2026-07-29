@@ -14,7 +14,15 @@ import {
    정확히 부모에게 되돌리는가다. */
 
 function draft(over: Partial<WeekDraft> = {}): WeekDraft {
-  return { note: "", published: false, entries: [], days: {}, ...over };
+  return {
+    note: "",
+    published: false,
+    entries: [],
+    days: {},
+    fanartImageUrl: "",
+    fanartCredit: "",
+    ...over,
+  };
 }
 
 function deferred<T>() {
@@ -171,6 +179,9 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
       entries: [{ scheduledDate: "2027-01-04", title: "젤다", gameId: null }],
       // 하루 속성도 같은 페이로드로 나간다(이슈 #117) — 기본값인 날은 draftDayInputs 가 접는다.
       days: [],
+      // 팬아트도 같은 페이로드다. '' 는 null 로 접어 보낸다(서버 Zod 와 같은 정규형).
+      fanartImageUrl: null,
+      fanartCredit: null,
     });
   });
 
@@ -191,7 +202,14 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
   });
 
   it("성공하면 draft·baseline 을 서버 응답으로 통째로 교체하고 announcement 를 세운다(발행)", async () => {
-    const saved: WeekDraft = { note: "공지", published: true, entries: [], days: {} };
+    const saved: WeekDraft = {
+      note: "공지",
+      published: true,
+      entries: [],
+      days: {},
+      fanartImageUrl: "",
+      fanartCredit: "",
+    };
     const actor = start({ run: async () => ({ draft: saved, revision: 42 }) });
     actor.send({ type: "SAVE" });
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 42);
@@ -204,7 +222,14 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
   });
 
   it("초안으로 저장하면 announcement 가 초안 문구다", async () => {
-    const saved: WeekDraft = { note: "", published: false, entries: [], days: {} };
+    const saved: WeekDraft = {
+      note: "",
+      published: false,
+      entries: [],
+      days: {},
+      fanartImageUrl: "",
+      fanartCredit: "",
+    };
     const actor = start({ run: async () => ({ draft: saved, revision: 1 }) });
     actor.send({ type: "SAVE" });
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 1);
@@ -275,7 +300,14 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
 
   it("실패는 이전 성공의 announcement 를 지우지 않는다(원본이 실패 시 announcement 를 안 건드리던 것과 같다)", async () => {
     let attempt = 0;
-    const savedOnce: WeekDraft = { note: "", published: false, entries: [], days: {} };
+    const savedOnce: WeekDraft = {
+      note: "",
+      published: false,
+      entries: [],
+      days: {},
+      fanartImageUrl: "",
+      fanartCredit: "",
+    };
     const actor = start({
       run: async () => {
         attempt += 1;
@@ -305,6 +337,8 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
     const fromServer: WeekDraft = {
       note: "서버가 되돌린 값",
       published: false,
+      fanartImageUrl: "",
+      fanartCredit: "",
       entries: [],
       days: {},
     };

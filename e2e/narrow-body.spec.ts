@@ -653,6 +653,16 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
         page.locator('[data-od-id^="schedule-day-rest-"]').first().locator("xpath=.."),
         "휴방 토글",
       );
+      // 팬아트 주소 입력(이슈 #117) — 새 조작이라 여기 적어야 검사에 든다. 작가 표기 칸은
+      // 주소가 있을 때만 열리므로, 주소를 채운 뒤에 같이 잰다.
+      const fanartUrl = page.locator('[data-od-id="schedule-fanart-url"]');
+      await expectTouchTarget(fanartUrl, "팬아트 주소");
+      await fanartUrl.fill("https://example.com/a.png");
+      await expectTouchTarget(
+        page.locator('[data-od-id="schedule-fanart-credit"]'),
+        "팬아트 작가 표기",
+      );
+      expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
       await expectTouchTarget(
         page.locator('[data-od-id="schedule-publish-toggle"]'),
         "발행 상태 전환",

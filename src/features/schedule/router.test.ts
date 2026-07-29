@@ -29,9 +29,19 @@ type SaveInput = Parameters<Caller["schedule"]["saveWeek"]>[0];
    낙관적 동시성 토큰을 요구하게 된 뒤로 대부분의 테스트는 "경합 없는 정상 경로"를 원하므로
    여기로 몬다(경합 자체는 전용 테스트가 revision 을 손으로 어긋내 본다).
    getWeek 이 schedule:write 를 요구하므로 **권한 있는 caller 로만** 쓴다. */
-async function saveWeekAsEditor(caller: Caller, input: Omit<SaveInput, "revision">) {
+async function saveWeekAsEditor(
+  caller: Caller,
+  input: Omit<SaveInput, "revision" | "fanartImageUrl" | "fanartCredit"> &
+    Partial<Pick<SaveInput, "fanartImageUrl" | "fanartCredit">>,
+) {
   const { revision } = await caller.schedule.getWeek({ weekStartDate: input.weekStartDate });
-  return caller.schedule.saveWeek({ ...input, revision });
+  // 팬아트는 대부분의 테스트가 안 쓰는 칸이라 기본값을 여기서 채운다(테스트마다 반복 금지).
+  return caller.schedule.saveWeek({
+    fanartImageUrl: null,
+    fanartCredit: null,
+    ...input,
+    revision,
+  });
 }
 
 describe("nextRevision — CAS 토큰은 단조 증가", () => {
@@ -66,6 +76,8 @@ describe("일정 라우터", () => {
       // 메타도 항목도 없는 주 = 아직 아무도 안 짠 새 주라 초안으로 연다.
       draft: true,
       revision: null,
+      fanartImageUrl: null,
+      fanartCredit: null,
       days: [],
       entries: [],
     });
@@ -125,6 +137,38 @@ describe("일정 라우터", () => {
       { date: "2026-07-20", time: "21:00", rest: false },
       { date: "2026-07-21", time: null, rest: true },
     ]);
+  });
+
+  it("팬아트는 https 만 받고, 그림 없이 표기만 오면 거절한다", async () => {
+    /* 외부 주소를 그대로 <img src> 에 넣는 자리라 스킴을 좁혀 둔다(schema.ts 주석). 표기만
+       오는 조합은 화면에 아무것도 안 뜨는데 값만 남아, 다음 사람이 "왜 안 보이지"를 데이터에서
+       찾게 된다 — Zod 와 DB CHECK 둘 다 막지만 경계에서 먼저 거른다. */
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const base = {
+      weekStartDate: toIsoDate(MON),
+      note: null,
+      published: false,
+      days: [],
+      entries: [{ scheduledDate: toIsoDate("2026-07-20"), title: "저챗", gameId: null }],
+    };
+
+    await expect(
+      saveWeekAsEditor(caller, { ...base, fanartImageUrl: "http://example.com/a.png" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      saveWeekAsEditor(caller, { ...base, fanartImageUrl: "javascript:alert(1)" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      saveWeekAsEditor(caller, { ...base, fanartCredit: "누군가" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // https 는 통과하고, 표기 없이 그림만도 정상이다(작가를 모를 수 있다).
+    const saved = await saveWeekAsEditor(caller, {
+      ...base,
+      fanartImageUrl: "https://example.com/a.png",
+    });
+    expect(saved.fanartImageUrl).toBe("https://example.com/a.png");
+    expect(saved.fanartCredit).toBeNull();
   });
 
   it("휴방으로 바꾼 날의 항목은 보드의 플레이 날짜에서 빠진다 — 두 공개 화면이 같은 말을 한다", async () => {
@@ -302,6 +346,8 @@ describe("일정 라우터", () => {
         revision: null,
         note: "저장이 거절됐다는데 남으면 안 되는 공지",
         published: true,
+        fanartImageUrl: null,
+        fanartCredit: null,
         days: [],
         entries: [{ scheduledDate: toIsoDate(MON), title: "젤다", gameId: null }],
       }),
@@ -334,6 +380,8 @@ describe("일정 라우터", () => {
         revision: null, // 메타가 없으니 편집기가 읽는 revision 도 null 이다.
         note: null,
         published: false,
+        fanartImageUrl: null,
+        fanartCredit: null,
         days: [],
         entries: [{ scheduledDate: toIsoDate(MON), title: "레거시 항목", gameId: null }],
       }),

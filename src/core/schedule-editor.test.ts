@@ -23,7 +23,15 @@ const MON = "2026-07-20"; // 월요일
 const WED = "2026-07-22";
 
 function draft(over: Partial<WeekDraft> = {}): WeekDraft {
-  return { note: "", published: false, entries: [], days: {}, ...over };
+  return {
+    note: "",
+    published: false,
+    entries: [],
+    days: {},
+    fanartImageUrl: "",
+    fanartCredit: "",
+    ...over,
+  };
 }
 
 function entry(key: string, over: Partial<ReturnType<typeof makeDraftEntry>> = {}) {

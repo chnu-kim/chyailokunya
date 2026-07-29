@@ -141,6 +141,27 @@ export function ScheduleReadView({
                 );
               })}
             </ol>
+
+            {/* 팬아트는 **목록 아래**다 — 이 화면의 주인공은 일정이고, 팬아트는 그 주에 딸린
+                보너스라 일정을 밀어내면 안 된다. 부품은 사진지 섬(.polaroid) 을 그대로 쓴다:
+                이 사이트에서 "사진"의 모양은 이미 정해져 있고 라이트·다크 양쪽이 검증돼 있다
+                (kunya-design §3). figcaption 의 크기·색은 안 건드린다 — --brand-taupe 는
+                --text-xl(25px)에서만 대비를 통과해, 한 단계만 줄여도 두 테마가 동시에 미달한다.
+
+                referrerPolicy 로 우리 주소를 남기지 않는다 — 외부 호스트에 걸린 그림이라
+                방문자가 이 페이지를 열었다는 사실이 그쪽 로그로 새지 않게 한다. */}
+            {week.fanartImageUrl && (
+              <figure className="polaroid sched-fanart" data-od-id="schedule-fanart">
+                <img
+                  className="sched-fanart__img"
+                  src={week.fanartImageUrl}
+                  alt="팬아트"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+                {week.fanartCredit && <figcaption>{week.fanartCredit}</figcaption>}
+              </figure>
+            )}
           </>
         ) : (
           <div className="sched__empty" data-od-id="schedule-empty">

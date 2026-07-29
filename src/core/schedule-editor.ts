@@ -45,6 +45,10 @@ export type WeekDraft = {
   published: boolean;
   entries: DraftEntry[];
   days: Record<string, DraftDay>;
+  /* 그 주 팬아트(이슈 #117). 서버가 '' 를 null 로 접으므로 여기선 '' 를 그대로 들고 다닌다
+     (note·startTime 과 같은 규약 — 중복 정규화 금지). */
+  fanartImageUrl: string;
+  fanartCredit: string;
 };
 
 /* 그 날짜의 속성. 키가 없으면 기본값 — "행이 없는 것 = 기본값"을 클라이언트에서도 그대로 쓴다. */
@@ -186,6 +190,9 @@ export function draftHasContent(draft: WeekDraft): boolean {
 export function isWeekDirty(a: WeekDraft, b: WeekDraft): boolean {
   if (a.note.trim() !== b.note.trim()) return true;
   if (a.published !== b.published) return true;
+  // 팬아트도 저장되는 값이다 — 빼먹으면 주소를 넣어도 저장 버튼이 안 열린다(하루 속성과 같은 자리).
+  if (a.fanartImageUrl.trim() !== b.fanartImageUrl.trim()) return true;
+  if (a.fanartCredit.trim() !== b.fanartCredit.trim()) return true;
   /* **하루 속성도 저장되는 값이다**(이슈 #117) — 빼먹으면 시각을 바꾸거나 휴방을 켜도 저장
      버튼이 계속 비활성이고, 같은 판정을 읽는 다운로드 카드의 미저장 힌트도 조용해진다. */
   if (canonicalDays(a) !== canonicalDays(b)) return true;

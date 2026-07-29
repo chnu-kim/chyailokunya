@@ -94,6 +94,8 @@ export type SaveWeekValues = {
   /* 하루의 속성(이슈 #117). 기본값인 날은 draftDayInputs 가 이미 접어 낸다 — 서버도 같은
      필터를 다시 걸지만, 여기서 접어야 dirty 판정과 저장 페이로드가 같은 정규형을 본다. */
   days: DraftDayInput[];
+  fanartImageUrl: string | null;
+  fanartCredit: string | null;
 };
 
 /* run 의 반환 shape. 실제 tRPC 응답(WeekView, features 타입)을 core 가 못 보므로, 호출자가
@@ -152,6 +154,8 @@ type ScheduleSaveEvent =
   /* 하루의 속성(시각·휴방, 이슈 #117). 항목 이벤트와 갈라 두는 이유는 대상이 다르기 때문이다 —
      항목은 key 로, 하루는 날짜로 지목한다. */
   | { type: "DAY_PATCHED"; date: string; patch: Parameters<typeof setDay>[2] }
+  // 주에 딸린 팬아트 두 칸(이슈 #117). note 와 같은 결이라 같은 모양의 이벤트를 둔다.
+  | { type: "FANART_CHANGED"; patch: Partial<Pick<WeekDraft, "fanartImageUrl" | "fanartCredit">> }
   | { type: "SAVE" }
   | { type: "PUBLISH" }
   | { type: "UNPUBLISH" };
@@ -166,6 +170,9 @@ function saveValues(context: ScheduleSaveContext): SaveWeekValues {
     published: context.draft.published,
     entries: draftEntryInputs(context.draft),
     days: draftDayInputs(context.draft),
+    // '' → null 은 서버 Zod 도 하지만, dirty 비교가 같은 정규형을 봐야 저장 직후 깨끗해진다.
+    fanartImageUrl: context.draft.fanartImageUrl.trim() || null,
+    fanartCredit: context.draft.fanartCredit.trim() || null,
   };
 }
 
@@ -309,6 +316,9 @@ export const scheduleSaveMachine = setup({
       actions: assign({
         draft: ({ context, event }) => setDay(context.draft, event.date, event.patch),
       }),
+    },
+    FANART_CHANGED: {
+      actions: assign({ draft: ({ context, event }) => ({ ...context.draft, ...event.patch }) }),
     },
   },
   initial: "ready",

@@ -18,6 +18,8 @@ const WEEK: WeekView = {
   draft: false,
   revision: 1753600000000,
   days: [],
+  fanartImageUrl: null,
+  fanartCredit: null,
   entries: [
     {
       id: 1,
@@ -92,6 +94,56 @@ describe("ScheduleReadView 의 오늘 표시", () => {
     );
     const day = screen.getByTestId("schedule-day-2026-07-30");
     expect(within(day).getByText("21:00")).toBeInTheDocument();
+  });
+
+  it("팬아트는 목록 아래에 사진지로 서고, 작가 표기는 있을 때만 붙는다", () => {
+    /* 이 화면의 주인공은 일정이라 팬아트가 목록을 밀어내면 안 된다(문서 순서로 못박는다).
+       표기는 선택이다 — 작가를 모르거나 본인이 그린 경우가 있다. */
+    const { rerender } = render(
+      <ScheduleReadView
+        weekStartDate={WEEK_START}
+        week={{ ...WEEK, fanartImageUrl: "https://example.com/a.png", fanartCredit: "그린 사람" }}
+        games={[]}
+        currentWeek={WEEK_START}
+        today="2026-07-29"
+      />,
+    );
+    const fanart = screen.getByTestId("schedule-fanart");
+    expect(within(fanart).getByAltText("팬아트")).toHaveAttribute(
+      "src",
+      "https://example.com/a.png",
+    );
+    expect(within(fanart).getByText("그린 사람")).toBeInTheDocument();
+    // 우리 주소가 외부 호스트 로그로 새지 않게 한다.
+    expect(within(fanart).getByAltText("팬아트")).toHaveAttribute("referrerpolicy", "no-referrer");
+
+    const list = screen.getByTestId("schedule-days");
+    expect(list.compareDocumentPosition(fanart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    rerender(
+      <ScheduleReadView
+        weekStartDate={WEEK_START}
+        week={{ ...WEEK, fanartImageUrl: "https://example.com/a.png", fanartCredit: null }}
+        games={[]}
+        currentWeek={WEEK_START}
+        today="2026-07-29"
+      />,
+    );
+    expect(screen.queryByText("그린 사람")).not.toBeInTheDocument();
+    expect(screen.getByAltText("팬아트")).toBeInTheDocument();
+  });
+
+  it("팬아트가 없으면 그 자리 자체가 없다", () => {
+    render(
+      <ScheduleReadView
+        weekStartDate={WEEK_START}
+        week={WEEK}
+        games={[]}
+        currentWeek={WEEK_START}
+        today="2026-07-29"
+      />,
+    );
+    expect(screen.queryByTestId("schedule-fanart")).not.toBeInTheDocument();
   });
 
   it("공지는 카드 미리보기보다 앞에 온다", () => {
