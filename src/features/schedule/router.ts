@@ -29,7 +29,10 @@ export const scheduleRouter = router({
     .input(saveWeekInput)
     .mutation(async ({ ctx, input }) => {
       try {
-        // 팬아트를 교체·삭제하면 버려진 객체를 서비스가 치운다(ADR-0028) — 바인딩이 없으면 건너뛴다.
+        /* 팬아트를 교체·삭제하면 버려진 객체를 서비스가 치우고, 새로 거는 키가 실제로 있는지
+           확인한다(ADR-0028). **프로덕션에선 이 값이 절대 null 이 아니다** — tRPC 라우트가
+           `env.FANART` 를 그대로 싣는다. null 은 바인딩 없이 도는 단위 테스트의 기본값이고,
+           그때는 두 동작을 건너뛴다(확인할 저장소 자체가 없다). */
         return await saveWeek(ctx.db, input, ctx.fanart ?? undefined);
       } catch (e) {
         /* 불러온 뒤 누군가 이 주를 먼저 저장했다. 전체 교체라 그대로 진행하면 그 사람의 항목이
