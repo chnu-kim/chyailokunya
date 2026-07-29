@@ -112,6 +112,22 @@ export class MultiDayScheduleLocked extends Error {
   }
 }
 
+/* 게임 폼이 **휴방으로 표시된 날**에 플레이 날짜를 붙이려 했다. 라우터가 BAD_REQUEST 로 올린다.
+
+   막지 않으면 쓰기는 성공하는데 보드가 그 날짜를 안 센다(lastPlayedExpr 가 휴방을 제외한다) —
+   관리자는 날짜를 넣었는데 화면엔 아무 일도 안 일어난 것처럼 보인다. AGENTS 의 "보드를 안 바꾸는
+   쓰기는 성공 신호가 하나도 없다"와 정확히 같은 자리라, 조용한 무시 대신 이유를 말하고 거절한다.
+
+   자동으로 휴방을 풀지 않는 이유: 그러면 게임 폼의 저장이 **주간표를 바꾼다**(팬이 보는 화면에서
+   "휴방"이 사라진다). 게임 폼은 그 권한을 주장한 적이 없고, 되돌릴 곳도 여기가 아니다 —
+   사용자가 /schedule 에서 먼저 결정하게 한다(적대적 리뷰 지적). */
+export class PlayDateOnRestDay extends Error {
+  constructor() {
+    super("play date falls on a rest day");
+    this.name = "PlayDateOnRestDay";
+  }
+}
+
 /* 폼이 열린 뒤 그 게임의 일정 날짜가 딴 데서 바뀌었다. 라우터가 CONFLICT 로 올린다.
    덮어쓰지 않고 거절하는 게 핵심이다 — 그냥 쓰면 남의 일정 작업이 조용히 되돌아간다
    (적대적 리뷰 6라운드). saveWeek 의 revision CONFLICT 와 같은 처방: 새로고침해서 지금 값
@@ -121,6 +137,15 @@ export class PlayDateChangedElsewhere extends Error {
     super("play date changed after the form was opened");
     this.name = "PlayDateChangedElsewhere";
   }
+}
+
+/* 그 날짜가 휴방으로 표시돼 있나. 행이 없으면 휴방이 아니다(기본값 = 부재, db/schema.ts). */
+async function isRestDay(db: Db, date: string): Promise<boolean> {
+  const [row] = await db
+    .select({ rest: scheduleDays.rest })
+    .from(scheduleDays)
+    .where(eq(scheduleDays.scheduledDate, date));
+  return row?.rest === true;
 }
 
 /* 이 게임에 걸린 일정 항목 — **발행 경계를 걸지 않는다.** lastPlayedExpr 와 일부러 다르다:
@@ -180,6 +205,10 @@ export async function addGame(db: Db, input: AddGameInput): Promise<GameCard> {
     // 날짜를 안 받았으면 항목도 없으므로 lastPlayed 는 확정적으로 null — 되유도 조회를 아낀다.
     return { ...row!, lastPlayed: null };
   }
+
+  /* 휴방인 날엔 못 붙인다 — 붙여도 보드가 그 날짜를 안 세서(lastPlayedExpr) 관리자에겐 저장이
+     조용히 무시된 것처럼 보인다. 게임 행을 만들기 **전에** 막아 실패가 흔적을 안 남긴다. */
+  if (await isRestDay(db, input.playedDate)) throw new PlayDateOnRestDay();
 
   const insertEntry = db.insert(scheduleEntries).values({
     scheduledDate: input.playedDate,
@@ -258,6 +287,14 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
      저장"이며 그건 이 검사가 잡는다(AGENTS.md 의 D1 수용 경계와 같은 판단). */
   if (touchesSchedule && (input.playedDateWas ?? null) !== (entries[0]?.scheduledDate ?? null)) {
     throw new PlayDateChangedElsewhere();
+  }
+
+  /* 휴방인 날로 옮기려는 저장도 막는다(addGame 과 같은 이유·같은 문구) — 통과시키면 쓰기는
+     성공하는데 보드가 그 날짜를 안 세, 관리자가 넣은 값이 화면에서 사라진 것처럼 보인다.
+     CAS 뒤에 두는 이유는 오류 우선순위다: 이미 stale 해진 요청이라면 "휴방이라 안 된다"가
+     아니라 "다른 곳에서 먼저 바꿨다"가 진짜 원인이다(publishWeek 의 같은 배치와 같은 판단). */
+  if (touchesSchedule && input.playedDate != null && (await isRestDay(db, input.playedDate))) {
+    throw new PlayDateOnRestDay();
   }
 
   const updateRow = db

@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { authoritiesFor, type Authority } from "@/core/authorities";
-import { makeDb, scheduleEntries, scheduleWeeks } from "@/db";
+import { games, makeDb, scheduleDays, scheduleEntries, scheduleWeeks, type Db } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import { getPublishedWeek } from "@/features/schedule/service";
@@ -862,5 +862,63 @@ describe("games 라우터", () => {
     expect(await authed.games.remove({ id: row.id })).toEqual({ deleted: true });
     expect(await createCaller(makeCtx()).games.list()).toEqual([]);
     expect(await authed.games.remove({ id: 9999 })).toEqual({ deleted: false });
+  });
+});
+
+describe("휴방인 날엔 플레이 날짜를 못 붙인다(ADR-0027)", () => {
+  /* 막지 않으면 쓰기는 성공하는데 보드가 그 날짜를 안 센다(lastPlayedExpr 가 휴방을 제외한다) —
+     관리자는 날짜를 넣었는데 화면엔 아무 일도 안 일어난 것처럼 보인다. AGENTS 의 "보드를 안
+     바꾸는 쓰기는 성공 신호가 하나도 없다"와 같은 자리라 이유를 말하고 거절한다. */
+  async function markRest(db: Db, date: string) {
+    await db.insert(scheduleDays).values({ scheduledDate: date, rest: true });
+  }
+
+  it("추가: 휴방인 날짜면 BAD_REQUEST 이고 게임 행도 안 생긴다", async () => {
+    const db = makeDb(env.DB);
+    await markRest(db, "2026-07-22");
+    const caller = createCaller(makeCtx({ authorities: admin }));
+
+    await expect(
+      caller.games.add({
+        categoryId: "c-rest",
+        categoryType: "GAME",
+        categoryValue: "휴방 게임",
+        posterImageUrl: null,
+        cleared: false,
+        clearedDate: null,
+        playedDate: "2026-07-22",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    // 실패가 흔적을 안 남긴다 — 게임 행을 만들기 전에 막았다.
+    expect(await db.select().from(games)).toHaveLength(0);
+  });
+
+  it("수정: 휴방인 날짜로 옮기려 하면 BAD_REQUEST 이고 일정도 안 바뀐다", async () => {
+    const db = makeDb(env.DB);
+    await markRest(db, "2026-07-23");
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const added = await caller.games.add({
+      categoryId: "c-move",
+      categoryType: "GAME",
+      categoryValue: "옮길 게임",
+      posterImageUrl: null,
+      cleared: false,
+      clearedDate: null,
+      playedDate: "2026-07-22",
+    });
+
+    await expect(
+      caller.games.update({
+        id: added.id,
+        cleared: false,
+        clearedDate: null,
+        playedDate: "2026-07-23",
+        playedDateWas: "2026-07-22",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const entries = await db.select().from(scheduleEntries);
+    expect(entries.map((e) => e.scheduledDate)).toEqual(["2026-07-22"]);
   });
 });

@@ -62,6 +62,22 @@ function migrate(db: DatabaseSync): void {
   db.exec("COMMIT;");
 }
 
+/* 실패를 기대하는 재생. **롤백까지 태워야 러너를 재현한다** — BEGIN 뒤 exec 가 던지면
+   node:sqlite 는 트랜잭션을 열어 둔 채로 두고, 그 상태에서 조회하면 미커밋 변경이 그대로
+   보인다(첫 판이 "테이블이 남았다"로 빨갰던 이유). 실제 마이그레이션 러너는 실패한 파일을
+   롤백하므로 여기서도 같은 처리를 한 뒤에 결과를 잰다. */
+function migrateExpectingFailure(db: DatabaseSync): unknown {
+  db.exec("BEGIN;");
+  try {
+    db.exec(readFileSync(join(DRIZZLE_DIR, target()), "utf8"));
+    db.exec("COMMIT;");
+    return null;
+  } catch (e) {
+    db.exec("ROLLBACK;");
+    return e;
+  }
+}
+
 test("0011 이관: 그날 항목들의 시각이 하루의 시각 하나로 접힌다", () => {
   const db = seed([
     ["2026-07-27", "19:00", "월요일 방송"],
@@ -135,21 +151,43 @@ test("0011 이관문이 DROP COLUMN 보다 위에 있다 — 순서가 뒤집히
   db.close();
 });
 
-test("0011 이관: 하루에 시각이 여럿이면 가장 이른 것만 남는다 — 접힘의 경계", () => {
-  /* MIN 이 무손실인 것은 하루에 서로 다른 시각이 둘 이상인 날이 **없을 때뿐**이다. 그런 날이
-     있으면 어떻게 되는지를 여기서 명시적으로 재 둔다 — 이슈 #117 결정 6 이 받아들인 결과이고,
-     나중에 누가 "이관이 값을 지웠다"를 만났을 때 의도된 동작임을 이 테스트가 말해 준다. */
+test("0011 은 fail-closed 다 — 하루에 시각이 둘이면 이관이 죽고 아무것도 안 남는다", () => {
+  /* **접으면 되돌릴 수 없다.** 옛 스키마는 항목마다 다른 시각을 허용했으므로, 그런 날이 있는
+     채로 조용히 MIN 을 취하면 배포가 성공한 채 값이 사라진다. 그래서 DISTINCT + UNIQUE 로
+     그 경우 마이그레이션 자체가 죽게 했다 — 사람이 먼저 결정하도록. 러너가 트랜잭션으로
+     감싸므로 죽으면 schedule_days 도 안 남는다(그 사실까지 같이 잰다). */
   const db = seed([
     ["2026-07-27", "22:00", "밤 게임"],
     ["2026-07-27", "19:00", "오후 저챗"],
+  ]);
+  expect(migrateExpectingFailure(db), "이관이 죽어야 한다").not.toBeNull();
+
+  // 롤백됐다 — 부분 적용된 채로 남지 않는다.
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'schedule_days'")
+    .all();
+  expect(tables).toEqual([]);
+  // 원본도 그대로다 — 시각 컬럼이 아직 살아 있다.
+  expect(
+    db.prepare("SELECT count(*) AS n FROM schedule_entries WHERE start_time IS NOT NULL").get(),
+  ).toEqual({ n: 2 });
+
+  db.close();
+});
+
+test("0011 이관: 같은 날 같은 시각이 여러 항목이어도 하루 한 행으로 접힌다", () => {
+  /* 위 fail-closed 가 막는 건 **서로 다른** 시각이다. 같은 시각이 여러 항목에 붙은 건 손실이
+     아니므로(하루의 시각은 하나로 확정된다) DISTINCT 가 그대로 접어 통과시킨다. */
+  const db = seed([
+    ["2026-07-27", "19:00", "저챗"],
+    ["2026-07-27", "19:00", "이어서 게임"],
   ]);
   migrate(db);
 
   expect(db.prepare("SELECT scheduled_date, start_time FROM schedule_days").all()).toEqual([
     { scheduled_date: "2026-07-27", start_time: "19:00" },
   ]);
-
-  // 항목 둘은 그대로 남는다 — 사라지는 건 시각 하나지 편성이 아니다.
+  // 항목 둘은 그대로 남는다 — 접히는 건 시각이지 편성이 아니다.
   expect(db.prepare("SELECT count(*) AS n FROM schedule_entries").get()).toEqual({ n: 2 });
 
   db.close();
