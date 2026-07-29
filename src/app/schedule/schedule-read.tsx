@@ -151,9 +151,9 @@ export function ScheduleReadView({
                 referrerPolicy 로 우리 주소를 남기지 않는다 — 외부 호스트에 걸린 그림이라
                 방문자가 이 페이지를 열었다는 사실이 그쪽 로그로 새지 않게 한다. */}
             {week.fanartImageUrl && (
-              <figure className="polaroid sched-fanart" data-od-id="schedule-fanart">
+              <figure className="polaroid sched-fanart-card" data-od-id="schedule-fanart">
                 <img
-                  className="sched-fanart__img"
+                  className="sched-fanart-card__img"
                   src={week.fanartImageUrl}
                   alt="팬아트"
                   loading="lazy"

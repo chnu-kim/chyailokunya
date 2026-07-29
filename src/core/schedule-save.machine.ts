@@ -318,7 +318,16 @@ export const scheduleSaveMachine = setup({
       }),
     },
     FANART_CHANGED: {
-      actions: assign({ draft: ({ context, event }) => ({ ...context.draft, ...event.patch }) }),
+      /* 주소를 지우면 작가 표기도 함께 지운다. 화면은 주소가 있을 때만 표기 칸을 여는데, 값만
+         남겨 두면 **보이지 않는 칸 때문에 저장이 거절되고 사용자가 고칠 수단이 없다** — 그
+         조합(그림 없이 표기만)은 Zod·DB CHECK 가 둘 다 막는다(코드 리뷰 지적). 화면에서 사라진
+         값은 데이터에서도 사라지는 게 맞다. */
+      actions: assign({
+        draft: ({ context, event }) => {
+          const next = { ...context.draft, ...event.patch };
+          return next.fanartImageUrl.trim() === "" ? { ...next, fanartCredit: "" } : next;
+        },
+      }),
     },
   },
   initial: "ready",

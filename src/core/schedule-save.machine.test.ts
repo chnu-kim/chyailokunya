@@ -349,6 +349,36 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
   });
 });
 
+describe("scheduleSaveMachine — 팬아트(이슈 #117)", () => {
+  it("주소를 지우면 작가 표기도 함께 지운다 — 보이지 않는 값이 저장을 막으면 안 된다", async () => {
+    /* 화면은 주소가 있을 때만 표기 칸을 연다. 값만 남겨 두면 그림 없이 표기만 있는 조합이
+       저장 페이로드로 나가 Zod·DB CHECK 에 걸리는데, 그 칸이 화면에 없어 사용자가 고칠 수단이
+       없다(코드 리뷰 지적). */
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      initialDraft: draft({
+        fanartImageUrl: "https://example.com/a.png",
+        fanartCredit: "그린 사람",
+      }),
+    });
+
+    actor.send({ type: "FANART_CHANGED", patch: { fanartImageUrl: "" } });
+    expect(actor.getSnapshot().context.draft.fanartCredit).toBe("");
+  });
+
+  it("주소가 남아 있으면 표기를 안 건드린다", () => {
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      initialDraft: draft({
+        fanartImageUrl: "https://example.com/a.png",
+        fanartCredit: "그린 사람",
+      }),
+    });
+    actor.send({ type: "FANART_CHANGED", patch: { fanartImageUrl: "https://example.com/b.png" } });
+    expect(actor.getSnapshot().context.draft.fanartCredit).toBe("그린 사람");
+  });
+});
+
 describe("scheduleSaveMachine — PUBLISH·UNPUBLISH 계약(이슈 #56 결정 14 개정)", () => {
   /* 제목을 채워 둔다 — draftHasContent(발행 가드)는 **저장에 실릴 값**만 센다(빈 제목 항목은
      draftEntryInputs 가 버린다). 서버의 weekHasContent 와 같은 기준이라, 제목 없는 항목만 있는

@@ -576,14 +576,18 @@ dialog.sched-confirm::backdrop {
    폭 상한이 있는 이유: 팬아트는 세로로 긴 일러스트가 흔한데 상한이 없으면 화면 높이를 통째로
    먹어 "보너스"가 본문을 밀어낸다. 가운데 정렬은 목록(왼쪽 정렬)과 결을 갈라 이 블록이 일정의
    일부가 아니라 딸린 그림임을 자리로 말한다. */
-.sched-fanart {
+/* **클래스명이 편집기와 갈려 있다** — 편집기의 입력 묶음도 한때 `.sched-fanart` 였는데, 그러면
+   이 폴라로이드 치수(fit-content·420 상한·가운데 정렬)가 그 입력들에 그대로 새서 주소 칸이
+   쪼그라들고 가운데로 몰린다(코드 리뷰 지적). 같은 기능의 두 화면이라도 부품이 다르면 이름도
+   다르다. */
+.sched-fanart-card {
   margin: var(--space-7) auto 0;
   width: fit-content;
   max-width: min(100%, 420px);
   padding: var(--space-3) var(--space-3) var(--space-2);
 }
 /* 사진지 안쪽 그림. block 이 아니면 인라인 여백이 아래에 남아 종이 테두리가 비뚤어 보인다. */
-.sched-fanart__img {
+.sched-fanart-card__img {
   display: block;
   width: 100%;
   height: auto;
