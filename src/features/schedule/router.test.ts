@@ -139,6 +139,40 @@ describe("일정 라우터", () => {
     ]);
   });
 
+  it("팬아트를 안 보낸 저장은 기존 값을 유지한다 — 옛 클라이언트가 조용히 지우면 안 된다", async () => {
+    /* saveWeek 은 주를 통째로 교체한다. 새 필드에 기본값 null 을 주면 **이 필드를 모르는 옛
+       클라이언트의 저장이 팬아트를 지운다** — 배포 중 열려 있던 편집기 탭이 그대로 그 경로다
+       (적대적 리뷰 지적). undefined = 유지 · null = 지움으로 뜻을 갈랐다. */
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const base = {
+      weekStartDate: toIsoDate(MON),
+      note: null,
+      published: false,
+      days: [],
+      entries: [{ scheduledDate: toIsoDate("2026-07-20"), title: "저챗", gameId: null }],
+    };
+    await saveWeekAsEditor(caller, {
+      ...base,
+      fanartImageUrl: "https://example.com/a.png",
+      fanartCredit: "그린 사람",
+    });
+
+    // 팬아트 필드를 **아예 안 실은** 저장 — 옛 클라이언트가 보내는 모양이다.
+    const { revision } = await caller.schedule.getWeek({ weekStartDate: MON });
+    const after = await caller.schedule.saveWeek({ ...base, revision });
+    expect(after.fanartImageUrl).toBe("https://example.com/a.png");
+    expect(after.fanartCredit).toBe("그린 사람");
+
+    // null 을 **명시하면** 지운다 — 유지와 지움이 갈린다.
+    const cleared = await saveWeekAsEditor(caller, {
+      ...base,
+      fanartImageUrl: null,
+      fanartCredit: null,
+    });
+    expect(cleared.fanartImageUrl).toBeNull();
+    expect(cleared.fanartCredit).toBeNull();
+  });
+
   it("팬아트는 https 만 받고, 그림 없이 표기만 오면 거절한다", async () => {
     /* 외부 주소를 그대로 <img src> 에 넣는 자리라 스킴을 좁혀 둔다(schema.ts 주석). 표기만
        오는 조합은 화면에 아무것도 안 뜨는데 값만 남아, 다음 사람이 "왜 안 보이지"를 데이터에서

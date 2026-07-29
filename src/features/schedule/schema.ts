@@ -47,8 +47,7 @@ const fanartImageUrl = z.preprocess(
         return false;
       }
     }, "https:// 로 시작하는 주소여야 합니다")
-    .nullable()
-    .default(null),
+    .nullable(),
 );
 
 /* 항목 하나. title 은 자유 제목(항목 종류 컬럼을 안 둔다 — 결정 9). gameId 는 게임에 이어
@@ -94,13 +93,20 @@ export const saveWeekInput = z
        입력 순서에 달리므로 아래 refine 이 중복을 거절한다(UNIQUE 제약이 최종 방어선이지만
        거기까지 가면 저장이 통째로 실패한다 — 경계에서 먼저 거른다). */
     days: z.array(dayInput).max(7).default([]),
-    fanartImageUrl,
+    /* **`.optional()` 이다 — 기본값을 안 준다.** 이 뮤테이션은 주를 통째로 교체하므로, 새 필드에
+       `.default(null)` 을 주면 **이 필드를 모르는 옛 클라이언트의 저장이 팬아트를 NULL 로 덮는다**
+       (배포 중 열려 있던 편집기 탭이 그대로 그 경로다 — 적대적 리뷰 지적). 그래서 뜻을 셋으로
+       가른다: 없음(undefined) = 지금 값을 그대로 둔다 · null = 지운다 · 문자열 = 그 값으로 바꾼다.
+       서비스가 그 셋을 그대로 반영한다(saveWeek 의 setMeta). */
+    fanartImageUrl: fanartImageUrl.optional(),
     /* 작가 표기. 이름만 받는다(링크가 아니다 — db/schema.ts 주석). 그림 없이 표기만 오는
        조합은 아래 refine 이 막는다(DB CHECK 와 같은 규칙, 경계에서 먼저 거른다). */
-    fanartCredit: z.preprocess(
-      (v) => (typeof v === "string" && v.trim() === "" ? null : v),
-      z.string().trim().max(100).nullable().default(null),
-    ),
+    fanartCredit: z
+      .preprocess(
+        (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+        z.string().trim().max(100).nullable(),
+      )
+      .optional(),
   })
   .superRefine((v, ctx) => {
     // weekStartDate 가 월요일인가 — weekStartOf 가 자기 자신이면 그 주의 시작이다.
@@ -148,7 +154,10 @@ export const saveWeekInput = z
     });
     /* 작가 표기만 있고 그림이 없으면 화면에 아무것도 안 뜨는데 값만 남는다(DB CHECK 와 같은
        규칙 — 제약이 최종 방어선이지만 거기까지 가면 저장이 통째로 실패한다). */
-    if (v.fanartCredit !== null && v.fanartImageUrl === null) {
+    /* 둘 다 **보낸 경우에만** 조합을 본다 — 한쪽만 보낸 요청은 나머지를 서버가 유지하므로,
+       여기서 판정하면 지금 DB 에 뭐가 있는지 모르는 채로 거절하게 된다(그 판정은 DB CHECK 가
+       최종적으로 한다). */
+    if (v.fanartCredit != null && v.fanartImageUrl === null) {
       ctx.addIssue({
         code: "custom",
         path: ["fanartCredit"],

@@ -378,14 +378,17 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      setMeta 는 last_updated_at 을 안 건드린다(1단계가 이미 새 revision 을 박았다). */
   /* 팬아트도 note 와 같은 user-visible 메타라 **2단계 batch 에서만** 쓴다(1단계 청구는 revision
      만 만진다) — 이 batch 가 실패하면 함께 롤백돼 화면에 반쯤 반영된 상태가 안 남는다. */
+  /* 팬아트는 **보낸 경우에만** 쓴다 — 안 보낸 요청(이 필드를 모르는 옛 클라이언트, 배포 중
+     열려 있던 탭)이 이 전체 교체 경로로 팬아트를 조용히 지우면 안 된다(적대적 리뷰 지적).
+     undefined = 유지 · null = 지움 · 문자열 = 바꿈 (schema.ts 주석). */
   const setMeta = db
     .update(scheduleWeeks)
     .set({
       note: input.note,
       draft,
       publishedAt,
-      fanartImageUrl: input.fanartImageUrl,
-      fanartCredit: input.fanartCredit,
+      ...(input.fanartImageUrl !== undefined ? { fanartImageUrl: input.fanartImageUrl } : {}),
+      ...(input.fanartCredit !== undefined ? { fanartCredit: input.fanartCredit } : {}),
     })
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const clearEntries = db
