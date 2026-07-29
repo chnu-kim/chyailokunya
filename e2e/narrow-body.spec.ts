@@ -733,5 +733,18 @@ test.describe("감축 경로 — 주간표 미리보기", () => {
     expect(buf.subarray(12, 16).toString("ascii")).toBe("IHDR");
     expect(buf.readUInt32BE(16)).toBe(2400);
     expect(buf.readUInt32BE(20)).toBe(1260);
+
+    /* 이 미디어쿼리는 읽기 화면과 편집기가 **공유한다** — WeekCardDownload 를 둘 다 그린다.
+       편집기에서 미리보기는 baseline(마지막 저장값)을 보여주는 유일한 창이라 감추는 게 손실로
+       보이지만, 이 폭에선 그 창이 어차피 4.6px 글자라 아무것도 안 알려 준다. "지금 받으면 뭐가
+       나오나"의 답은 원래 그림이 아니라 문장이 맡는다 — 미리보기 **밖**의 stale 힌트다. 그래서
+       여기서 그 둘을 같이 잰다: 미리보기는 감춰지고, 그 문장과 버튼은 남는가(코드 리뷰가 짚은
+       자리라 주장 대신 단언으로 남긴다). 위에서 이미 발행·저장까지 마쳤으므로 제목만 고치면
+       dirty 가 된다. */
+    await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("좁은 폭 미저장");
+    const staleHint = page.locator('[data-od-id="week-card-download-stale"]');
+    await expect(staleHint).toBeVisible();
+    await expect(preview).toBeHidden();
+    await expect(button).toBeVisible();
   });
 });
