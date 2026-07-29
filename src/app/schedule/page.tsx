@@ -25,6 +25,15 @@ const getPublishedWeekCached = cache(async (weekStart: string) => {
   return getPublishedWeek(db, weekStart);
 });
 
+/* **한 요청이 보는 "오늘"은 하나다.** 위와 같은 react cache 패턴을 시계에도 쓴다 —
+   generateMetadata 와 본문이 각자 todayKST() 를 부르면 그 두 읽기 사이에 KST 자정이 지날 때
+   `?week=` 없는(또는 형식이 틀린) 요청에서 og:url 이 canonical 로 못박은 주와 화면이 그린 주가
+   갈린다. 그건 resolveWeekParam 이 애초에 한 곳에 있는 이유로 적어 둔 불변("갈라 두면 화면과
+   og:url 이 다른 주를 가리킨다")을 정확히 깨는 경로다(적대적 리뷰가 짚었다).
+
+   **이 파일에서 todayKST 를 직접 부르지 않는다** — 부르는 순간 그 불변이 다시 열린다. */
+const todayCached = cache(todayKST);
+
 /* og:image 는 주별 동적 PNG 를 다시 가리키지 않는다 — 항상 사이트 기본 커버(OG_IMAGE)다.
    2026-07-27 프로덕션 인시던트로 되돌렸다: Satori/resvg 서버 렌더가 Cloudflare Workers 무료
    플랜의 요청당 CPU 10ms 한도를 구조적으로 못 지켜(고정 비용 자체가 한도 초과), 발행된 주의
@@ -39,7 +48,7 @@ export async function generateMetadata({
   searchParams: Promise<{ week?: string }>;
 }): Promise<Metadata> {
   const { week } = await searchParams;
-  const weekStart = resolveWeekParam(week);
+  const weekStart = resolveWeekParam(week, todayCached());
   /* `week` 이 명시된 요청만 그 주로 못박는다 — 명시가 없는 맨 `/schedule` 은 계속 "지금 주"라는
      움직이는 과녁이어야 한다(원래 동작). 여기서 `weekStart`(정규화된 값)로 무조건 못박으면
      맨 URL 공유도 그 순간의 주에 영영 고정돼, 다음 주가 되어도 크롤러가 캐싱해 둔 카드가 지난
@@ -68,8 +77,14 @@ export default async function SchedulePage({
   searchParams: Promise<{ week?: string }>;
 }) {
   const { week } = await searchParams;
-  const weekStart = resolveWeekParam(week);
-  const currentWeek = weekStartOf(todayKST());
+  /* 기본 주(week 없음)·현재 주 판정·오늘 칸 표시가 전부 이 한 값에서 나온다 — 시계를 두 번
+     읽으면 그 사이 KST 자정이 지날 때 어제 기준 주를 그리면서 오늘 칩은 어디에도 없는 화면이
+     나온다(그래서 resolveWeekParam 이 today 를 필수 인자로 받는다 — core/calendar 주석).
+     todayCached 라 위 generateMetadata 와도 같은 값이다(파일 상단 주석). 클라이언트가 todayKST
+     를 다시 부르지 않는 이유는 WeekNav 주석과 같다(SSR 과 갈리면 하이드레이션이 튄다). */
+  const today = todayCached();
+  const weekStart = resolveWeekParam(week, today);
+  const currentWeek = weekStartOf(today);
 
   const db = makeDb(getCloudflareContext().env.DB);
   // 신원(쓰기 권한)에 따라 서버가 다른 뷰를 준다 — 관리자는 초안 포함 편집용, 그 외엔 발행된
@@ -111,6 +126,7 @@ export default async function SchedulePage({
         week={weekView}
         games={games}
         currentWeek={currentWeek}
+        today={today}
       />
     </main>
   );

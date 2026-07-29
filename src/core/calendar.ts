@@ -103,10 +103,16 @@ export function weekStartOf(date: IsoDate): IsoDate {
    날이면 조용히 이번 주로 떨어진다 — 위조·오타 링크를 눌러도 화면이 깨지지 않는
    `safeReturnTo` 와 같은 "버리고 기본값" 규율이다. /schedule 페이지 본문과 generateMetadata
    가 각자 이 파라미터를 해석하므로 여기 하나로 둔다 — 갈라 두면 한쪽만 느슨해지는 날 화면과
-   og:url 이 다른 주를 가리킨다. */
-export function resolveWeekParam(param: string | undefined): IsoDate {
+   og:url 이 다른 주를 가리킨다.
+
+   `today` 를 **인자로 받는다**(안에서 todayKST 를 부르지 않는다). 호출자가 이미 오늘을 알아야
+   하는 자리라(page.tsx 는 "오늘 칸" 표시에 그 값을 쓴다) 여기서 시계를 또 읽으면 한 요청이
+   서로 다른 두 시각을 보게 된다 — KST 자정이 그 두 읽기 사이에 지나면 기본 `/schedule` 이
+   **어제 기준 주**를 그리면서 오늘 칩은 어디에도 없는 화면이 나온다(코드 리뷰가 짚은 자리).
+   필수 인자라 그 실수를 타입이 막는다. */
+export function resolveWeekParam(param: string | undefined, today: IsoDate): IsoDate {
   if (param && isIsoDate(param)) return weekStartOf(param);
-  return weekStartOf(todayKST());
+  return weekStartOf(today);
 }
 
 /* 그 날짜가 속한 주의 7일(월→일). 인자로 주의 시작을 요구하지 않는다 — 요구하면 호출자가

@@ -20,11 +20,16 @@ export function ScheduleReadView({
   week,
   games,
   currentWeek,
+  today,
 }: {
   weekStartDate: string;
   week: WeekView | null;
   games: GameOption[];
   currentWeek: string;
+  /* 서버가 계산한 오늘(KST). currentWeek 과 같은 todayKST() 호출에서 나온다(page.tsx) —
+     주간 일정표에서 "지금 어느 칸인가"는 첫 질문인데 화면이 그걸 못 말하고 있었다.
+     공유 카드에는 안 싣는다: PNG 는 며칠 뒤에도 돌아다니므로 "오늘"이 거짓이 된다. */
+  today: string;
 }) {
   const days = weekDates(toIsoDate(weekStartDate));
   const gamesById = new Map(games.map((g) => [g.id, g]));
@@ -51,21 +56,37 @@ export function ScheduleReadView({
                 유지한다 — 접근성 목록이 정본이고 카드는 여전히 aria-hidden(둘이 같은 내용을
                 중복해서 말한다, week-card-download.tsx 주석). 편집기 쪽 카드 위치는 이번
                 스코프 밖이다(발행 전 미저장 변경까지 다뤄야 해서 결이 다르다). */}
-            <WeekCardDownload card={buildWeekCard(week)} weekStartDate={weekStartDate} />
-
+            {/* 공지가 카드보다 **위**다. 아래로 두면 카드 안 공지(week-card__note)와 200px
+                안에서 같은 문장이 두 번 보인다 — 카드는 공유될 그림이라 공지를 빼면 안 되고,
+                화면 쪽도 빼면 미리보기가 숨는 좁은 폭(560 아래)에서 공지를 아예 못 본다.
+                순서를 "주 전체에 대한 말 → 그 주의 그림 → 그 주의 목록"으로 두면 둘이 안 붙어
+                반복이 눈에 안 걸린다. */}
             {week.note && (
               <p className="sched__note" data-od-id="schedule-note">
                 {week.note}
               </p>
             )}
+
+            <WeekCardDownload card={buildWeekCard(week)} weekStartDate={weekStartDate} />
+
             <ol className="sched__days" data-od-id="schedule-days">
               {days.map((date, i) => {
                 const entries = week.entries.filter((e) => e.scheduledDate === date);
+                const isToday = date === today;
                 return (
-                  <li key={date} className="sched-day" data-od-id={`schedule-day-${date}`}>
+                  <li
+                    key={date}
+                    className={isToday ? "sched-day sched-day--today" : "sched-day"}
+                    data-od-id={`schedule-day-${date}`}
+                    /* 보조 기술에도 오늘이 어느 칸인지 말한다 — 칩 글자만으론 시각 사용자에게만
+                       전해진다. 오늘이 아닌 날엔 속성 자체를 안 단다(aria-current="false" 는
+                       "이 집합에 현재 항목이 있다"는 잘못된 신호를 준다). */
+                    {...(isToday ? { "aria-current": "date" as const } : {})}
+                  >
                     <div className="sched-day__label">
                       <span className="sched-day__dow">{WEEKDAY_LABELS[i]!}</span>
                       <span className="sched-day__md">{formatMD(date)}</span>
+                      {isToday && <span className="chip chip--ink sched-day__today">오늘</span>}
                     </div>
                     <div className="sched-day__entries">
                       {entries.length === 0 ? (
