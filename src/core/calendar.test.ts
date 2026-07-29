@@ -141,22 +141,27 @@ describe("weekStartOf", () => {
 });
 
 describe("resolveWeekParam", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  /* 오늘을 인자로 받으므로 가짜 타이머가 필요 없다 — 시계를 안 읽는 순수 함수가 됐다.
+     그 시그니처 자체가 계약이다: 한 요청이 "오늘"을 두 번 읽어 자정을 사이에 두는 일을
+     타입이 막는다(calendar.ts 주석). */
+  const TODAY = d("2026-07-23"); // KST 목요일
 
   it("실재하는 날짜면 그 주의 월요일로 정규화", () => {
-    expect(resolveWeekParam("2026-07-23")).toBe("2026-07-20");
+    expect(resolveWeekParam("2026-07-23", TODAY)).toBe("2026-07-20");
   });
 
   it("undefined·형식 오류·실재하지 않는 날짜는 이번 주로 — 화면이 안 깨진다", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-23T00:00:00Z")); // KST 2026-07-23(목)
     const thisWeek = "2026-07-20";
-    expect(resolveWeekParam(undefined)).toBe(thisWeek);
-    expect(resolveWeekParam("")).toBe(thisWeek);
-    expect(resolveWeekParam("2026-13-01")).toBe(thisWeek); // 형식만 맞고 실재하지 않음
-    expect(resolveWeekParam("not-a-date")).toBe(thisWeek);
+    expect(resolveWeekParam(undefined, TODAY)).toBe(thisWeek);
+    expect(resolveWeekParam("", TODAY)).toBe(thisWeek);
+    expect(resolveWeekParam("2026-13-01", TODAY)).toBe(thisWeek); // 형식만 맞고 실재하지 않음
+    expect(resolveWeekParam("not-a-date", TODAY)).toBe(thisWeek);
+  });
+
+  it("주어진 오늘이 폴백의 유일한 근거다 — 다른 날을 주면 그 주로 떨어진다", () => {
+    /* 위 두 단언만 두면 "이번 주로 떨어진다"가 인자를 쓰는지 시계를 읽는지 못 가린다.
+       다른 오늘을 넣어 결과가 따라 움직이는 걸 봐야 그 구분이 선다. */
+    expect(resolveWeekParam(undefined, d("2026-08-01"))).toBe("2026-07-27");
   });
 });
 

@@ -39,7 +39,7 @@ export async function generateMetadata({
   searchParams: Promise<{ week?: string }>;
 }): Promise<Metadata> {
   const { week } = await searchParams;
-  const weekStart = resolveWeekParam(week);
+  const weekStart = resolveWeekParam(week, todayKST());
   /* `week` 이 명시된 요청만 그 주로 못박는다 — 명시가 없는 맨 `/schedule` 은 계속 "지금 주"라는
      움직이는 과녁이어야 한다(원래 동작). 여기서 `weekStart`(정규화된 값)로 무조건 못박으면
      맨 URL 공유도 그 순간의 주에 영영 고정돼, 다음 주가 되어도 크롤러가 캐싱해 둔 카드가 지난
@@ -68,11 +68,13 @@ export default async function SchedulePage({
   searchParams: Promise<{ week?: string }>;
 }) {
   const { week } = await searchParams;
-  const weekStart = resolveWeekParam(week);
-  /* 오늘과 이번 주를 **한 번의** todayKST() 에서 같이 낸다 — 두 번 부르면 자정 직전 요청에서
-     서로 다른 날을 볼 수 있고, 그러면 "이번 주"인데 오늘 칸이 없는 화면이 나온다. 클라이언트가
+  /* 이 요청이 보는 "오늘"은 **여기 한 번**뿐이다 — 기본 주(week 없음)·현재 주 판정·오늘 칸
+     표시가 전부 이 값에서 나온다. 시계를 두 번 읽으면 그 사이 KST 자정이 지날 때 기본
+     `/schedule` 이 어제 기준 주를 그리면서 오늘 칩은 어디에도 없는 화면이 나온다(그래서
+     resolveWeekParam 이 today 를 필수 인자로 받는다 — core/calendar 주석). 클라이언트가
      todayKST 를 다시 부르지 않는 이유는 WeekNav 주석과 같다(SSR 과 갈리면 하이드레이션이 튄다). */
   const today = todayKST();
+  const weekStart = resolveWeekParam(week, today);
   const currentWeek = weekStartOf(today);
 
   const db = makeDb(getCloudflareContext().env.DB);
