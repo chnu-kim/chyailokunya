@@ -6,6 +6,7 @@ import {
   oauthAccounts,
   refreshTokens,
   roleAuditLogs,
+  scheduleDays,
   scheduleEntries,
   scheduleWeeks,
   securityEvents,
@@ -30,6 +31,10 @@ beforeEach(async () => {
   await db.delete(refreshTokens);
   await db.delete(securityEvents);
   await db.delete(scheduleEntries);
+  /* schedule_days 는 FK 가 없지만(하루의 속성일 뿐 무엇도 참조하지 않는다) 반드시 비운다 —
+     워커 풀은 스토리지를 재사용하고 이 파일엔 isolatedStorage 가 없어서(AGENTS Phase 3 지뢰),
+     남은 행이 다음 테스트의 같은 날짜에 얹히거나 scheduled_date UNIQUE 로 터진다. */
+  await db.delete(scheduleDays);
   await db.delete(scheduleWeeks);
   await db.delete(games);
   await db.delete(users);

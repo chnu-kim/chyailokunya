@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { authoritiesFor, type Authority } from "@/core/authorities";
 import { toIsoDate } from "@/core/calendar";
-import { makeDb, scheduleEntries, scheduleWeeks, type Db } from "@/db";
+import { games, makeDb, scheduleDays, scheduleEntries, scheduleWeeks, type Db } from "@/db";
 import { createCallerFactory } from "@/features/trpc/init";
 import { appRouter } from "@/features/router";
 import type { Context } from "@/features/trpc/init";
@@ -125,6 +125,38 @@ describe("일정 라우터", () => {
       { date: "2026-07-20", time: "21:00", rest: false },
       { date: "2026-07-21", time: null, rest: true },
     ]);
+  });
+
+  it("휴방으로 바꾼 날의 항목은 보드의 플레이 날짜에서 빠진다 — 두 공개 화면이 같은 말을 한다", async () => {
+    /* /schedule 은 휴방인 날의 항목을 가린다(ADR-0027 결정 5 — 표시에서 휴방이 이긴다). 보드가
+       같은 규칙을 안 따르면 주간표는 그날을 "휴방"이라 하는데 게임 보드는 같은 날짜를 그 게임의
+       플레이 날짜로 띄운다 — 관리자가 한 행동은 "그날 쉬기로 했다" 하나뿐인데 두 공개 화면이
+       서로 다른 말을 하게 된다(코드 리뷰가 잡은 자리). */
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const db = makeDb(env.DB);
+    const [g] = await db
+      .insert(games)
+      .values({ categoryType: "GAME", categoryValue: "엘든 링" })
+      .returning();
+
+    // 먼저 평범하게 편성하고 발행한다 — 보드에 날짜가 뜬다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      published: true,
+      days: [{ scheduledDate: "2026-07-22", startTime: "20:00", rest: false }],
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든 링", gameId: g!.id }],
+    });
+    expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBe("2026-07-22");
+
+    /* 그날을 휴방으로 바꾼다. 항목은 **일부러 그대로 둔다** — 표시에서만 휴방이 이기고 저장은
+       보존하는 것이 결정 5 라, 이 상황이 실제로 만들어질 수 있다. */
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      published: true,
+      days: [{ scheduledDate: "2026-07-22", startTime: null, rest: true }],
+      entries: [{ scheduledDate: "2026-07-22", title: "엘든 링", gameId: g!.id }],
+    });
+    expect((await createCaller(makeCtx()).games.list())[0]!.lastPlayed).toBeNull();
   });
 
   it("휴방만 있는 주도 발행할 수 있다 — 항목 0 이 곧 빈 주는 아니다(결정 9)", async () => {
