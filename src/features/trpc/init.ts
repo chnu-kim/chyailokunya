@@ -6,6 +6,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import type { Authority } from "@/core/authorities";
 import type { Db } from "@/db";
 import type { ChzzkCreds } from "@/features/chzzk-http";
+import type { FanartObjectStore } from "@/features/schedule/service";
 
 /* tRPC 컨텍스트(ADR-0017). actor 는 로그인 주체(channelId·userId, access JWT 에서 검증) — 비로그인
    이면 null. authoritiesOf 는 인가가 필요한 순간에만 역할을 DB 조회한다(access 엔 authorities 를
@@ -19,6 +20,11 @@ export type Context = {
   actor: SessionActor | null;
   authoritiesOf: () => Promise<ReadonlySet<Authority>>;
   chzzk: ChzzkCreds | null;
+  /* 팬아트 객체 저장소(ADR-0028). 저장이 팬아트를 교체·삭제하면 버려진 객체를 치우는 데만
+     쓴다 — 업로드는 파일 바이트를 실어 나르므로 tRPC 가 아니라 Route Handler 다. 바인딩이
+     없는 환경(단위 테스트 기본값)에선 null 이고, 그때는 정리를 건너뛴다(고아가 남을 뿐
+     저장은 정상이다 — 실패 방향을 그쪽으로 고정한 것이 ADR 의 결정이다). */
+  fanart: FanartObjectStore | null;
 };
 
 const t = initTRPC.context<Context>().create();

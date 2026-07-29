@@ -14,9 +14,18 @@ import { getPublishedWeek, getWeekForEdit, nextRevision, saveWeek } from "./serv
 const createCaller = createCallerFactory(appRouter);
 const admin = authoritiesFor(["admin"]); // schedule:write + game:write 포함
 
-function makeCtx(over: { authorities?: ReadonlySet<Authority> } = {}): Context {
+function makeCtx(
+  over: { authorities?: ReadonlySet<Authority>; fanart?: Context["fanart"] } = {},
+): Context {
   const authorities = over.authorities ?? new Set<Authority>();
-  return { db: makeDb(env.DB), actor: null, chzzk: null, authoritiesOf: async () => authorities };
+  return {
+    db: makeDb(env.DB),
+    actor: null,
+    chzzk: null,
+    // 기본은 null — 바인딩 없는 환경과 같다(정리를 건너뛴다). 팬아트 정리를 재는 테스트만 스텁을 준다.
+    fanart: over.fanart ?? null,
+    authoritiesOf: async () => authorities,
+  };
 }
 
 // 2026-07-20 은 월요일 — 주의 시작. 이 주의 7일은 07-20..07-26.
@@ -67,6 +76,8 @@ describe("일정 라우터", () => {
       draft: true,
       revision: null,
       days: [],
+      fanartImageKey: null,
+      fanartCredit: null,
       entries: [],
     });
   });
@@ -797,5 +808,135 @@ describe("일정 라우터", () => {
     const [card] = await createCaller(makeCtx()).games.list();
     expect(card!.id).toBe(game.id);
     expect(card!.lastPlayed).toBe("2026-07-20");
+  });
+});
+
+/* 팬아트 저장 계약(ADR-0028). 바이트는 Route Handler 가 맡고(e2e/fanart.spec 이 증명) 여기선
+   **키가 주 메타에 어떻게 붙고 떨어지는가**를 잰다 — 저장 규약(undefined/null/문자열)과 버려진
+   객체 정리가 그 둘이다. */
+describe("팬아트", () => {
+  const KEY_A = "0189d1f0-3a4b-7c8d-9e0f-1a2b3c4d5e6f.png";
+  const KEY_B = "0189d1f0-3a4b-7c8d-9e0f-aaaabbbbcccc.webp";
+
+  // R2 대신 지운 키를 모으는 스텁. 구조적 타이핑이라 어댑터가 필요 없다(service 의 FanartObjectStore).
+  function fanartSpy() {
+    const deleted: string[] = [];
+    return { deleted, store: { delete: async (key: string) => void deleted.push(key) } };
+  }
+
+  it("키와 표기를 저장하고 되읽는다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      fanartImageKey: KEY_A,
+      fanartCredit: "그린 사람",
+    });
+    const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    // 저장되는 값은 URL 이 아니라 키 조각이다 — 화면이 /api/fanart/${key} 로 조립한다.
+    expect(week.fanartImageKey).toBe(KEY_A);
+    expect(week.fanartCredit).toBe("그린 사람");
+  });
+
+  it("안 보낸 저장은 기존 팬아트를 그대로 둔다 — 옛 클라이언트가 값을 지우지 않는다", async () => {
+    /* 전체 교체 뮤테이션에 새 필드를 더할 때의 일반 규칙이다. `.default(null)` 을 줬다면 이
+       필드를 모르는 탭(배포 중 열려 있던 편집기)의 저장이 팬아트를 NULL 로 덮었다. */
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      fanartImageKey: KEY_A,
+      fanartCredit: "그린 사람",
+    });
+    // 팬아트 두 칸을 아예 안 싣고 저장한다(옛 클라이언트가 보내는 모양 그대로).
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-21", title: "저챗" }],
+    });
+    const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageKey).toBe(KEY_A);
+    expect(week.fanartCredit).toBe("그린 사람");
+  });
+
+  it("키를 바꾸면 옛 객체를 치우고, 지우면 표기도 함께 사라진다", async () => {
+    const spy = fanartSpy();
+    const caller = createCaller(makeCtx({ authorities: admin, fanart: spy.store }));
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      fanartImageKey: KEY_A,
+      fanartCredit: "그린 사람",
+    });
+    expect(spy.deleted).toEqual([]); // 처음 붙일 땐 버려지는 게 없다
+
+    // 다른 그림으로 교체 — 옛 객체는 이제 아무도 안 가리킨다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      fanartImageKey: KEY_B,
+    });
+    // prefix 는 코드가 붙인다 — DB 엔 조각만 산다(core/fanart).
+    expect(spy.deleted).toEqual([`fanart/${KEY_A}`]);
+
+    // 명시적으로 지우면(null) 그 객체도 치운다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      fanartImageKey: null,
+      fanartCredit: null,
+    });
+    expect(spy.deleted).toEqual([`fanart/${KEY_A}`, `fanart/${KEY_B}`]);
+    const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageKey).toBeNull();
+    expect(week.fanartCredit).toBeNull();
+  });
+
+  it("같은 키를 다시 저장하면 아무것도 안 지운다 — 지금 걸려 있는 그림이다", async () => {
+    const spy = fanartSpy();
+    const caller = createCaller(makeCtx({ authorities: admin, fanart: spy.store }));
+    const base = {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      fanartImageKey: KEY_A,
+    };
+    await saveWeekAsEditor(caller, base);
+    await saveWeekAsEditor(caller, { ...base, fanartCredit: "그린 사람" });
+    expect(spy.deleted).toEqual([]);
+    expect((await caller.schedule.getWeek({ weekStartDate: MON })).fanartImageKey).toBe(KEY_A);
+  });
+
+  it("그림 없이 작가 표기만은 거절한다 — 화면엔 아무것도 안 뜨는데 값만 남는다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    await expect(
+      saveWeekAsEditor(caller, {
+        weekStartDate: MON,
+        days: [],
+        entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+        fanartImageKey: null,
+        fanartCredit: "그린 사람",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("업로드가 낸 키가 아닌 값은 거절한다 — 외부 주소가 이 칸에 못 들어온다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    for (const bad of ["https://example.com/a.png", "../secret", `fanart/${KEY_A}`]) {
+      await expect(
+        saveWeekAsEditor(caller, {
+          weekStartDate: MON,
+          days: [],
+          entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+          // 위조 클라이언트가 보낼 수 있는 값 — Zod 경계가 형식으로 거른다(core/fanart 가 정본).
+          fanartImageKey: bad,
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
   });
 });

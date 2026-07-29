@@ -18,6 +18,9 @@ const WEEK: WeekView = {
   draft: false,
   revision: 1753600000000,
   days: [],
+  // 팬아트는 PR 2(화면)에서 붙는다 — 지금은 뷰 타입을 만족시키는 값이다.
+  fanartImageKey: null,
+  fanartCredit: null,
   entries: [
     {
       id: 1,

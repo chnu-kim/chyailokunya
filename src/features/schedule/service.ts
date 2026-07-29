@@ -4,6 +4,7 @@
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { toIsoDate, weekDates, weekStartOf } from "@/core/calendar";
+import { fanartObjectKey } from "@/core/fanart";
 import {
   games,
   scheduleDays,
@@ -14,6 +15,12 @@ import {
   type ScheduleEntry,
 } from "@/db";
 import type { PublishWeekInput, SaveWeekInput } from "./schema";
+
+/* 팬아트 객체 저장소로 난 좁은 창(ADR-0028). R2Bucket 이 구조적으로 이걸 만족하므로 별도
+   어댑터가 필요 없고, 테스트는 스텁 하나를 준다 — 이 서비스가 R2 전역 타입에 매이지 않는다.
+   `delete` 하나뿐인 이유: 이 레이어가 바이트에 대해 할 일이 "버려진 것을 치운다" 뿐이다.
+   업로드는 Route Handler 가 맡는다(파일 바이트는 tRPC 경계를 안 건넌다). */
+export type FanartObjectStore = { delete(key: string): Promise<void> };
 
 /* 한 주의 뷰 — 메타(공지·발행) + 그 주 7일의 항목들. 편집 화면이 불러오고, 저장이 되돌려준다.
    주 자체는 저장하지 않고 날짜에서 유도하므로(결정 2) 항목은 week_id FK 가 아니라 scheduled_date
@@ -35,6 +42,11 @@ export type WeekView = {
      별도 revision 컬럼을 안 두는 이유: last_updated_at 이 이미 "이 주가 마지막으로 바뀐 순간"
      이라 같은 사실을 두 곳에 적을 필요가 없다. */
   revision: number | null;
+  /* 그 주에 걸어 둔 팬아트(ADR-0028). R2 객체 키 한 조각이라 화면이 `/api/fanart/${key}` 로
+     조립한다 — 여기서 완성된 URL 을 만들지 않는다: 서버가 origin 을 알 필요가 없고(뷰가
+     같은 origin 에서 뜬다), 라우트를 옮길 때 저장된 값이 아니라 조립부 한 곳만 바뀐다. */
+  fanartImageKey: string | null;
+  fanartCredit: string | null;
   entries: ScheduleEntry[];
   /* 그 주 7일 중 **기본값이 아닌 날만**(시각이 있거나 휴방인 날). 행이 없는 날은 "시각 미정 ·
      휴방 아님"과 같은 뜻이라 목록에 안 실린다(db/schema.ts 의 "행이 없는 것 = 기본값").
@@ -92,6 +104,8 @@ export async function getWeekForEdit(db: Db, weekStartDate: string): Promise<Wee
     weekStartDate,
     note: meta?.note ?? null,
     publishedAt: meta?.publishedAt ?? null,
+    fanartImageKey: meta?.fanartImageKey ?? null,
+    fanartCredit: meta?.fanartCredit ?? null,
     /* 메타가 없는 주의 draft 는 "관리자가 뭔가 정해 뒀나"로 가른다 — 휴방만 있는 주도 정해 둔
        주다(결정 9). 항목 수만 보면 그런 주가 "아직 아무도 안 짠 새 주"로 읽혀 보드에서 사라진다. */
     draft: meta?.draft ?? !weekHasContent(entries.length, days.filter((d) => d.rest).length),
@@ -225,7 +239,11 @@ export function claimWeek(db: Db, date: string, now: number) {
 
    발행 시각은 처음 발행할 때만 찍고 이후 저장엔 유지한다(existing ?? now) — 재저장마다 바뀌면
    "언제 발행했나"가 무의미해진다. 발행을 내리면 null 로 되돌린다(다시 초안). */
-export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> {
+export async function saveWeek(
+  db: Db,
+  input: SaveWeekInput,
+  fanart?: FanartObjectStore,
+): Promise<WeekView> {
   const { monday, sunday } = weekBounds(input.weekStartDate);
   const now = Date.now();
 
@@ -268,7 +286,12 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      없는 주의 draft 기본값을 가르는 데만 쓰인다(아래). */
   const [metaRows, priorEntries, priorRestDays] = await db.batch([
     db
-      .select({ publishedAt: scheduleWeeks.publishedAt, draft: scheduleWeeks.draft })
+      .select({
+        publishedAt: scheduleWeeks.publishedAt,
+        draft: scheduleWeeks.draft,
+        // 지금 걸려 있는 팬아트 키. 저장이 다른 키로 바꾸거나 지우면 이 객체가 버려진다(아래).
+        fanartImageKey: scheduleWeeks.fanartImageKey,
+      })
       .from(scheduleWeeks)
       .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate)),
     db
@@ -370,9 +393,19 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
      note·publishedAt 이 여기서만 쓰인다 — 이 batch 가 실패/중단되면 셋(메타 SET·삭제·삽입)이
      함께 롤백돼 발행 경계가 안 넘어간다. 0단계가 gameId 를 걸렀으므로 현실적으로 실패하지 않는다.
      setMeta 는 last_updated_at 을 안 건드린다(1단계가 이미 새 revision 을 박았다). */
+  /* 팬아트도 note 와 같은 user-visible 메타라 **2단계 batch 에서만** 쓴다(1단계 청구는 revision
+     만 만진다). 그리고 **보낸 경우에만** 쓴다 — 이 필드를 모르는 옛 클라이언트(배포 중 열려
+     있던 탭)의 저장이 이 전체 교체 경로로 팬아트를 조용히 지우면 안 된다:
+     undefined = 유지 · null = 지움 · 문자열 = 바꿈(schema.ts 주석). */
   const setMeta = db
     .update(scheduleWeeks)
-    .set({ note: input.note, draft, publishedAt })
+    .set({
+      note: input.note,
+      draft,
+      publishedAt,
+      ...(input.fanartImageKey !== undefined ? { fanartImageKey: input.fanartImageKey } : {}),
+      ...(input.fanartCredit !== undefined ? { fanartCredit: input.fanartCredit } : {}),
+    })
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const clearEntries = db
     .delete(scheduleEntries)
@@ -412,6 +445,29 @@ export async function saveWeek(db: Db, input: SaveWeekInput): Promise<WeekView> 
     );
   }
   await db.batch(writes as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
+
+  /* ── 3단계: 버려진 팬아트 객체를 치운다 ─────────────────────────────────────────────
+     **행이 새 키를 가리킨 뒤에 지운다.** 순서를 뒤집으면 batch 가 실패했을 때 아직 행이
+     가리키고 있는 객체를 지운 상태가 되어 그림이 깨진다 — D1 엔 대화형 트랜잭션이 없어 둘을
+     한 원자 단위로 못 묶으므로(AGENTS), 어느 쪽으로 실패할지를 순서로 정한다: 고아 객체는
+     스토리지 비용일 뿐이고 dangling key 는 화면이 깨진다(ADR-0028).
+
+     실패를 삼키는 것도 같은 이유다. 저장은 이미 커밋됐고 사용자가 원한 결과는 나왔다 —
+     여기서 던지면 성공한 저장이 실패로 보이고, 재시도해도 이 객체는 이미 아무도 안 가리켜
+     같은 자리에 다시 오지도 않는다. */
+  const discarded = existing?.fanartImageKey;
+  if (
+    fanart &&
+    discarded &&
+    input.fanartImageKey !== undefined &&
+    discarded !== input.fanartImageKey
+  ) {
+    try {
+      await fanart.delete(fanartObjectKey(discarded));
+    } catch (e) {
+      console.error(`[schedule] 버려진 팬아트 객체를 못 지웠다: ${discarded}`, e);
+    }
+  }
 
   return getWeekForEdit(db, input.weekStartDate);
 }

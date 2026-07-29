@@ -250,10 +250,31 @@ export const scheduleWeeks = sqliteTable(
     // 기본 false 가 "메타 행 없음"과 같은 뜻이라, 새 행이 도메인 상태를 안 흔든다.
     draft: integer("draft", { mode: "boolean" }).notNull().default(false),
     publishedAt: integer("published_at"),
+    /* 그 주에 걸어 둘 팬아트(ADR-0028). 주에 딸린 부가 정보라 note 와 같은 자리다.
+
+       **URL 이 아니라 R2 객체 키다** — `<uuid>.<ext>` 한 조각이고, prefix(`fanart/`)와 서빙
+       경로(`/api/fanart/…`)는 코드가 붙인다(core/fanart.ts 가 형식의 정본). 컬럼이 URL 이면
+       외부 호스트를 가리키는 행을 문법적으로 막을 수단이 없는데, 이 기능이 R2 로 옮겨온 이유가
+       정확히 그 유출(방문자 IP 가 남의 서버로 간다)이다. 키는 호스트를 표현할 수 없다.
+
+       credit 은 작가 표기 문자열이다. 링크가 아니라 이름만 받는다 — 링크를 받으면 그 URL 도
+       검증·새 창 처리·대비를 따로 져야 하는데, 팬아트 한 장에 그만한 배선을 붙일 근거가 아직
+       없다(ADR-0010 JIT). 필요해지면 그때 연다. */
+    fanartImageKey: text("fanart_image_key"),
+    fanartCredit: text("fanart_credit"),
     createdAt: createdAt(),
     lastUpdatedAt: lastUpdatedAt(),
   },
-  (t) => [check("schedule_weeks_draft", sql`${t.draft} = 0 OR ${t.publishedAt} IS NULL`)],
+  (t) => [
+    check("schedule_weeks_draft", sql`${t.draft} = 0 OR ${t.publishedAt} IS NULL`),
+    /* 작가 표기만 있고 그림이 없는 조합을 막는다 — 그러면 화면에 아무것도 안 뜨는데 값만
+       남아, 다음 사람이 "왜 안 보이지"를 데이터에서 찾게 된다. 반대(그림만 있고 표기 없음)는
+       정상이다: 작가를 모르거나 본인이 그린 경우가 있다. */
+    check(
+      "schedule_weeks_fanart",
+      sql`${t.fanartCredit} IS NULL OR ${t.fanartImageKey} IS NOT NULL`,
+    ),
+  ],
 );
 
 /* 팬 수정 제안(ADR-0025). 보드의 쓰기는 상승 역할 전용인데(ADR-0012), 방송을 실제로 본 팬이

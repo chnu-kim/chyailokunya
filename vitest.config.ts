@@ -27,6 +27,10 @@ export default defineConfig(async () => {
                 compatibilityDate: "2026-07-14",
                 compatibilityFlags: ["nodejs_compat"],
                 d1Databases: ["DB"],
+                // 팬아트 바이트(ADR-0028). D1 과 같은 결 — 이름만 주면 Miniflare 가 로컬
+                // 저장소를 세운다. 테스트 간 정리는 D1 과 달리 각 스펙이 자기 키만 쓰고 지운다
+                // (버킷 전체를 비우면 병렬 스펙끼리 서로의 객체를 지운다).
+                r2Buckets: ["FANART"],
                 bindings: { TEST_MIGRATIONS: migrations },
               },
             }),

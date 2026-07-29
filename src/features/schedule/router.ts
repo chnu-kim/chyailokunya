@@ -27,7 +27,8 @@ export const scheduleRouter = router({
     .input(saveWeekInput)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await saveWeek(ctx.db, input);
+        // 팬아트를 교체·삭제하면 버려진 객체를 서비스가 치운다(ADR-0028) — 바인딩이 없으면 건너뛴다.
+        return await saveWeek(ctx.db, input, ctx.fanart ?? undefined);
       } catch (e) {
         /* 불러온 뒤 누군가 이 주를 먼저 저장했다. 전체 교체라 그대로 진행하면 그 사람의 항목이
            통째로 사라지므로 덮어쓰지 않고 거절한다 — 편집기가 이 코드를 받아 안내한다. */

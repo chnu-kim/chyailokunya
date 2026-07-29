@@ -25,6 +25,8 @@ function week(over: Partial<WeekView> = {}): WeekView {
     draft: false,
     days: [],
     revision: 1,
+    fanartImageKey: null,
+    fanartCredit: null,
     entries: [],
     ...over,
   };

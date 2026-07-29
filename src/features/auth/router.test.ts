@@ -18,6 +18,7 @@ function makeCtx(authorities: ReadonlySet<Authority>, actor: SessionActor | null
     db: makeDb(env.DB),
     actor,
     chzzk: null,
+    fanart: null,
     authoritiesOf: async () => authorities,
   };
 }
