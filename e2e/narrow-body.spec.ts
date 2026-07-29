@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
@@ -671,4 +672,66 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
       expect(dayBox!.y + dayBox!.height).toBeLessThanOrEqual(barBox!.y + 1);
     });
   }
+});
+
+/* 주간표 미리보기의 감축 경로(2026-07-29). 미리보기는 1200px 원본을 컨테이너 폭에 맞춰 축소해
+   보여주는데, 390px 에선 배율이 0.285 라 요일 34px→9.7px · 항목 제목 16px→4.6px 로 글자를 전혀
+   못 읽는다(실측). 그래서 560 아래에서 감춘다 — 카드는 aria-hidden 이고 바로 아래 요일 목록이
+   같은 내용을 이미 말하므로 잃는 의미가 0 이다.
+
+   위 두 /schedule 블록과 달리 **발행된 주**가 필요하다(미발행이면 미리보기 자체가 없어 이
+   감축을 잴 수 없다). 그래서 관리자로 직접 하나 만든다 — 다른 스펙이 안 읽는 먼 주를 쓴다
+   (AGENTS 의 "e2e 스펙은 D1 픽스처 하나를 공유한다").
+
+   전환은 경계 ±1px 로 본다: 위 상단 주석대로 320·390 사이엔 브레이크포인트가 없어 그 둘만으론
+   "감축이 실제로 일어나는지"를 증명하지 못한다. 버튼은 양쪽 폭에서 다 남아야 한다 — 캡처는
+   화면 밖 복제본을 찍으므로(week-card-download.tsx 의 snapshotCard) 미리보기가 안 보여도
+   다운로드 자체는 된다. */
+test.describe("감축 경로 — 주간표 미리보기", () => {
+  test("560 아래에서 미리보기가 감춰지고 다운로드 버튼은 남는다", async ({ page, baseURL }) => {
+    await signIn(page.context(), baseURL!);
+    await page.goto("/schedule?week=2035-09-03");
+    await expectSignedIn(page);
+
+    // 발행해야 미리보기가 선다 — 저장 뒤 칩을 눌러 확인창을 거친다(schedule.spec 의 publishNow).
+    await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+    await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("좁은 폭 미리보기");
+    await page.locator('[data-od-id="schedule-save"]').click();
+    await expect(page.locator('[data-od-id="schedule-save"]')).toBeDisabled();
+    await page.locator('[data-od-id="schedule-publish-toggle"]').click();
+    await page.locator('[data-od-id="schedule-publish-confirm-confirm"]').click();
+    await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("공개 중");
+
+    const preview = page.locator(".week-card-download__preview");
+    const button = page.locator('[data-od-id="week-card-download-btn"]');
+
+    await page.setViewportSize({ width: 561, height: 800 });
+    await expect(preview).toBeVisible();
+
+    await page.setViewportSize({ width: 560, height: 800 });
+    await expect(preview).toBeHidden();
+    await expect(button).toBeVisible();
+
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(preview).toBeHidden();
+    await expect(button).toBeVisible();
+    expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
+
+    /* **여기가 이 스펙의 핵심이다.** 미리보기를 감춘 조상이 display:none 이면 그 안의
+       `.week-card` 도 레이아웃이 없다 — 캡처가 원본 노드를 그대로 찍는 구현이었다면 좁은 폭에서
+       다운로드가 통째로 깨진다. 실제로는 클릭 시점에 노드를 복제해 body 직속으로 붙여 찍으므로
+       (week-card-download.tsx 의 snapshotCard) 그 복제본엔 이 미디어쿼리가 안 걸린다. 버튼이
+       보이는 것만 재고 넘어가면 그 사실이 주장으로만 남으니, 320px 에서 진짜 바이트를 받아
+       PNG 시그니처와 1200×630 의 2배 치수까지 확인한다(schedule.spec 의 PNG 검증과 같은 방식). */
+    const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
+    const file = await download.path();
+    expect(file).not.toBeNull();
+    const buf = readFileSync(file!);
+    expect(buf.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    expect(buf.subarray(12, 16).toString("ascii")).toBe("IHDR");
+    expect(buf.readUInt32BE(16)).toBe(2400);
+    expect(buf.readUInt32BE(20)).toBe(1260);
+  });
 });

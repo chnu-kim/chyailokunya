@@ -129,11 +129,24 @@
   gap: 2px;
   padding-top: 6px;
 }
+/* 오늘 칸. 주간 일정표에서 "지금 어느 칸인가"는 첫 질문인데 화면이 그걸 안 말하고 있었다.
+   정본은 라벨 칸의 "오늘" 칩이고 이 테두리는 보조다 — 색만으로 구분하면 색각 이상에서 통째로
+   사라진다. --border-strong 은 이 카드가 앉는 .paper 표면(--surface) 위에서 진한 잉크라 양
+   테마에서 선다(파일 상단 주석의 근거 그대로). 두께는 안 바꾼다 — 1.5px 로 올리면 오늘 칸만
+   0.5px 씩 커져 7장이 미세하게 어긋난다. */
+.sched-day--today {
+  border-color: var(--border-strong);
+}
 .sched-day__dow {
   font-family: var(--font-display);
   font-size: var(--text-lg);
   line-height: 1;
   color: var(--fg);
+}
+/* 라벨 칸이 56px 고정폭이라 .chip 기본 패딩(4px 12px)이면 넘친다 — 좌우를 8 로 줄여
+   12px 두 글자 + 16 + 보더 2 로 들어간다. 인터랙티브가 아니라 44 하한 대상이 아니다. */
+.sched-day__today {
+  padding: 3px 8px;
 }
 .sched-day__md {
   font-family: var(--font-mono);
@@ -695,7 +708,11 @@ dialog.sched-confirm::backdrop {
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-3);
+  /* 아래 여백은 이 묶음(카드+버튼)과 요일 목록을 가르는 자리다. 공지가 카드 **위**로 올라가며
+     (schedule-read.tsx 주석) 그 공지의 margin-bottom 이 맡던 간격이 사라져, 버튼이 목록 첫
+     카드에 붙어 목록에 딸린 조작처럼 읽혔다 — 실측 후 되살린 값이다. */
   margin-top: var(--space-7);
+  margin-bottom: var(--space-6);
 }
 .week-card-download__preview {
   position: relative;
@@ -730,6 +747,19 @@ dialog.sched-confirm::backdrop {
   .sched__head {
     flex-direction: column;
     align-items: stretch;
+  }
+  /* 미리보기는 컨테이너 폭에 맞춰 축소되는데(week-card-download.tsx 의 ResizeObserver) 390px
+     에선 배율이 0.285 라 요일 34px→9.7px · 항목 제목 16px→4.6px 로 글자를 전혀 못 읽는다
+     (실측 2026-07-29). **무엇이 받아질지 못 보여주면 미리보기가 아니다.** 카드는 aria-hidden
+     이고 바로 아래 목록이 같은 내용을 이미 말하므로 감춰도 잃는 의미가 0 이다. 버튼은 남는다 —
+     캡처는 화면 밖에 붙인 복제본을 찍으므로(snapshotCard) 미리보기가 안 보여도 그대로 된다. */
+  .week-card-download__preview {
+    display: none;
+  }
+  /* 미리보기가 빠지면 이 묶음은 버튼 한 줄뿐이라, 카드를 띄우려고 잡은 위 여백(48)이 공지와
+     버튼 사이를 과하게 벌린다. 그 자리에선 space-5 가 이웃 블록 간격과 같은 결이다. */
+  .week-card-download {
+    margin-top: var(--space-5);
   }
   /* 하루 카드는 라벨을 위로 올린다 — 좁으면 왼쪽 고정폭 라벨이 항목 폭을 너무 먹는다. */
   .sched-day {

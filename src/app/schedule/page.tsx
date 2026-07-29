@@ -69,7 +69,11 @@ export default async function SchedulePage({
 }) {
   const { week } = await searchParams;
   const weekStart = resolveWeekParam(week);
-  const currentWeek = weekStartOf(todayKST());
+  /* 오늘과 이번 주를 **한 번의** todayKST() 에서 같이 낸다 — 두 번 부르면 자정 직전 요청에서
+     서로 다른 날을 볼 수 있고, 그러면 "이번 주"인데 오늘 칸이 없는 화면이 나온다. 클라이언트가
+     todayKST 를 다시 부르지 않는 이유는 WeekNav 주석과 같다(SSR 과 갈리면 하이드레이션이 튄다). */
+  const today = todayKST();
+  const currentWeek = weekStartOf(today);
 
   const db = makeDb(getCloudflareContext().env.DB);
   // 신원(쓰기 권한)에 따라 서버가 다른 뷰를 준다 — 관리자는 초안 포함 편집용, 그 외엔 발행된
@@ -111,6 +115,7 @@ export default async function SchedulePage({
         week={weekView}
         games={games}
         currentWeek={currentWeek}
+        today={today}
       />
     </main>
   );
