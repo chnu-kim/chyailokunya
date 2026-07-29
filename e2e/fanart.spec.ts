@@ -75,7 +75,9 @@ test("관리자: PNG 를 올리고 그 키로 되받는다", async ({ browser, b
   expect(got.status()).toBe(200);
   // Content-Type 은 클라이언트가 보낸 값이 아니라 업로드가 바이트로 판정한 결과다.
   expect(got.headers()["content-type"]).toBe("image/png");
-  expect(got.headers()["cache-control"]).toContain("immutable");
+  /* 캐시는 걸되 **immutable 은 안 쓴다** — 이 자원은 삭제된다(관리자가 내리거나 교체한다).
+     내용이 안 바뀐다고 1년 immutable 을 걸면 지운 뒤에도 옛 URL 이 계속 서빙된다. */
+  expect(got.headers()["cache-control"]).toBe("public, max-age=3600");
   expect(Buffer.from(await got.body()).subarray(0, 8)).toEqual(PNG_BYTES.subarray(0, 8));
 
   await context.close();

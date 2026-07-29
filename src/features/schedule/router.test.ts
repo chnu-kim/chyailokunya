@@ -912,6 +912,119 @@ describe("팬아트", () => {
     expect((await caller.schedule.getWeek({ weekStartDate: MON })).fanartImageKey).toBe(KEY_A);
   });
 
+  it("그림을 내리면 작가 표기도 함께 사라진다 — 표기만 남으면 DB CHECK 가 저장을 죽인다", async () => {
+    /* 지움 요청이 키만 싣고 표기를 생략해도(화면이 그렇게 보낸다) 서버가 조합을 맞춘다.
+       안 맞추면 batch 가 CHECK 로 실패하는데, 그때는 이미 revision 이 올라 편집기가 이유 없는
+       CONFLICT 에 빠진다(적대적 리뷰·코드 리뷰가 같이 잡은 자리). */
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+      fanartCredit: "그린 사람",
+    });
+    // 표기는 안 싣고 그림만 내린다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: null,
+    });
+    const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageKey).toBeNull();
+    expect(week.fanartCredit).toBeNull();
+  });
+
+  it("그림을 바꾸면 옛 작가 표기를 안 물려준다 — 잘못된 귀속이 값 소실보다 나쁘다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+      fanartCredit: "처음 그린 사람",
+    });
+    // 새 그림만 싣는다(표기 생략) — 옛 이름이 새 그림에 붙으면 안 된다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_B,
+    });
+    let week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageKey).toBe(KEY_B);
+    expect(week.fanartCredit).toBeNull();
+
+    // 새 표기를 함께 보내면 그 값이 쓰인다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+      fanartCredit: "다른 사람",
+    });
+    week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartCredit).toBe("다른 사람");
+  });
+
+  it("표기만 보냈는데 걸린 그림이 없으면 거절하고 revision 을 안 올린다", async () => {
+    /* 청구 뒤로 미루면 거절이 그 주를 stale 하게 만들어, 편집기가 멀쩡한 폼을 들고도 다음
+       저장에서 CONFLICT 를 받는다. 그래서 revision 이 그대로인지도 함께 잰다. */
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
+    await saveWeekAsEditor(caller, { weekStartDate: MON, days: [], entries });
+    const before = await caller.schedule.getWeek({ weekStartDate: MON });
+
+    await expect(
+      caller.schedule.saveWeek({
+        weekStartDate: MON,
+        revision: before.revision,
+        days: [],
+        entries,
+        // 그림은 안 싣고(= 유지, 그런데 지금 걸린 게 없다) 표기만 보낸다.
+        fanartCredit: "그린 사람",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const after = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(after.revision).toBe(before.revision);
+  });
+
+  it("같은 키를 다른 주가 아직 쓰면 안 지운다 — 남의 그림이 깨진다", async () => {
+    const spy = fanartSpy();
+    const caller = createCaller(makeCtx({ authorities: admin, fanart: spy.store }));
+    const NEXT_MON = "2026-07-27";
+    // 두 주가 같은 그림을 건다(스키마가 막지 않는다 — UNIQUE 가 아니다).
+    for (const week of [MON, NEXT_MON]) {
+      await saveWeekAsEditor(caller, {
+        weekStartDate: week,
+        days: [],
+        entries: [{ scheduledDate: week, title: "젤다" }],
+        fanartImageKey: KEY_A,
+      });
+    }
+    // 한쪽에서 내려도 다른 주가 아직 가리키므로 객체는 살아 있어야 한다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: MON, title: "젤다" }],
+      fanartImageKey: null,
+    });
+    expect(spy.deleted).toEqual([]);
+
+    // 마지막 참조가 사라지면 그때 지운다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: NEXT_MON,
+      days: [],
+      entries: [{ scheduledDate: NEXT_MON, title: "젤다" }],
+      fanartImageKey: null,
+    });
+    expect(spy.deleted).toEqual([`fanart/${KEY_A}`]);
+  });
+
   it("그림 없이 작가 표기만은 거절한다 — 화면엔 아무것도 안 뜨는데 값만 남는다", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     await expect(

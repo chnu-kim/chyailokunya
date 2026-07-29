@@ -7,6 +7,7 @@ import { authorizedProcedure, router } from "../trpc/init";
 import { getWeekInput, publishWeekInput, saveWeekInput } from "./schema";
 import {
   EmptyWeekCannotPublish,
+  FanartCreditWithoutImage,
   getWeekForEdit,
   publishWeek,
   ReferencedGameMissing,
@@ -50,6 +51,14 @@ export const scheduleRouter = router({
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "항목이 있어야 발행할 수 있습니다.",
+          });
+        }
+        /* 저장 후에 "그림 없이 작가 표기만"이 남는 조합. Zod 의 같은 규칙(한 요청 안의 조합)을
+           서버가 기존 값까지 합쳐 완성한 것이라 문구도 같다. */
+        if (e instanceof FanartCreditWithoutImage) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "그림 없이 작가 표기만 넣을 수 없습니다.",
           });
         }
         throw e;

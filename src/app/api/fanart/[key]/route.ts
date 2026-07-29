@@ -20,11 +20,22 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { fanartObjectKey, isFanartKey } from "@/core/fanart";
 
-/* 키가 유일해 같은 주소가 다른 내용을 가리키는 일이 없다 — immutable 이 성립한다.
-   그런데 **헤더만으로는 Worker 응답이 엣지 캐시에 안 앉는다**(AGENTS 지뢰): Worker 가 zone
+/* **`immutable` 도 1년도 쓰지 않는다.** 키가 유일해 같은 주소의 *내용*은 안 바뀌므로 얼핏
+   immutable 이 맞아 보이는데, 그건 이 자원이 **삭제된다**는 사실을 빠뜨린 판단이다(적대적
+   리뷰 지적): 관리자가 잘못 올렸거나 내려 달라는 요청을 받아 팬아트를 지워도, 한 번이라도
+   열린 URL 은 엣지·브라우저 캐시에서 1년간 그대로 서빙된다 — 내렸는데 안 내려간다.
+
+   Cache API 의 `delete` 로 지우는 길도 온전하지 않다: 그건 그 요청을 받은 콜로케이션의 캐시만
+   비우고 다른 지역에 퍼진 사본은 남는다. "지웠다"고 믿게 만드는 부분 해결이 더 위험하다.
+
+   그래서 수명을 짧게 둔다. 1시간이면 그 주를 여는 트래픽 피크는 캐시가 받고(팬아트는 주 단위로
+   집중해서 열린다), 삭제는 최악 1시간 뒤 실제로 반영된다. `immutable` 을 빼서 만료 뒤에는
+   ETag 재검증(304)이 돌아, 안 바뀐 그림은 바이트를 다시 안 보낸다.
+
+   그리고 **헤더만으로는 Worker 응답이 엣지 캐시에 안 앉는다**(AGENTS 지뢰): Worker 가 zone
    캐시보다 먼저 요청을 받으므로, 직접 `caches.default` 에 넣지 않으면 이 헤더는 브라우저
    캐시에만 통한다. 아래 waitUntil 이 그 자리를 채운다. */
-const CACHE_CONTROL = "public, max-age=31536000, immutable";
+const CACHE_CONTROL = "public, max-age=3600";
 
 export async function GET(req: Request, { params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;

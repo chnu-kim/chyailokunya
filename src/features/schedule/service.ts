@@ -155,6 +155,44 @@ export class EmptyWeekCannotPublish extends Error {
   }
 }
 
+/* 저장 후에 "그림 없이 작가 표기만" 이 남는 조합. Zod 는 **한 요청 안에서** 둘 다 보낸 경우만
+   보는데(부분 갱신이라 안 보낸 쪽의 현재 값을 경계에선 모른다), 서버는 기존 값을 알아 최종
+   조합을 판정할 수 있다. DB CHECK 가 최종 방어선이지만 거기까지 가면 batch 가 통째로 실패하고
+   **이미 오른 revision 만 남아** 편집기가 이유 없는 CONFLICT 에 빠진다(적대적 리뷰 지적) —
+   그래서 청구 전에 거절한다. */
+export class FanartCreditWithoutImage extends Error {
+  constructor() {
+    super("fanart credit without image");
+    this.name = "FanartCreditWithoutImage";
+  }
+}
+
+/* 저장 후의 팬아트 조합을 계산한다. 부분 갱신(undefined = 유지)이라 입력만으로는 최종 상태를
+   모르므로 기존 값과 합쳐 판정한다 — 규칙 셋이 여기 모여 있다:
+
+   1. **그림을 내리면 표기도 함께 내린다.** 표기만 남으면 DB CHECK 가 batch 를 죽이는데, 화면엔
+      아무것도 안 뜨므로 관리자는 왜 저장이 계속 실패하는지 알 길이 없다.
+   2. **그림을 바꾸면 표기를 안 물려준다.** 새 그림에 옛 작가 이름이 붙는 건 **잘못된 귀속**이라
+      값이 사라지는 것보다 나쁘다(코드 리뷰 지적). 새 표기를 함께 보내면 그 값이 쓰인다.
+   3. 그림 없이 표기만 남는 조합은 거절한다 — 위 두 규칙을 지나고도 남는 경우는 "표기만 보냈는데
+      걸린 그림이 없다"뿐이고, 그건 화면이 만들 수 없는 요청이다. */
+export function nextFanart(
+  input: Pick<SaveWeekInput, "fanartImageKey" | "fanartCredit">,
+  existing: { fanartImageKey: string | null; fanartCredit: string | null } | undefined,
+): { key: string | null; credit: string | null } {
+  const currentKey = existing?.fanartImageKey ?? null;
+  const key = input.fanartImageKey !== undefined ? input.fanartImageKey : currentKey;
+
+  let credit: string | null;
+  if (input.fanartCredit !== undefined) credit = input.fanartCredit;
+  // 키가 바뀌었으면(내림 포함) 옛 표기는 이 그림의 것이 아니다.
+  else if (key !== currentKey) credit = null;
+  else credit = existing?.fanartCredit ?? null;
+
+  if (key === null && credit !== null) throw new FanartCreditWithoutImage();
+  return { key, credit };
+}
+
 /* 다음 revision. revision 은 그 주 메타의 last_updated_at 이지만 **단조 증가가 정본이다** —
    벽시계 ms 를 그대로 쓰면 같은 ms 에 두 번 저장될 때 새 값이 옛 값과 같아져(now === oldRevision),
    그 옛 revision 을 든 stale 요청이 CAS(WHERE last_updated_at = revision)를 통과해 남의 저장을
@@ -289,8 +327,10 @@ export async function saveWeek(
       .select({
         publishedAt: scheduleWeeks.publishedAt,
         draft: scheduleWeeks.draft,
-        // 지금 걸려 있는 팬아트 키. 저장이 다른 키로 바꾸거나 지우면 이 객체가 버려진다(아래).
+        // 지금 걸려 있는 팬아트. 부분 갱신이라(한쪽만 보낼 수 있다) 최종 조합을 계산하려면
+        // 둘 다 필요하다 — 키만 보고 credit 을 그대로 두면 아래 nextFanart 의 두 사고가 난다.
         fanartImageKey: scheduleWeeks.fanartImageKey,
+        fanartCredit: scheduleWeeks.fanartCredit,
       })
       .from(scheduleWeeks)
       .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate)),
@@ -316,6 +356,9 @@ export async function saveWeek(
       .limit(1),
   ]);
   const existing = metaRows[0];
+  /* **청구 전에** 계산한다 — 이게 던지면 revision 이 아직 안 올라 편집기가 멀쩡한 상태로
+     오류만 받는다(nextFanart 주석). 청구 뒤로 미루면 거절이 그 주를 stale 하게 만든다. */
+  const fanartNext = nextFanart(input, existing);
   const publishedAt = input.published ? (existing?.publishedAt ?? now) : null;
   /* 저장 **전**의 주가 내용이 있었는가. claim placeholder 와 draft 유도가 같은 값을 봐야 한다
      — 갈리면 2단계 실패 시 placeholder 가 "행 없음"과 다른 뜻이 된다(아래 claim 주석). */
@@ -394,17 +437,17 @@ export async function saveWeek(
      함께 롤백돼 발행 경계가 안 넘어간다. 0단계가 gameId 를 걸렀으므로 현실적으로 실패하지 않는다.
      setMeta 는 last_updated_at 을 안 건드린다(1단계가 이미 새 revision 을 박았다). */
   /* 팬아트도 note 와 같은 user-visible 메타라 **2단계 batch 에서만** 쓴다(1단계 청구는 revision
-     만 만진다). 그리고 **보낸 경우에만** 쓴다 — 이 필드를 모르는 옛 클라이언트(배포 중 열려
-     있던 탭)의 저장이 이 전체 교체 경로로 팬아트를 조용히 지우면 안 된다:
-     undefined = 유지 · null = 지움 · 문자열 = 바꿈(schema.ts 주석). */
+     만 만진다). 값은 위 nextFanart 가 기존 값과 합쳐 계산한 최종 조합이다 — "안 보낸 필드는
+     유지"(undefined)가 거기서 이미 접혔으므로 여기선 조건 없이 쓴다. 그 계산을 안 거치고
+     보낸 것만 조건부로 쓰면 표기가 그림 없이 남거나 새 그림에 옛 작가가 붙는다. */
   const setMeta = db
     .update(scheduleWeeks)
     .set({
       note: input.note,
       draft,
       publishedAt,
-      ...(input.fanartImageKey !== undefined ? { fanartImageKey: input.fanartImageKey } : {}),
-      ...(input.fanartCredit !== undefined ? { fanartCredit: input.fanartCredit } : {}),
+      fanartImageKey: fanartNext.key,
+      fanartCredit: fanartNext.credit,
     })
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const clearEntries = db
@@ -456,14 +499,18 @@ export async function saveWeek(
      여기서 던지면 성공한 저장이 실패로 보이고, 재시도해도 이 객체는 이미 아무도 안 가리켜
      같은 자리에 다시 오지도 않는다. */
   const discarded = existing?.fanartImageKey;
-  if (
-    fanart &&
-    discarded &&
-    input.fanartImageKey !== undefined &&
-    discarded !== input.fanartImageKey
-  ) {
+  if (fanart && discarded && discarded !== fanartNext.key) {
     try {
-      await fanart.delete(fanartObjectKey(discarded));
+      /* **아직 이 키를 가리키는 주가 있으면 안 지운다**(코드 리뷰 지적). 업로드가 매번 새 UUID 를
+         내므로 자연스러운 조작으론 한 키가 두 주에 걸리지 않지만, 스키마가 그걸 강제하진 않고
+         (UNIQUE 가 아니다) tRPC 는 노출된 경로다 — 확인 없이 지우면 남의 주 그림이 깨진다.
+         batch 뒤에 세므로 방금 저장한 결과까지 반영된 수를 본다. */
+      const [stillUsed] = await db
+        .select({ id: scheduleWeeks.id })
+        .from(scheduleWeeks)
+        .where(eq(scheduleWeeks.fanartImageKey, discarded))
+        .limit(1);
+      if (!stillUsed) await fanart.delete(fanartObjectKey(discarded));
     } catch (e) {
       console.error(`[schedule] 버려진 팬아트 객체를 못 지웠다: ${discarded}`, e);
     }
