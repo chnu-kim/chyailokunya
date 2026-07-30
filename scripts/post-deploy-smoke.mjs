@@ -293,6 +293,35 @@ function checkCurrentWeek(body, startedAt, endedAt) {
   return null;
 }
 
+/* **이 검사만 배포 버전에 민감하다 — 그래서 전파 지연을 흡수한다**(2026-07-30 실측).
+
+   나머지 검사(상태 코드·content-type·og:url·번들)는 **구 버전이 답해도 똑같이 통과**한다.
+   그런데 이번 주 검사는 "이 배포가 시계를 어떻게 읽는가"를 재므로, 아직 구 버전을 서빙하는
+   콜로가 답하면 **고쳐진 배포인데도 빨개진다.** 실제로 그랬다:
+
+     16:54:16.38  Deployed chyailokunya triggers
+     16:54:18.56  라운드 1 /schedule → FAIL (배포 +2.2초, 구 버전이 답했다)
+     16:54:20.84  라운드 2 /schedule → ok   (배포 +4.5초, 새 버전)
+
+   그래서 이 파일이 이미 쓰는 규율을 그대로 적용한다: **라운드 1 에서만 한 번 재시도하고
+   라운드 2 는 엄격하다.** 진짜로 시계가 틀린 배포는 간헐이 아니다 — 고치기 전엔 모든 요청이
+   모든 라운드에서 1970 이었다(실측: 12/12 · 40/40 · 스모크 2/2). 그러니 이 재시도가 진짜
+   실패를 삼키지 않는다.
+
+   **초기 대기(sleep)를 안 넣는 이유**: 전파 시간은 배포마다 다르고, 고정 대기는 짧으면 못 막고
+   길면 모든 배포를 느리게 한다. 재시도는 필요한 배포에서만 값을 치른다. */
+async function checkCurrentWeekWithRetry(first, startedAt, endedAt, { allowRetry }) {
+  const problem = checkCurrentWeek(first.body, startedAt, endedAt);
+  if (!problem || !allowRetry) return problem;
+
+  await new Promise((resolve) => setTimeout(resolve, RETRY_ONCE_AFTER_MS));
+  const retryStartedAt = Date.now();
+  const again = await probe(CURRENT_WEEK_PATH, { expectHtml: true }, { allowRetry: false });
+  const retryEndedAt = Date.now();
+  if (!again.ok) return `${problem} (재시도도 실패: ${again.reason})`;
+  return checkCurrentWeek(again.body, retryStartedAt, retryEndedAt);
+}
+
 /* 각 경로를 **두 번** 두드린다. 1102 는 한 요청이 isolate 를 죽이고 **그 뒤 무관한 요청까지**
    연쇄로 실패하는 모양이라(2026-07-27 실측: favicon.ico 까지 같이 죽었다), 한 번씩만 보면
    첫 요청은 통과하고 두 번째가 죽는 패턴을 놓친다. 정적 자산을 섞는 것도 같은 이유다 — 가벼운
@@ -407,7 +436,9 @@ async function main() {
       console.log(`  [${round}/${ROUNDS}] ${result.ok ? "ok  " : "FAIL"} ${result.url}`);
       if (!result.ok) failures.push(`${result.url} — ${result.reason}`);
       if (result.ok && target.path === CURRENT_WEEK_PATH && result.body) {
-        const weekProblem = checkCurrentWeek(result.body, startedAt, endedAt);
+        const weekProblem = await checkCurrentWeekWithRetry(result, startedAt, endedAt, {
+          allowRetry: round === 1,
+        });
         console.log(
           `  [${round}/${ROUNDS}] ${weekProblem ? "FAIL" : "ok  "} ${result.url} (이번 주)`,
         );
