@@ -27,7 +27,17 @@ const WCAG_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
    더하고 `routes.ts` 와 `app/` 만 고치면 routes.spec 은 초록인데 axe 는 그 페이지를 영영 안
    본다 — 이 파일 맨 위에서 비판하는 `narrow-body.spec.ts` 의 손 열거 함정과 **같은 모양**이다.
 
-   Playwright 스펙은 Node 라 정본을 그대로 import 할 수 있다(`routes.spec.ts` 도 그렇게 한다). */
+   Playwright 스펙은 Node 라 정본을 그대로 import 할 수 있다(`routes.spec.ts` 도 그렇게 한다).
+
+   **왜 `SITE_LINKS` 가 아니라 `KNOWN_PAGE_PATHS` 인가.** 이름만 보면 후자는 "로그인 복귀
+   허용목록"이라 목적이 다르다 — 그런데 `routes.spec.ts` 가 그 목록을 `src/app` 의 실제
+   page.tsx 전체와 **`toEqual` 로** 대조한다. 즉 지금은 "복귀 허용목록 == 이 사이트의 모든
+   페이지"가 기계로 강제되고, 그래서 이 목록이 곧 스캔 대상 전체다(`SITE_LINKS` 를 쓰면
+   `/` 를 따로 더해야 해서 그 파생을 여기서 다시 구현하게 된다).
+
+   **이 안전은 그 `toEqual` 에 매달려 있다.** 언젠가 복귀시키면 안 되는 페이지가 생겨 그 등식을
+   깨면 — 그 자체는 routes.spec 이 빨개져 알려 준다 — 그때 axe 대상도 같이 정해야 한다.
+   두 개념이 갈리는 날 이 줄을 다시 본다. */
 const PAGES = KNOWN_PAGE_PATHS;
 
 /* 좁은 폭도 같이 본다. 대비·이름은 폭과 무관하지만 **타깃 크기와 겹침은 폭에서 갈린다** —

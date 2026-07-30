@@ -70,12 +70,14 @@ function cfErrorIn(body) {
    "무슨 일이 있었는지"를 말해 주지 않는다. 스모크가 재는 건 어차피 "즉시 응답하는가"라 5초면
    넉넉하다(정상 응답은 로컬·프로덕션 모두 100ms 대).
 
-   **이 값은 워크플로 스텝 시한과 함께 골라야 한다.** 최악은 `대상수 × 라운드 × (시한 + 대기 +
-   시한)` 이다 — 6 × 2 × (5 + 3 + 5) = 156초. 스텝 시한 5분(300초)의 절반이라, 여러 대상이
-   "죽지는 않았는데 느린" 상태여도 **스크립트가 자기 진단을 먼저 출력하고 끝난다.** 처음엔
-   10초로 뒀다가 최악이 276초가 되어 여유가 24초뿐이었다(리뷰 지적) — 그러면 GitHub 이 스텝을
-   먼저 죽여, 진단을 남기려고 넣은 시한이 도로 무의미해진다. 이 상수를 올릴 땐 위 산술을 다시
-   하고 스텝 시한도 같이 본다. */
+   **이 값은 워크플로 스텝 시한과 함께 골라야 한다.** 재시도는 라운드 1 에서만 하므로 최악은
+   `N × (시한 + 대기 + 시한) + N × 시한` 이다. 지금 대상은 9개(페이지 4 + 번들 2 + 자산 2 +
+   tRPC 1)라 9 × 13 + 9 × 5 = **162초**, 스텝 시한 5분(300초)의 절반 근처다. 여러 대상이
+   "죽지는 않았는데 느린" 상태여도 **스크립트가 자기 진단을 먼저 출력하고 끝난다.**
+
+   처음엔 10초로 뒀다가 최악이 276초가 되어 여유가 24초뿐이었다(리뷰 지적) — 그러면 GitHub 이
+   스텝을 먼저 죽여, 진단을 남기려고 넣은 시한이 도로 무의미해진다. **대상을 늘리거나 이 값을
+   올릴 땐 위 산술을 다시 하고 스텝 시한도 같이 본다.** */
 const PROBE_TIMEOUT_MS = 5_000;
 
 /* **재시도는 하되, (1) Cloudflare 에러 표식이 보이면 안 하고 (2) 첫 라운드에서만 한다.**
@@ -164,10 +166,43 @@ async function probe(path, { expectHtml, expectType }, { allowRetry }) {
    요청이 죽는다면 원인은 그 요청이 아니라 isolate 다. */
 const ROUNDS = 2;
 
+/* **페이지가 200 이어도 앱은 깨져 있을 수 있다**(적대적 리뷰 지적). HTML 은 서버가 그리므로
+   `_next/static` 청크가 통째로 404 여도 이 스크립트의 페이지 프로브는 전부 초록이다 — 그런데
+   방문자에겐 스타일 없는 문서에 인터랙션이 죽은 화면이 보인다. 배포 산출물이 갈리거나 asset
+   업로드가 반쯤 나가면 정확히 그 모양이 된다.
+
+   청크 이름엔 해시가 붙어 하드코딩할 수 없으므로 **홈 HTML 이 실제로 참조하는 것**을 뽑는다.
+   못 뽑으면 죽는다 — Next 앱이 CSS·JS 를 하나도 안 싣는 일은 없으니, 못 찾았다면 이 정규식이
+   낡았거나 홈이 우리 페이지가 아니다. 둘 다 "검사 대상 0 으로 통과"보다 낫다. */
+async function discoverBundles() {
+  const { res, body } = await attemptFetch(`${ORIGIN}/`);
+  if (!res || res.status !== 200) {
+    throw new Error(`번들을 찾으려고 연 홈이 정상이 아니다(status ${res?.status ?? "연결 실패"})`);
+  }
+  const css = body.match(/href="(\/_next\/static\/[^"]+\.css)"/)?.[1];
+  const js = body.match(/src="(\/_next\/static\/[^"]+\.js)"/)?.[1];
+  if (!css || !js) {
+    throw new Error(
+      "홈 HTML 에서 _next/static CSS·JS 참조를 못 찾았다 — 정규식이 낡았거나 우리 페이지가 " +
+        "아니다. 번들 검사를 건너뛰고 통과시키지 않는다.",
+    );
+  }
+  return [
+    { path: css, expectHtml: false, expectType: "text/css" },
+    { path: js, expectHtml: false, expectType: "javascript" },
+  ];
+}
+
 async function main() {
   const pages = knownPagePaths();
   const targets = [
     ...pages.map((path) => ({ path, expectHtml: true })),
+    ...(await discoverBundles()),
+    /* **API 경계도 살아 있어야 한다.** 페이지는 서버 컴포넌트가 D1 을 직접 읽어 그리므로
+       tRPC 라우트가 통째로 죽어도 렌더된다 — 그런데 그 순간 게임 검색·저장·제안이 전부
+       안 된다. 공개 읽기 하나로 그 경계가 서 있는지만 본다(쓰기는 안 건드린다 — 스모크가
+       프로덕션 데이터를 바꾸면 안 된다). */
+    { path: "/api/trpc/games.list", expectHtml: false, expectType: "application/json" },
     /* 가벼운 정적 자산 둘. 페이지가 아니라 **isolate 카나리아**다 — 이만한 요청이 죽는다면
        원인은 그 요청이 아니라 isolate 이고, 그게 1102 의 모양이다(2026-07-27 실측: 무거운
        og 라우트가 죽자 아이콘 요청까지 같이 죽었다).
