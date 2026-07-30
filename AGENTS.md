@@ -81,6 +81,11 @@ npm run db:seed        # 게임 시드(`-- --remote` 로 원격)
 통과한다. 수치가 낮은 자리(`src/app`)가 곧 위험은 아니다 — 거긴 e2e 가 렌더해서 본다.
 위험한 건 **어느 층에도 안 걸린 코드**이고, 그건 층 표와 커버리지를 겹쳐 봐야 보인다.
 
+**신뢰 경계 셋(`src/features/auth/**` · `src/app/api/**` · `src/middleware.ts`)은 집계 말고
+경로별 임계치로 따로 잠근다** — 저장소 전체 한 숫자면 인증 코드가 0% 로 들어와도 다른 곳이 늘어
+통과한다. **0% 인 경로엔 임계치를 안 건다**(0 은 어떤 후퇴도 못 막고 "잠갔다"는 착시만 만든다) —
+그 경로를 덮는 PR 이 테스트와 임계치를 **같이** 넣는다.
+
 CI(`.github/workflows/ci.yml`)가 PR·main 에서 `format · lint · typecheck · boundaries ·
 unit+커버리지 · drizzle-kit check · build · **배포 빌드(opennextjs-cloudflare)**` 게이트와
 **e2e 스모크**(별도 job)를 돌린다. 배포 빌드가 게이트에 있는 이유는 아래 Phase 4 지뢰를 보라 —
