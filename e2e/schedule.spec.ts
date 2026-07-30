@@ -183,6 +183,55 @@ test("관리자: 휴방만 정한 주도 발행할 수 있다(이슈 #117 결정
   await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("공개 중");
 });
 
+/* 휴방 잠금의 흐림은 **한 겹이다**(GitHub codex 리뷰 P2, 2026-07-31).
+
+   `opacity` 는 조상과 자손이 곱해진다 — 잠긴 덩어리에 0.5 를 걸고 그 안 컨트롤의 `:disabled`
+   에도 0.5 가 있으면 실효 0.25 가 되어, 같은 덩어리 안에서 제목·표지·삭제(25%)와 항목추가
+   (50%)가 서로 다른 세기로 흐려진다. 보존한 항목을 확인하라고 남겨 둔 자리인데 정작 25% 면
+   읽기 어렵다.
+
+   **이건 e2e 가 아니면 못 본다** — dom 단위 테스트(happy-dom)는 CSS 캐스케이드를 이 수준으로
+   계산하지 않고, 조상 곱셈은 computed style 하나만 봐선 드러나지도 않는다. 그래서 실효값을
+   루트까지 곱해 직접 잰다. 저장을 안 하므로 이 스펙은 공유 픽스처를 안 건드린다. */
+test("관리자: 휴방인 날의 잠긴 컨트롤이 모두 같은 세기로 흐려진다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 쓰는 주. 저장하지 않으므로 상태도 안 남는다.
+  await page.goto("/schedule?week=2037-06-01");
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("마인크래프트 하기");
+  await page.locator('[data-od-id^="schedule-day-rest-"]').first().check();
+  await expect(page.locator('[data-od-id^="schedule-day-rest-note-"]').first()).toBeVisible();
+
+  const effective = await page.evaluate(() => {
+    const read = (sel: string) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      let o = 1;
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        o *= Number(getComputedStyle(n).opacity);
+      }
+      return Math.round(o * 1000) / 1000;
+    };
+    return {
+      title: read('[data-od-id^="schedule-entry-title-"]'),
+      poster: read('[data-od-id^="schedule-entry-game-trigger-"]'),
+      del: read('[data-od-id^="schedule-entry-del-"]'),
+      add: read('[data-od-id^="schedule-day-add-"]'),
+      note: read('[data-od-id^="schedule-day-rest-note-"]'),
+    };
+  });
+
+  // 넷이 같은 세기여야 한다 — 고정값(0.5)이 아니라 서로 같은지를 재는 이유: 디자인이 흐림
+  // 정도를 바꿔도 이 계약("한 겹")은 그대로 유효해야 한다.
+  expect(effective.title).toBe(effective.add);
+  expect(effective.poster).toBe(effective.add);
+  expect(effective.del).toBe(effective.add);
+  // 그리고 잠긴 이유는 또렷해야 한다 — 그게 안 읽히면 잠금이 표시로서 성립하지 않는다.
+  expect(effective.note).toBe(1);
+});
+
 /* 공개 읽기의 PNG 다운로드 회귀(적대적 리뷰 지적, PR #112). WeekCardDownload 의 submit 머신
    run 은 마운트 시점에 얼어붙는데(submit.machine.ts), 읽기 화면은 편집기와 달리 이 컴포넌트를
    key 로 리마운트시키지 않는다 — WeekNav 클라이언트 네비로 주를 넘기면 같은 컴포넌트 인스턴스가

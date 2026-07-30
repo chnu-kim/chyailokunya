@@ -505,6 +505,16 @@
   opacity: 0.5;
   border-color: var(--border-strong);
 }
+/* **안쪽 컨트롤은 자기 흐림을 끈다**(GitHub codex 리뷰 P2). opacity 는 조상과 자손이 곱해지므로
+   부모 0.5 × `.sched-field:disabled` 0.5 = **0.25** 가 되어, 같은 덩어리 안에서 제목·표지·삭제는
+   25% 인데 항목추가 버튼만 50% 로 서로 다른 세기가 됐다(그 버튼은 `:disabled` 에 opacity 를 안
+   줬다). 보존한 항목을 확인하라고 남겨 둔 자리인데 정작 25% 면 읽기 어렵다 — 흐림은 이 덩어리
+   한 겹으로만 건다. 휴방 밖(팬아트 표기 칸이 업로드 중 잠기는 자리)에선 `:disabled` 규칙이
+   그대로 유일한 흐림이라 영향이 없다. */
+.sched-day__items--rest .sched-field:disabled,
+.sched-day__items--rest .sched-row__del:disabled {
+  opacity: 1;
+}
 /* 잠긴 이유. 값 칸이 아니라 말을 거는 자리라 문장이고, 합쇼체다(AGENTS). --fg-muted 는
    하루 카드 표면(--surface) 위 라이트 6.39:1 · 다크 6.69:1 로 14px 게이트(4.5:1)를 넘는다. */
 .sched-day__rest-note {
