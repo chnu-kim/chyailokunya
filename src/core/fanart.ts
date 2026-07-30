@@ -54,6 +54,32 @@ export function normalizeFanartSize(
   return ok(width) && ok(height) ? { width, height } : { width: null, height: null };
 }
 
+/* 파일에서 픽셀 치수를 읽어 저장할 수 있는 값으로 정규화한다(ADR-0030). 화면이 업로드 성공 뒤
+   부른다 — **여기 오는 파일은 이미 서버의 픽셀 예산을 통과했다**(업로드 라우트가 헤더로 거절한다).
+   그 순서 덕에 이 `createImageBitmap` 이 거대한 비트맵을 할당해 관리자 탭을 죽이는 경로가 닫힌다.
+
+   **못 읽어도 던지지 않는다**: 치수는 레이아웃 힌트라, 없으면 예약 없이 그리는 저하로 끝나지만
+   던지면 그림 자체를 못 건다. `createImageBitmap` 이 없는 런타임(workerd·구형 브라우저)에서도
+   ReferenceError 가 여기서 잡혀 같은 저하로 떨어진다 — 그 갈래를 단위 테스트가 실제로 탄다.
+
+   core 에 두는 이유: 편집기 컴포넌트의 private 함수로 두면 **어느 검증 층도 이 분기를 못 본다**
+   (ADR-0029 의 "어느 층이 이걸 보나"). Blob 은 workerd·브라우저 공통 전역이라 이 파일이 여전히
+   HTTP·React 를 모른다. */
+export async function readFanartImageSize(
+  file: Blob,
+): Promise<{ width: number | null; height: number | null }> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    try {
+      return normalizeFanartSize(bitmap.width, bitmap.height);
+    } finally {
+      bitmap.close();
+    }
+  } catch {
+    return normalizeFanartSize(null, null);
+  }
+}
+
 /* 픽셀 예산 — **바이트 상한과 다른 축이다.** 5MB 안에도 수억 픽셀이 들어간다: 단색 20000×20000
    PNG 는 압축 상태로 수 KB 인데 브라우저가 디코드하면 픽셀당 4바이트로 펼쳐져 1.6GB 가 된다.
    그 파일이 발행된 주에 걸리면 **그 주를 여는 모든 방문자의 탭이 죽는다** — 업로드하는 관리자

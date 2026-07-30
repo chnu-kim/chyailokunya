@@ -3,6 +3,7 @@ import {
   deleteErrorMessage,
   FanartUploadFailed,
   fanartUploadErrorMessage,
+  fanartUploadErrorText,
   isAborted,
   readErrorMessage,
   updateErrorMessage,
@@ -246,5 +247,20 @@ describe("fanartUploadErrorMessage(ADR-0028)", () => {
   it("우리 것이 아닌 에러도 기본 문구로 떨어진다", () => {
     expect(fanartUploadErrorMessage(new Error("boom"))).toContain("잠시 후 다시 시도");
     expect(fanartUploadErrorMessage(null)).toContain("잠시 후 다시 시도");
+  });
+});
+
+describe("fanartUploadErrorText", () => {
+  /* 업로드 라우트는 실패를 `{ error }` JSON 으로 말한다. **못 읽으면 빈 문자열**이고, 그때 매퍼가
+     일반 문구로 떨어진다 — 이 파일의 원칙(확인 안 된 것은 말하지 않는다)이 여기서 시작한다. */
+  it("서버가 준 문구를 뽑는다", async () => {
+    const res = Response.json({ error: "파일이 너무 큽니다." }, { status: 413 });
+    await expect(fanartUploadErrorText(res)).resolves.toBe("파일이 너무 큽니다.");
+  });
+
+  it("JSON 이 아니거나 error 가 문자열이 아니면 빈 문자열", async () => {
+    await expect(fanartUploadErrorText(new Response("<html>502</html>"))).resolves.toBe("");
+    await expect(fanartUploadErrorText(Response.json({ error: 42 }))).resolves.toBe("");
+    await expect(fanartUploadErrorText(Response.json({}))).resolves.toBe("");
   });
 });

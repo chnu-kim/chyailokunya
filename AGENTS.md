@@ -40,10 +40,14 @@
 
 정적 사이트 시절과 달리 이제 **기계가 검증한다.** 로컬에서 게이트를 그대로 돌릴 수 있다:
 
+검증은 **층으로 쌓여 있고 각 층이 구조적으로 못 보는 것이 있다** — 새 검증을 어디 둘지는
+"어느 층이 이걸 볼 수 있나"로 답한다. 층 표는
+[ADR-0029](./docs/adr/0029-verification-layers-and-coverage-ratchet.md) 가 정본이다.
+
 ```bash
 npm run dev            # 로컬 개발 (http://localhost:3000)
 npm run build          # next build (컴파일 + 타입체크 + 정적 생성)
-npm test               # Vitest — workerd(서버·도메인·머신) + dom(클라이언트 컴포넌트) 두 프로젝트
+npm test               # Vitest — workerd(서버·도메인·머신) + dom(클라이언트) 두 프로젝트 + 커버리지 래칫
 npm run typecheck      # tsc --noEmit (strict)
 npm run lint           # eslint (flat config)
 npm run boundaries     # dependency-cruiser 레이어 경계
@@ -71,10 +75,31 @@ npm run db:seed        # 게임 시드(`-- --remote` 로 원격)
 치지직 OAuth 를 태우지 않고 access 쿠키를 직접 서명하지만 진짜 서버 경로가 돈다 —
 근거와 함정은 [ADR-0021](./docs/adr/0021-e2e-session-fixture-signed-access-cookie.md).
 
-CI(`.github/workflows/ci.yml`)가 PR·main 에서 `format · lint · typecheck · boundaries · unit ·
-drizzle-kit check · build · **배포 빌드(opennextjs-cloudflare)**` 게이트와 **e2e 스모크**(별도
-job)를 돌린다. 배포 빌드가 게이트에 있는 이유는 아래 Phase 4 지뢰를 보라 — `next build` 만으론
-배포 실패를 못 잡는다. **시각 스냅샷은 CI 에 없다** —
+**`npm test` 는 커버리지를 항상 켜고 임계치를 못 넘기면 죽는다**(ADR-0029). 임계치는 목표가
+아니라 **래칫(바닥)** 이다 — 지금 수치 바로 아래에 박혀 있고, **테스트를 늘리는 PR 은
+`vitest.config.ts` 의 `thresholds` 도 같이 올린다.** 안 올리면 바닥이 낡아 새 코드가 안 덮여도
+통과한다. 수치가 낮은 자리(`src/app`)가 곧 위험은 아니다 — 거긴 e2e 가 렌더해서 본다.
+위험한 건 **어느 층에도 안 걸린 코드**이고, 그건 층 표와 커버리지를 겹쳐 봐야 보인다.
+
+**신뢰 경계 셋(`src/features/auth/**` · `src/app/api/**` · `src/middleware.ts`)은 집계 말고
+경로별 임계치로 따로 잠근다** — 저장소 전체 한 숫자면 인증 코드가 0% 로 들어와도 다른 곳이 늘어
+통과한다. 여기서 "신뢰 경계"는 **요청이 바깥에서 처음 닿는 자리**다. **0% 인 경로엔 임계치를 안
+건다**(0 은 어떤 후퇴도 못 막고 "잠갔다"는 착시만 만든다) — 그 경로를 덮는 PR 이 테스트와
+임계치를 **같이** 넣는다.
+
+**라우터 프로시저를 caller 로 테스트해도 HTTP 가드는 안 덮인다.** caller 는 HTTP 를 안 타므로
+`Sec-Fetch-Site`·`Origin` 검사를 지나가지 않는다 — 그 계약은 라우트 핸들러를 직접 부르는
+테스트(`src/app/api/**/route.test.ts`)가 본다. 새 라우트 핸들러를 만들면 그쪽도 같이 짠다.
+
+app 레이어 라우트를 워커 풀에서 테스트하는 배선은 `src/app/api/auth/login/route.test.ts` 가
+가장 작은 예다 — `vi.hoisted` 로 만든 가변 상자를 `getCloudflareContext`·`next/headers` 목이
+읽게 해서 테스트마다 env·쿠키를 갈아 끼운다(목 팩토리는 hoist 되므로 바깥 변수를 직접 못 읽는다).
+**인가는 목으로 건너뛰지 않는다** — 진짜 access 쿠키를 서명해 심고 역할 조회까지 돌린다.
+
+CI(`.github/workflows/ci.yml`)가 PR·main 에서 `format · lint · typecheck · boundaries ·
+unit+커버리지 · drizzle-kit check · build · **배포 빌드(opennextjs-cloudflare)**` 게이트와
+**e2e 스모크**(별도 job)를 돌린다. 배포 빌드가 게이트에 있는 이유는 아래 Phase 4 지뢰를 보라 —
+`next build` 만으론 배포 실패를 못 잡는다. **시각 스냅샷은 CI 에 없다** —
 베이스라인이 OS 별 파일이라(`-darwin`/`-linux`) macOS 에서 만든 게 리눅스 CI 와 안 맞기
 때문이다. `npm run e2e`(=`--project=smoke`)는 크로스플랫폼 동작 검증만 하고, 시각 회귀
 (`--project=visual`)는 로컬 dev 회귀 + 사람의 육안 패리티 판단용이다. 배포는 CI 게이트가 아니라
@@ -523,6 +548,27 @@ decoded` 로 거절하고, 그 결과가 **화면에 아무 신호 없이** 치�
   클라이언트 버그가 "저장은 됐는데 그 필드만 안 붙는" 증상으로 숨는다. **한쪽만 보내는 것이
   뜻을 갖지 않는 필드는 경계에서 거절한다** — 표기(한쪽만 보내는 게 뜻이 있다)와 치수(없다)가
   같은 규약을 다르게 받는 이유다.
+
+검증 층·커버리지(ADR-0029)에서 밟은 것들:
+
+- **블록 주석 안에 `**` 와 `/` 가 붙어 있으면 거기서 주석이 끝난다.** glob 을 근거로 적으려고
+  `features` 아래 경로를 별 두 개로 쓴 순간 그 뒤 문장이 코드로 파싱됐고, 파서는 **한참 뒤 줄**을
+  가리켜("Expected a semicolon", 실제 원인보다 30줄 아래) 원인이 안 보였다. 파일이 통째로 안
+  열리므로 "테스트 0개"로 나온다. 주석에 glob 을 적을 땐 별 하나로 쓰거나 말로 푼다. 설정 파일의
+  `"src/app/api/**": { … }` 같은 **코드**는 무관하다 — 주석 안일 때만 터진다.
+
+- **커버리지 리포트는 `all: true` 없이는 "안 덮인 파일"을 통째로 숨긴다.** 이 저장소는 86.5% 로
+  보였지만 실제는 68.3% 였고, 빠진 26개 파일에 OAuth 콜백·API 라우트 전부가 있었다. 도구가 자기
+  목적을 배반하는 설정이라 기본값을 믿으면 안 된다.
+
+- **커버리지 provider 는 `istanbul` 이어야 한다.** 기본값 v8 은 `node:inspector` Session 을 쓰는데
+  workerd 엔 없다 — 워커 풀 스펙 35개가 `ERR_METHOD_NOT_IMPLEMENTED` 로 죽고, 그런데도 리포트는
+  dom 프로젝트만 담아 32% 라는 **그럴듯한 숫자**로 나온다.
+
+- **병행 세션의 worktree(`.claude/worktrees/…`)가 로컬 게이트만 빨갛게 만든다.** 저장소 안쪽
+  경로라 prettier·eslint 가 그 체크아웃을 통째로 다시 훑는데, CI 엔 그 디렉터리가 없다. git 은
+  nested worktree 를 알아서 무시하지만 **파일 훑기는 그렇지 않다.** 둘 다 ignore 에 넣어 뒀다 —
+  새 도구를 게이트에 더할 땐 같은 자리를 확인한다.
 
 ## 접근성 기준 (협상 대상 아님)
 

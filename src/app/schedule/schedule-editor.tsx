@@ -3,8 +3,13 @@
 import { useMachine } from "@xstate/react";
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
-import { FanartUploadFailed, fanartUploadErrorMessage, isAborted } from "@/core/error-message";
-import { FANART_IMAGE_TYPES, normalizeFanartSize } from "@/core/fanart";
+import {
+  FanartUploadFailed,
+  fanartUploadErrorMessage,
+  fanartUploadErrorText,
+  isAborted,
+} from "@/core/error-message";
+import { FANART_IMAGE_TYPES, readFanartImageSize } from "@/core/fanart";
 import {
   dayOf,
   draftDayInputs,
@@ -75,41 +80,6 @@ function weekToDraft(week: WeekView): WeekDraft {
   };
 }
 
-/* 업로드 라우트는 실패를 `{ error }` JSON 으로 말한다. 못 읽으면 빈 문자열 — 그때는 아래
-   매퍼가 일반 문구로 떨어진다(우리가 확인하지 못한 것을 단정하지 않는다). */
-async function serverErrorText(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: unknown };
-    return typeof body.error === "string" ? body.error : "";
-  } catch {
-    return "";
-  }
-}
-
-/* 파일에서 픽셀 치수를 읽는다 — 읽기 화면이 자리를 예약할 값이다(ADR-0028·db/schema.ts).
-   **못 읽어도 업로드는 성공으로 둔다**: 치수는 레이아웃 힌트라, 없으면 예약 없이 그리는
-   저하로 끝나지만 여기서 던지면 그림 자체를 못 건다.
-
-   서버가 디코드하지 않는 이유는 CPU 다(ADR-0028) — 관리자 기기에서 하면 그 예산을 안 쓴다.
-   `createImageBitmap` 이 없는 환경(구형·테스트 런타임)에서도 ReferenceError 가 여기서 잡혀 같은
-   저하로 떨어진다.
-
-   **여기 오는 파일은 이미 서버의 픽셀 예산을 통과했다**(업로드 라우트가 헤더에서 치수를 읽어
-   40MP 초과를 거절한다, ADR-0030). 그래서 이 `createImageBitmap` 이 거대한 비트맵을 할당해
-   관리자 탭을 죽이는 경로도 함께 닫혔다 — 순서가 중요하다: 업로드가 **먼저** 거절한다. */
-async function readImageSize(file: Blob) {
-  try {
-    const bitmap = await createImageBitmap(file);
-    try {
-      return normalizeFanartSize(bitmap.width, bitmap.height);
-    } finally {
-      bitmap.close();
-    }
-  } catch {
-    return normalizeFanartSize(null, null);
-  }
-}
-
 /* 파일 선택 대화상자가 받아들일 형식. **core/fanart 의 배열에서 유도한다** — 손으로 적으면
    서버가 받는 형식과 갈려, 대화상자가 고를 수 있게 해 준 파일이 업로드에서 415 로 거절된다.
    이건 편의일 뿐 방어선이 아니다(사용자는 "모든 파일"로 바꿔 고를 수 있고, 진짜 판정은
@@ -170,12 +140,12 @@ export function ScheduleEditor({
          본문은 raw 바이트다(multipart 가 아니다 — 파일 하나뿐이라 폼이 표현할 게 없다). */
       uploadRun: async ({ file }, signal) => {
         const res = await fetch("/api/fanart", { method: "POST", body: file, signal });
-        if (!res.ok) throw new FanartUploadFailed(res.status, await serverErrorText(res));
+        if (!res.ok) throw new FanartUploadFailed(res.status, await fanartUploadErrorText(res));
         const { key } = (await res.json()) as { key: string };
         /* 치수는 **업로드가 성공한 뒤** 읽는다 — 형식 판정을 서버가 이미 했으므로, 여기서
            실패하면 "우리가 안 받는 형식"이 아니라 "브라우저가 못 그리는 파일"이고 그때도
-           키는 살린다(readImageSize 주석). */
-        return { key, ...(await readImageSize(file)) };
+           키는 살린다(core/fanart 의 readFanartImageSize 주석). */
+        return { key, ...(await readFanartImageSize(file)) };
       },
       mapError: saveErrorMessage,
       mapUploadError: fanartUploadErrorMessage,

@@ -218,6 +218,19 @@ export class FanartUploadFailed extends Error {
   }
 }
 
+/* 업로드 라우트가 실패를 `{ error }` JSON 으로 말한다 — 그 문구를 뽑아 위 클래스에 싣는다.
+   못 읽으면 빈 문자열이고, 그때 아래 매퍼가 일반 문구로 떨어진다(우리가 확인하지 못한 것을
+   단정하지 않는다). `Response` 는 런타임 중립 타입이라 core 에 있어도 이 파일이 HTTP 를 아는
+   것은 아니다 — 실제 요청은 화면이 보낸다. */
+export async function fanartUploadErrorText(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    return typeof body.error === "string" ? body.error : "";
+  } catch {
+    return "";
+  }
+}
+
 export function fanartUploadErrorMessage(e: unknown): string {
   if (isAborted(e))
     return "그림을 올리는 데 너무 오래 걸려 기다리기를 멈췄습니다. 다시 시도해 주십시오.";

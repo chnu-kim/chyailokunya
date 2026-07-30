@@ -11,6 +11,7 @@ import {
   isOverFanartLimit,
   isOverPixelBudget,
   normalizeFanartSize,
+  readFanartImageSize,
   readImageDimensions,
   sniffImageType,
 } from "./fanart";
@@ -308,5 +309,22 @@ describe("isOverPixelBudget", () => {
     expect(isOverPixelBudget(1200, 1600)).toBe(false);
     expect(isOverPixelBudget(FANART_MAX_PIXELS, 1)).toBe(false); // 정확히 상한은 허용
     expect(isOverPixelBudget(FANART_MAX_PIXELS + 1, 1)).toBe(true);
+  });
+});
+
+describe("readFanartImageSize", () => {
+  /* **못 읽어도 던지지 않는다** — 치수는 레이아웃 힌트라, 없으면 예약 없이 그리는 저하로 끝나지만
+     던지면 그림 자체를 못 건다(ADR-0030). workerd 엔 `createImageBitmap` 이 없어서 이 테스트가
+     그 저하 갈래를 **실제로 탄다** — 구형 브라우저에서 나는 것과 같은 경로다. */
+  it("createImageBitmap 이 없거나 실패하면 쌍째로 null 을 준다", async () => {
+    const blob = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" });
+    await expect(readFanartImageSize(blob)).resolves.toEqual({ width: null, height: null });
+  });
+
+  it("빈 Blob 도 같은 저하로 떨어진다 — 업로드를 실패로 만들지 않는다", async () => {
+    await expect(readFanartImageSize(new Blob([]))).resolves.toEqual({
+      width: null,
+      height: null,
+    });
   });
 });
