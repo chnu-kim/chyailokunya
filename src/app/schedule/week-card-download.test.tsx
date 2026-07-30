@@ -31,6 +31,12 @@ const CARD: WeekCardData = {
     { dow: "토", date: "7.25", time: null, rest: false, entries: [], overflow: 0 },
     { dow: "일", date: "7.26", time: null, rest: false, entries: [], overflow: 0 },
   ],
+  fanart: null,
+};
+
+const FANART_CARD: WeekCardData = {
+  ...CARD,
+  fanart: { imageKey: "b7f3.png", credit: "그림 · @someone", size: null },
 };
 
 const NEXT_WEEK_CARD: WeekCardData = {
@@ -57,7 +63,19 @@ beforeEach(() => {
   ) {
     capturedAnchor = this;
   });
+  /* 캡처 전 그림 인라인(inlineImages)이 쓰는 fetch. 기본값을 성공으로 둬 **모든** 테스트가
+     네트워크 없이 같은 경로를 타게 한다 — 안 두면 팬아트가 있는 카드를 쓰는 테스트마다
+     실제 요청이 나가 실패까지의 대기가 tick 수를 흔든다. `mockClear` 로 호출 기록을
+     테스트마다 비운다(spyOn 은 같은 spy 를 돌려주므로 기록이 파일 전체에 누적된다). */
+  vi.spyOn(globalThis, "fetch").mockClear().mockResolvedValue(pngResponse());
 });
+
+// happy-dom 의 Response 는 blob() 계약이 이 용도에 안 맞는다 — inlineImages 가 실제로 쓰는
+// 두 가지(ok·blob())만 갖춘 최소 객체를 준다.
+function pngResponse(): Response {
+  const blob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" });
+  return { ok: true, blob: async () => blob } as unknown as Response;
+}
 
 // 시간 초과 뒤에도 배경에서 계속 도는 toPng mock(안 끝남)은 startCapture 의 snapshotCard 가
 // document.body 에 붙인 복제 노드를 finally 로 못 지운다(toPng 이 안 끝나므로) — 그 조각이
@@ -250,6 +268,150 @@ describe("WeekCardDownload", () => {
     expect(toPng).toHaveBeenCalledTimes(2); // 내용이 바뀐 카드라 재사용하지 않고 새로 캡처했다.
     expect(capturedAnchor!.href).toBe("data:image/png;base64,revised");
     expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-20.png");
+  });
+
+  it("같은 주에서 팬아트만 갈아 끼워도 새로 캡처한다(이슈 #122)", async () => {
+    /* 팬아트가 `WeekCardData` **안**에 있어야 하는 이유를 못박는다 — 캡처 캐시 키가
+       `${weekStartDate}:${JSON.stringify(card)}` 라, 팬아트를 카드 밖 별도 prop 으로 넘기면
+       그림을 바꿔 저장한 뒤 다시 받아도 키가 그대로여서 **옛 그림이 담긴 캡처**가 나온다.
+       위 "내용이 바뀌면" 스펙과 같은 함정이지만, 그 스펙은 note 만 바꿔 보므로 팬아트가 키에
+       실리는지는 안 본다(팬아트를 빼도 초록이다). */
+    vi.mocked(toPng).mockImplementation(() => new Promise(() => {})); // 첫 그림 캡처 — 안 끝남
+    const FIRST: WeekCardData = {
+      ...CARD,
+      fanart: { imageKey: "first.png", credit: null, size: null },
+    };
+    const { rerender } = render(<WeekCardDownload card={FIRST} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
+    // 캡처 전 그림 인라인(fetch→blob→FileReader)이 마이크로태스크 여럿을 지나므로 기다린다.
+    await waitFor(() => expect(toPng).toHaveBeenCalledTimes(1));
+
+    const SWAPPED: WeekCardData = {
+      ...CARD,
+      fanart: { imageKey: "second.png", credit: null, size: null },
+    };
+    vi.mocked(toPng).mockResolvedValue("data:image/png;base64,swapped");
+    rerender(<WeekCardDownload card={SWAPPED} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    await waitFor(() => expect(toPng).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(capturedAnchor!.href).toBe("data:image/png;base64,swapped"));
+  });
+
+  it("화면 밖으로 치우는 스타일은 감싸는 상자가 받는다 — 캡처 대상 노드엔 안 건다", async () => {
+    /* 이걸 복제본 자신에 걸면 **받아지는 PNG 가 통째로 빈다**(2026-07-30 실측, 이슈 #122):
+       html-to-image 가 computed style 을 SVG foreignObject 안으로 그대로 베끼는데,
+       `position: fixed` 는 그 안에서 SVG 뷰포트 기준이라 카드가 -10000px 에 놓인다. 게이트
+       전부 초록인 채로 살아 있던 결함이라(빈 PNG 도 유효한 PNG 이고 치수도 맞다) 여기서
+       구조를 못박고, "그림이 실제로 담기는가"는 e2e 가 픽셀로 본다. */
+    const seen: { pos: string; parentPos: string; parentTop: string; inDoc: boolean }[] = [];
+    vi.mocked(toPng).mockImplementation(async (node) => {
+      const el = node as HTMLElement;
+      const parent = el.parentElement!;
+      seen.push({
+        pos: el.style.position,
+        parentPos: parent.style.position,
+        parentTop: parent.style.top,
+        inDoc: document.body.contains(el),
+      });
+      return "data:image/png;base64,ok";
+    });
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.pos).toBe(""); // 복제본은 원본 스타일 그대로
+    expect(seen[0]!.parentPos).toBe("fixed");
+    expect(seen[0]!.parentTop).toBe("-10000px");
+    // 문서에 붙어 있어야 레이아웃(폭·오프셋)이 나온다 — 떨어진 조각은 치수가 0 이다.
+    expect(seen[0]!.inDoc).toBe(true);
+    // 캡처가 끝나면 감싼 상자째로 치운다(빈 상자가 body 에 쌓이지 않는다).
+    await waitFor(() => expect(document.querySelectorAll(".week-card")).toHaveLength(1));
+  });
+
+  describe("그림 인라인(이슈 #122)", () => {
+    /* html-to-image 에 맡기면 **같은 세션의 두 번째 캡처가 그림을 통째로 빠뜨린다**(실측
+       2026-07-30: 6번 연속 캡처 중 2번만 빔). SVG 엔 data URL 이 제대로 들어가는데 래스터화가
+       그 안쪽 그림의 디코드를 기다리지 않는 것이라, **미리 같은 문자열을 이 문서에서 디코드해
+       둔다**(week-card-download.tsx 의 inlineImages). 여기선 그 배선만 본다 — 실제로 그림이
+       담기는지는 e2e 가 받은 파일의 픽셀로 본다. */
+    /* 인라인은 fetch → blob → FileReader 라 클릭 한 번에 여러 마이크로태스크를 지난다 — `act`
+       한 번으로는 toPng 까지 못 간다. 그 상태로 다음 테스트가 시작되면 **늦게 도착한 캡처가 다음
+       테스트의 toPng mock 을 부른다**(실제로 두 테스트의 단언이 서로 뒤바뀌어 실패했다). 그래서
+       toPng 이 실제로 불린 것을 기다린 뒤 단언한다. */
+    async function clickAndAwaitCapture() {
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("week-card-download-btn"));
+      });
+      await waitFor(() => expect(toPng).toHaveBeenCalled());
+    }
+
+    it("캡처에 넘기는 노드의 그림은 data URL 이다 — 라이브러리 fetch 를 안 태운다", async () => {
+      let srcSeen = "";
+      vi.mocked(toPng).mockImplementation(async (node) => {
+        srcSeen = (node as HTMLElement).querySelector("img")!.getAttribute("src") ?? "";
+        return "data:image/png;base64,ok";
+      });
+
+      render(<WeekCardDownload card={FANART_CARD} weekStartDate="2026-07-20" />);
+      await clickAndAwaitCapture();
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/fanart/b7f3.png"),
+      );
+      expect(srcSeen.startsWith("data:image/png;base64,")).toBe(true);
+    });
+
+    it("그림을 못 받아 오면 주소를 그대로 두고 캡처는 계속한다", async () => {
+      /* 그림 한 장 때문에 일정 카드 전체를 못 받게 만들지 않는다 — 라이브러리가 예전처럼 자기
+         경로로 시도하고, 실패하면 그림만 빠진 카드가 나온다(이 변경 전과 같은 상태). */
+      vi.mocked(globalThis.fetch).mockRejectedValue(new Error("network"));
+      let srcSeen = "";
+      vi.mocked(toPng).mockImplementation(async (node) => {
+        srcSeen = (node as HTMLElement).querySelector("img")!.getAttribute("src") ?? "";
+        return "data:image/png;base64,ok";
+      });
+
+      render(<WeekCardDownload card={FANART_CARD} weekStartDate="2026-07-20" />);
+      await clickAndAwaitCapture();
+
+      expect(srcSeen).toBe("/api/fanart/b7f3.png");
+      await waitFor(() => expect(capturedAnchor!.href).toBe("data:image/png;base64,ok"));
+    });
+
+    it("그림이 404 여도(내려간 뒤 받은 링크) 캡처는 계속한다", async () => {
+      /* 응답이 오되 그림이 아닌 경우다 — 던지지 않으므로 위 catch 로 안 잡힌다. 저장된 키가
+         가리키던 객체를 지운 주에서 실제로 날 수 있다(ADR-0028 의 dangling key). */
+      vi.mocked(globalThis.fetch).mockResolvedValue({ ok: false } as unknown as Response);
+      let srcSeen = "";
+      vi.mocked(toPng).mockImplementation(async (node) => {
+        srcSeen = (node as HTMLElement).querySelector("img")!.getAttribute("src") ?? "";
+        return "data:image/png;base64,ok";
+      });
+
+      render(<WeekCardDownload card={FANART_CARD} weekStartDate="2026-07-20" />);
+      await clickAndAwaitCapture();
+
+      expect(srcSeen).toBe("/api/fanart/b7f3.png");
+    });
+
+    it("팬아트 없는 주는 받아 올 그림이 없어 fetch 자체를 안 한다", async () => {
+      vi.mocked(toPng).mockResolvedValue("data:image/png;base64,ok");
+
+      render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+      await clickAndAwaitCapture();
+
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
   });
 
   it("클릭 직후(폰트 대기 중) 리마운트 없이 주가 바뀌어도 클릭 시점 내용을 그대로 캡처한다", async () => {

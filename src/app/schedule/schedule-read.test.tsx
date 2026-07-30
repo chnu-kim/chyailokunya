@@ -113,6 +113,12 @@ describe("ScheduleReadView 의 오늘 표시", () => {
 describe("ScheduleReadView 의 팬아트(ADR-0028)", () => {
   const KEY = "0189d1f0-3a4b-7c8d-9e0f-1a2b3c4d5e6f.png";
 
+  /* 팬아트가 걸린 주는 이 화면에 그림이 **둘** 있다(이슈 #122) — 목록 아래 사진지와, 그 위
+     다운로드 카드 미리보기 안의 같은 그림이다. 그래서 alt 만으로 찾으면 둘이 잡힌다. 여기서
+     재려는 것은 읽기 화면의 사진지 쪽이라 그 블록 안으로 스코프를 좁힌다(카드 쪽 계약은
+     week-card.test.tsx 가 본다). */
+  const readFanartImg = () => within(screen.getByTestId("schedule-fanart")).getByAltText("팬아트");
+
   function renderFanart(over: Partial<WeekView>) {
     return render(
       <ScheduleReadView
@@ -147,7 +153,7 @@ describe("ScheduleReadView 의 팬아트(ADR-0028)", () => {
       />,
     );
     expect(screen.queryByText("그린 사람")).not.toBeInTheDocument();
-    expect(screen.getByAltText("팬아트")).toBeInTheDocument();
+    expect(readFanartImg()).toBeInTheDocument();
   });
 
   it("팬아트가 없으면 그 자리 자체가 없다", () => {
@@ -166,7 +172,7 @@ describe("ScheduleReadView 의 팬아트(ADR-0028)", () => {
       fanartImageWidth: 1200,
       fanartImageHeight: 1600,
     });
-    const img = screen.getByAltText("팬아트");
+    const img = readFanartImg();
     expect(img).toHaveAttribute("width", "1200");
     expect(img).toHaveAttribute("height", "1600");
 
@@ -180,7 +186,7 @@ describe("ScheduleReadView 의 팬아트(ADR-0028)", () => {
         today="2026-07-29"
       />,
     );
-    const plain = screen.getByAltText("팬아트");
+    const plain = readFanartImg();
     expect(plain).not.toHaveAttribute("width");
     expect(plain).not.toHaveAttribute("height");
   });

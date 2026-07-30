@@ -789,6 +789,23 @@ dialog.sched-confirm::backdrop {
   background-color: var(--brand-pink);
 }
 
+/* 목록+공지 덩어리(week-card.tsx 의 __body/__main). 팬아트가 없으면 세로 한 줄기라 이 두 겹은
+   옛 구조(카드 > 목록 + 공지)와 픽셀이 같고, 있으면 __body 가 가로로 돌아 __main 이 왼쪽 열이
+   된다. 래퍼를 유무에 따라 넣었다 빼지 않는 이유는 week-card.tsx 주석에 있다(마크업 골격이
+   갈리면 같은 규칙을 두 벌 관리한다). */
+.week-card__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.week-card__main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .week-card__days {
   display: flex;
   flex: 1;
@@ -886,10 +903,169 @@ dialog.sched-confirm::backdrop {
   color: var(--fg-muted);
 }
 
+/* 공지는 카드에서 **두 줄까지**다(GitHub codex 리뷰 P2). 저장 상한이 500자인데 줄 수 제한이
+   없어, 긴 공지가 본문 높이를 먹고 일정 목록을 눌렀다 — 실측: 7열 모양은 500자에서 목록이
+   356→104px 로 눌려 항목이 잘렸고(이 PR 이전부터 그랬다), 팬아트 모양은 폭이 780 이라 200자에서
+   이미 잘리고 500자면 **목록 높이가 0** 이 됐다(일정이 통째로 사라진다).
+
+   **자르는 쪽을 고른 이유:** 이 카드의 주인공은 일정이고 공지는 딸린 한 줄이다(읽기 화면의
+   `.sched__note` 는 안 자르므로 전문은 사이트에 그대로 있다). 두 줄이면 7열에서 ~108자,
+   팬아트 모양에서 ~70자까지 보인다 — 공지가 페이지 본문의 `line-height: 1.6` 을 물려받아 한
+   줄이 35.2px 이므로 두 줄은 70px 이고, 본문(406)에서 그것과 위 여백(22)을 빼면 목록에
+   **314px** 이 남는다(팬아트 모양의 일곱 행이 각 44px 로 서는 데 필요한 높이보다 넉넉하다). `flex: none` 은 반대 방향
+   (목록이 공지를 누르는 것)을 막는다 — 공지 높이는 clamp 가 정하지 그때그때 남는 공간이
+   정하지 않는다. `overflow-wrap: anywhere` 는 공백 없는 긴 문자열(주소 등)이 가로로 새는 것. */
 .week-card__note {
+  flex: none;
   margin: 22px 0 0;
   font-size: 22px;
   color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* ── 팬아트가 걸린 주의 모양 (이슈 #122) ──────────────────────────────────────
+   `.week-card--art` 는 같은 DOM 을 **7행 목록 + 오른쪽 사진지**로 돌린다. 7열을 유지하며 사진지를
+   끼우는 안(후보 A)을 먼저 렌더해 봤는데, 하루 칸이 147→108px 로 좁아져 제목이 낱말 중간에서
+   꺾였다("마인크래프 / 트"). **사진지를 좁혀도 못 고친다** — 200px 로 줄이면 칸은 115px(+7)에
+   그쳐 같은 자리에서 그대로 꺾이고 그림만 작아진다(실측). 여섯 글자 낱말이 들어가려면 116px 이
+   필요하고 7열로는 그 선을 못 넘는다. `word-break: keep-all` 은 꺾임을 **잘림**으로 바꿀 뿐이다.
+   4×2 격자(후보 B)는 칸을 넓히지만 높이가 172px 로 낮아져 하루 4건 중 3건만 들어간다 —
+   `MAX_ENTRIES_PER_DAY` 를 내리는 결정이 딸려 온다. 근거 전문은 이슈 #122 결정 코멘트.
+
+   행 높이는 7행이 본문을 나눠 44px 다(실측). content 높이로 두면 7행이 본문(356px)을 넘겨 카드
+   밖으로 흘러 공지를 덮으므로 `flex: 1 1 0` 로 못박는다. */
+.week-card--art .week-card__body {
+  flex-direction: row;
+  gap: 24px;
+}
+.week-card--art .week-card__main {
+  min-width: 0;
+}
+.week-card--art .week-card__days {
+  flex-direction: column;
+  gap: 8px;
+}
+.week-card--art .week-card__day {
+  flex: 1 1 0;
+  min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 12px;
+}
+/* 44px 행에 손글씨 34px 요일은 안 들어간다(줄 상자만 ~41px). 이 축소는 **이 모양에만** 걸린다 —
+   팬아트 없는 주의 카드는 34px 그대로다. */
+.week-card--art .week-card__dow {
+  font-size: 26px;
+}
+/* 라벨 폭을 고정해 일곱 행의 제목 시작선을 맞춘다. 시각 알약은 `margin-left: auto` 라 이 상자
+   오른쪽에 붙는다(세로 모양에서 칸 오른쪽에 붙던 것과 같은 규칙이 그대로 산다). */
+.week-card--art .week-card__day-label {
+  flex: none;
+  width: 132px;
+  align-items: baseline;
+}
+/* 칸 안 가로줄이 이 모양에선 라벨과 항목을 가르는 **세로줄**이 된다. */
+.week-card--art .week-card__day-rule {
+  flex: none;
+  width: 1px;
+  height: 26px;
+  margin: 0;
+}
+/* 하루 항목은 한 줄에 나란히 눕는다. 넘치면 각 제목이 함께 줄어들며 말줄임되고(그래서 항목이
+   통째로 사라지지 않는다), 개수 칩은 안 줄어 항상 보인다 — 칩이 밀려 나가면 "몇 개 더 있다"는
+   사실만 조용히 없어져 세로 모양의 "+N개" 계약이 이 모양에서만 깨진다.
+   말줄임표를 쓰는 이유: 세로 모양의 하드컷은 옛 Satori 가 line-clamp 를 못 해 받아들인 제약이고
+   (그 주석 참고), 진짜 DOM 인 이 모양엔 그 제약이 없다. */
+.week-card--art .week-card__entries {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 14px;
+  overflow: hidden;
+}
+.week-card--art .week-card__entry {
+  min-width: 0;
+}
+.week-card--art .week-card__entry-title {
+  max-height: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.week-card--art .week-card__overflow {
+  flex: none;
+}
+
+/* 사진지. 부품을 `.polaroid`(chrome.css)에서 안 가져오는 이유: 그건 페이지 위 작은 섬용이라 다크
+   토큰 재선언·figcaption 크기를 물고 오는데, 이 카드는 항상 라이트이고 캔버스가 훨씬 크다.
+   테두리·그림자·배경은 **하루 칸과 같은 값**을 쓴다 — 카드의 종이 어휘를 안 늘린다.
+
+   폭 300 은 고정이고(그래야 왼쪽 목록 폭이 그림 비율에 따라 흔들리지 않는다) **높이는 그림을
+   따라간다** — 그래서 `align-self: center` 다. 처음엔 사진지를 본문 높이에 늘이고 그림에
+   `object-fit: contain` 을 줬는데, 가로로 긴 그림(1600×500)이 356px 높이 종이 안에서 87px 띠로
+   떠 표기와의 사이가 통째로 비었다(실측) — 세로 그림이 흔하다고 그 경우를 방치하면 카드가
+   고장 난 것처럼 보인다. 그림 상자를 비율대로 두면 종이가 그림을 감싸므로 두 경우가 다 성립한다.
+
+   세로 그림은 손실이 없다: 상한(280×356)의 비율이 3:4 에 가까워, 600×763 은 늘였을 때와 같은
+   280×356 으로 그려진다(실측). 더 긴 세로 그림은 높이에 먼저 걸려 좌우 여백을 얻는데, 그건 늘인
+   판에서 `contain` 이 만드는 여백과 같은 값이다 — 달라지는 건 **종이가 그림을 감싸는지**뿐이다. */
+.week-card__art {
+  flex: none;
+  align-self: center;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 10px 6px;
+  background-color: var(--brand-paper);
+  border: 1px solid var(--thumb-edge);
+  box-shadow: 2px 3px 0 rgba(24, 24, 24, 0.06);
+  transform: rotate(1.1deg);
+  /* 안전망 — 어떤 조합이 와도 사진지가 본문 밖으로 못 나간다(퍼센트는 본문 높이가 확정이라
+     풀린다). 아래 두 규칙이 이미 높이를 계산해 맞추지만, 계산이 틀리면 카드가 깨지는 자리라
+     한 겹 더 잠근다: 여기서 걸리면 사진지 안에서 잘릴 뿐 카드는 온전하다. */
+  max-height: 100%;
+  overflow: hidden;
+}
+/* 상자는 이 두 상한과 그림의 고유 비율로 정해진다 — 어떤 비율이 와도 카드를 못 밀어낸다.
+   330 은 본문 높이(406, 실측)에서 종이 패딩 16 · gap 6 · **표기 두 줄**(53)을 뺀 값이다.
+   표기가 한 줄이거나 없는 주도 같은 상한을 쓴다 — 그림 크기가 표기 길이에 따라 달라지면 같은
+   그림을 두 주에 걸었을 때 크기가 갈린다. */
+.week-card__art-img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 330px;
+  margin-inline: auto;
+}
+/* 표기는 손글씨지만 색은 `--brand-taupe` 가 아니라 `--fg-muted` 다 — taupe 는 25px 이상에서만
+   대비를 넘는데(.polaroid figcaption 주석) 이 자리는 사진지 폭이 300px 이라 긴 표기가 24px 로
+   내려앉을 수 있다. muted 는 흰 종이 위 5.6:1 로 크기와 무관하게 통과한다.
+
+   **두 줄로 잠근다(GitHub codex 리뷰 P2).** 저장 상한이 100자라 그냥 두면 표기가 최대 일곱
+   줄까지 늘어나 사진지가 본문을 넘고(실측: 15자에서 이미 430 > 406, 100자면 카드 밖으로
+   나간다) 카드가 깨진 그림으로 나간다. 자르는 대신 안 자를 수도 있었지만, 표기는 **귀속**이라
+   한 줄로 줄이면 이름이 통째로 사라지는 쪽이 더 나쁘다 — 두 줄까지 보이고 넘치면 말줄임한다.
+   `overflow-wrap: anywhere` 는 공백 없는 핸들(`@aaaa…`) 때문이다: 그런 문자열은 줄바꿈 지점이
+   없어 상자를 **가로로** 넘어(실측 865px) 카드 오른쪽으로 샌다. */
+.week-card__art-credit {
+  margin: 0;
+  text-align: center;
+  font-family: var(--font-hand);
+  font-size: 24px;
+  line-height: 1.1;
+  color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 /* ── PNG 다운로드(이슈 #109 작업순서 3) ───────────────────────────────────────

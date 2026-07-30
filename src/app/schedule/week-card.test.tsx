@@ -47,6 +47,12 @@ const CARD: WeekCardData = {
     },
     { dow: "일", date: "7.26", time: null, rest: false, entries: [], overflow: 0 },
   ],
+  fanart: null,
+};
+
+const FANART_CARD: WeekCardData = {
+  ...CARD,
+  fanart: { imageKey: "b7f3.png", credit: "그림 · @someone", size: { width: 600, height: 800 } },
 };
 
 describe("WeekCard", () => {
@@ -118,5 +124,68 @@ describe("WeekCard", () => {
 
     rerender(<WeekCard card={{ ...CARD, note: null }} />);
     expect(container.querySelector(".week-card__note")).toBeNull();
+  });
+
+  describe("팬아트(이슈 #122)", () => {
+    it("팬아트가 있으면 서빙 경로로 사진지를 그리고 모양 클래스를 붙인다", () => {
+      /* 컬럼엔 URL 이 아니라 객체 키만 있다(ADR-0028) — 경로 조립이 이 컴포넌트의 계약이다. */
+      const { container } = render(<WeekCard card={FANART_CARD} />);
+      expect(container.querySelector(".week-card")).toHaveClass("week-card--art");
+      const img = screen.getByRole("img", { name: "팬아트" });
+      expect(img).toHaveAttribute("src", "/api/fanart/b7f3.png");
+      expect(screen.getByText("그림 · @someone")).toBeInTheDocument();
+    });
+
+    it("팬아트가 없으면 사진지도 모양 클래스도 없다 — 빈 자리를 남기지 않는다", () => {
+      const { container } = render(<WeekCard card={CARD} />);
+      expect(container.querySelector(".week-card")).not.toHaveClass("week-card--art");
+      expect(container.querySelector(".week-card__art")).toBeNull();
+      expect(screen.queryByRole("img")).toBeNull();
+    });
+
+    it("표기가 없으면 표기 줄 자체가 없다", () => {
+      const { container } = render(
+        <WeekCard
+          card={{ ...FANART_CARD, fanart: { imageKey: "b7f3.png", credit: null, size: null } }}
+        />,
+      );
+      expect(container.querySelector(".week-card__art-img")).not.toBeNull();
+      expect(container.querySelector(".week-card__art-credit")).toBeNull();
+    });
+
+    it("치수가 있으면 width·height 로 비율을 미리 준다", () => {
+      /* 사진지가 그림을 감싸는 모양이라(schedule.css) 로드 전엔 비율을 몰라 사진지가 표기
+         높이로 쪼그라들었다가 늘어난다 — 속성이 그 움직임을 없앤다. 극단 비율은 CSS 상한
+         (max-width/max-height)이 계속 막으므로 속성이 상자를 못 밀어낸다. */
+      render(<WeekCard card={FANART_CARD} />);
+      const img = screen.getByRole("img", { name: "팬아트" });
+      expect(img).toHaveAttribute("width", "600");
+      expect(img).toHaveAttribute("height", "800");
+    });
+
+    it("치수가 없으면(0013 이전 그림) 속성을 아예 안 단다", () => {
+      /* 반쪽만 달면 브라우저가 비율을 잘못 잡아 그림이 늘어난다 — 쌍이거나 없거나 둘 뿐이고,
+         그 조합은 타입(`size: {…} | null`)이 이미 막는다. */
+      render(
+        <WeekCard card={{ ...FANART_CARD, fanart: { ...FANART_CARD.fanart!, size: null } }} />,
+      );
+      const img = screen.getByRole("img", { name: "팬아트" });
+      expect(img).not.toHaveAttribute("width");
+      expect(img).not.toHaveAttribute("height");
+    });
+
+    it("lazy 로딩을 안 쓴다 — 미리보기가 좁은 폭에서 display:none 이면 안 받아 갈 수 있다", () => {
+      render(<WeekCard card={FANART_CARD} />);
+      expect(screen.getByRole("img", { name: "팬아트" })).not.toHaveAttribute("loading");
+    });
+
+    it("하루 칸 회전은 팬아트 없는 모양에만 남는다", () => {
+      /* 700px 폭 띠를 1° 기울이면 양 끝이 6px 씩 들려 8px 간격의 이웃 행과 겹친다. */
+      const { rerender } = render(<WeekCard card={CARD} />);
+      expect(screen.getByTestId("week-card-day-7.20").style.transform).toBe("rotate(-1deg)");
+
+      rerender(<WeekCard card={FANART_CARD} />);
+      expect(screen.getByTestId("week-card-day-7.20").style.transform).toBe("");
+    });
   });
 });

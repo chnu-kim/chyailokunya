@@ -22,6 +22,19 @@ export type WeekCardSource = {
      "행이 없는 것 = 시각 미정 · 휴방 아님"(db/schema.ts). 여기서도 부분집합 구조 타입이라
      WeekView.days(ScheduleDay[])도 WeekDraft 쪽 조립본도 그대로 만족한다. */
   days: { scheduledDate: string; startTime: string | null; rest: boolean }[];
+  /* 그 주에 걸어 둔 팬아트(ADR-0028). 표기는 두 호출자가 기준이 다르다 — WeekView 는 `null`,
+     WeekDraft 는 `""` 다(아래 buildWeekCard 가 합친다).
+
+     **치수도 받는다.** 처음엔 안 받았다: 카드 안 자리를 CSS 로 고정하면 비율을 속성으로 줄
+     이유가 없었기 때문이다. 그런데 가로로 긴 그림이 세로 사진지 안에서 얇은 띠로 뜨는 것을
+     고치며 **사진지가 그림을 감싸도록** 바꿨고(schedule.css), 그 순간 레이아웃이 그림의 고유
+     비율에 의존하게 됐다 — 로드 전에는 비율을 몰라 사진지가 표기 높이로 쪼그라들었다가 그림이
+     오면 늘어난다(GitHub codex 리뷰 P2). 캡처는 그림을 미리 디코드하고 찍으므로 받아지는 PNG 엔
+     영향이 없지만, 화면의 미리보기는 그 움직임을 그대로 보여 준다. */
+  fanartImageKey: string | null;
+  fanartCredit: string | null;
+  fanartImageWidth: number | null;
+  fanartImageHeight: number | null;
 };
 
 /* 한 칸에 다 못 그리는 날의 상한. 실사용은 하루 1~2건(결정 8 의 예 — "오후 저챗 + 밤 게임")
@@ -30,7 +43,14 @@ export type WeekCardSource = {
    레이아웃(1200×630, 날짜 칸 8개 폭)에서 시각 배지 없는 제목 두 줄까지 버티는 수를 어림한
    값이라 렌더를 눈으로 보며 조정한다(픽셀로 유도하지 않는다) — 옛 Satori 카드의 실측을 그대로
    물려받았고, week-card.tsx 가 같은 1200×630·날짜 칸 폭을 그대로 이식했으니(작업순서 1) 값도
-   같이 물려받는다. 이 DOM 렌더에서 다시 눈으로 확인해 바뀔 수 있다. */
+   같이 물려받는다. 이 DOM 렌더에서 다시 눈으로 확인해 바뀔 수 있다.
+
+   **카드가 모양 둘이 된 뒤에도(이슈 #122) 값은 하나다 — 다만 두 모양에서 이유가 다르다.** 위
+   유도는 세로 칸(팬아트 없는 주) 이야기이고, 팬아트가 걸린 주는 하루가 780px 한 줄이라 네 개가
+   나란히 눕고 넘치면 각 제목이 말줄임된다. 4×2 격자안(후보 B)은 칸 높이가 172px 로 낮아져 이
+   값을 3 으로 내려야 했고, 그게 그 후보를 기각한 이유 중 하나다. 상한을 모양별로 가르지 않는
+   이유: 같은 주를 두 모양으로 받았을 때 **보이는 항목 수가 달라지면** 카드가 데이터를 말하는
+   방식이 흔들린다. */
 const MAX_ENTRIES_PER_DAY = 4;
 
 export type WeekCardEntry = { title: string };
@@ -50,10 +70,27 @@ export type WeekCardDay = {
   overflow: number;
 };
 
+/* 카드가 그릴 팬아트. 키가 없으면 이 값 자체가 null 이고, 카드는 팬아트 없는 모양(7열 격자)으로
+   그린다 — 빈 사진지 자리를 남기지 않는다(이슈 #122 결정).
+
+   **`WeekCardData` 안에 있어야 한다.** 캡처 캐시가 `${weekStartDate}:${JSON.stringify(card)}` 를
+   키로 쓰므로(week-card-download.tsx 의 captureKey), 팬아트를 카드 밖 별도 prop 으로 넘기면
+   **그림만 바꾼 뒤 다시 받을 때 옛 캡처가 그대로 나온다.** 카드 안에 담으면 무효화가 공짜다. */
+export type WeekCardFanart = {
+  /* R2 객체 키 한 조각. 화면이 `/api/fanart/${key}` 로 조립한다(ADR-0028 — 컬럼엔 URL 이 없다). */
+  imageKey: string;
+  credit: string | null;
+  /* 폭·높이는 **쌍으로만** 존재한다(ADR-0030). 반쪽을 주면 브라우저가 비율을 잘못 잡아 그림이
+     늘어나므로, 한 오브젝트로 묶어 그 조합을 타입에서 없앤다 — 0013 이전에 걸린 그림은 통째로
+     null 이고 그 주는 예약 없이 그려진다. */
+  size: { width: number; height: number } | null;
+};
+
 export type WeekCardData = {
   rangeLabel: string;
   note: string | null;
   days: WeekCardDay[];
+  fanart: WeekCardFanart | null;
 };
 
 /* source.entries 는 이미 정렬된 채로 온다고 가정한다 — 서버 호출자(WeekView)는 getWeekForEdit 의
@@ -72,6 +109,19 @@ export function buildWeekCard(source: WeekCardSource): WeekCardData {
   return {
     rangeLabel: `${formatMD(days[0]!)} – ${formatMD(days[6]!)}`,
     note: source.note,
+    /* 표기는 **여기서 정규화한다** — 읽기 화면(WeekView)은 `null` 을, 편집기(WeekDraft)는 `""` 를
+       주므로 그대로 넘기면 편집기 미리보기에만 빈 figcaption 이 생겨 사진지 아래가 벌어진다.
+       두 화면이 같은 값을 다른 기준으로 얻는 자리라, 기준을 카드 조립부 한 곳에 둔다. */
+    fanart: source.fanartImageKey
+      ? {
+          imageKey: source.fanartImageKey,
+          credit: source.fanartCredit?.trim() || null,
+          size:
+            source.fanartImageWidth !== null && source.fanartImageHeight !== null
+              ? { width: source.fanartImageWidth, height: source.fanartImageHeight }
+              : null,
+        }
+      : null,
     days: days.map((date, i) => {
       const day = dayByDate.get(date);
       /* 휴방인 날은 항목을 **안 그린다**(이슈 #117 결정 5 — 표시에서 휴방이 이긴다). 두 테이블

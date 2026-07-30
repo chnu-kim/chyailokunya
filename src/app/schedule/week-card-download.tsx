@@ -70,15 +70,70 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
    화면 밖으로 치워도 body 에는 붙여 둔다 — computed style·레이아웃(오프셋·폭)은 실제로 문서
    트리에 앉아 있어야 나오고, 떨어져 나간 조각은 레이아웃이 없어 html-to-image 가 치수를 못
    읽는다. 디자인 토큰(globals.css 의 :root 변수)은 문서 어디에 붙든 그대로 상속되므로(이
-   컴포넌트가 var() 로만 색을 읽는 week-card.tsx 와 같은 전제) 시각 결과는 원본과 같다. */
-function snapshotCard(node: HTMLDivElement): HTMLDivElement {
+   컴포넌트가 var() 로만 색을 읽는 week-card.tsx 와 같은 전제) 시각 결과는 원본과 같다.
+
+   ── 화면 밖으로 치우는 스타일은 **감싸는 상자**에 건다(2026-07-30, 이슈 #122) ──────────
+   복제본 자신에 `position: fixed; top/left: -10000px` 을 걸면 **받아지는 PNG 가 통째로 빈다.**
+   html-to-image 는 노드를 SVG `<foreignObject>` 안에 넣어 래스터화하는데, 그때 computed style 을
+   인라인으로 베낀다 — `position: fixed` 는 그 안에서 SVG 뷰포트 기준이 되어 카드가 -10000px 에
+   놓이고, 1200×630 화폭엔 아무것도 안 그려진다(실측: 생성된 SVG 의 루트 style 에
+   `inset: -10000px 10080px 10090px -10000px`, 래스터 결과는 전 픽셀 알파 0).
+   감싸는 상자는 캡처 대상이 아니라 그 스타일이 SVG 로 안 새고, 복제본은 원본대로
+   `position: relative` 를 유지한다.
+
+   **이 결함은 게이트 전부 초록인 채로 살아 있었다** — e2e 가 PNG 매직 바이트와 2400×1260 만
+   봤기 때문이다. 빈 그림도 유효한 PNG 이고 치수도 맞다. 그래서 같은 PR 이 "받은 PNG 의 팬아트
+   자리 픽셀"을 재는 스펙을 함께 넣는다(schedule.spec.ts). */
+function snapshotCard(node: HTMLDivElement): { clone: HTMLDivElement; dispose: () => void } {
   const clone = node.cloneNode(true) as HTMLDivElement;
-  clone.style.position = "fixed";
-  clone.style.top = "-10000px";
-  clone.style.left = "-10000px";
-  clone.setAttribute("aria-hidden", "true");
-  document.body.appendChild(clone);
-  return clone;
+  const holder = document.createElement("div");
+  holder.style.position = "fixed";
+  holder.style.top = "-10000px";
+  holder.style.left = "-10000px";
+  holder.setAttribute("aria-hidden", "true");
+  holder.appendChild(clone);
+  document.body.appendChild(holder);
+  return { clone, dispose: () => holder.remove() };
+}
+
+/* 캡처 전에 카드 안 그림을 **우리가** data URL 로 바꿔 끼우고 디코드까지 끝낸다(이슈 #122).
+
+   html-to-image 도 같은 일을 하지만(embed-images.js 의 embedImageNode) 그 결과가 그림을 **한 번씩
+   빠뜨린다.** 실측(2026-07-30, 같은 세션에서 6번 연속 캡처): 1·3·4·5·6번은 팬아트가 담겼고
+   **2번만 통째로 비었다.** 생성된 SVG 를 뜯어 보면 2번에도 `src="data:image/png;base64,…"` 가
+   제대로 들어 있다 — 즉 **인라인이 아니라 래스터화가 진다.** 1번은 네트워크에서 받아 오느라
+   (요청 로그에 `fetch`) 시간이 걸리는 사이 브라우저가 그 data URL 을 디코드해 두는데, 2번은
+   라이브러리 캐시에 맞아 요청이 없어(로그에 `image` 만) SVG 를 곧바로 그리고, 그때 안쪽 그림이
+   아직 디코드 전이라 빈 자리로 래스터된다. 3번부터는 디코드 캐시가 데워져 다시 나온다.
+
+   그래서 **같은 문자열을 미리 이 문서에서 디코드해 둔다** — `img.decode()` 가 끝나면 그 data URL
+   의 비트맵이 브라우저 캐시에 있으므로, SVG 안의 같은 data URL 은 그릴 때 바로 나온다. 덤으로
+   라이브러리의 fetch 가 사라져 왕복이 하나 준다.
+
+   실패하면 **주소를 그대로 둔다** — html-to-image 가 예전처럼 자기 경로로 시도한다(오늘과 같은
+   상태로 떨어질 뿐 더 나빠지지 않는다). 그림 한 장 때문에 일정 카드 전체를 못 받게 만들 이유가
+   없다. `decode` 가 없는 환경(테스트용 DOM 구현)에선 그 단계만 건너뛴다. */
+async function inlineImages(root: HTMLElement): Promise<void> {
+  const targets = [...root.querySelectorAll("img")].filter((img) => !img.src.startsWith("data:"));
+  await Promise.all(
+    targets.map(async (img) => {
+      try {
+        const res = await fetch(img.src);
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+        img.src = dataUrl;
+        if (typeof img.decode === "function") await img.decode();
+      } catch {
+        // 위 주석 — 원래 주소를 그대로 두고 라이브러리에 맡긴다.
+      }
+    }),
+  );
 }
 
 type InFlightMap = Map<string, Promise<string>>;
@@ -135,9 +190,10 @@ function startCapture(
   const promise = (async () => {
     try {
       const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
-      return await toPng(snapshot, { pixelRatio: PIXEL_RATIO });
+      await inlineImages(snapshot.clone);
+      return await toPng(snapshot.clone, { pixelRatio: PIXEL_RATIO });
     } finally {
-      snapshot.remove();
+      snapshot.dispose();
     }
   })();
   map.set(key, promise);
