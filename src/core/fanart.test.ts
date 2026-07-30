@@ -9,6 +9,7 @@ import {
   fanartObjectKey,
   isFanartKey,
   isOverFanartLimit,
+  isAnimatedImage,
   isFanartSizeAcceptable,
   readImageDimensions,
   sniffImageType,
@@ -235,6 +236,31 @@ function vp8xWith(width: number, height: number): Uint8Array {
   return b;
 }
 
+/* APNG: PNG 시그니처 + IHDR 청크(33바이트) 뒤에 `acTL` 이 온다. CRC 는 판정에 안 쓰이므로 0
+   으로 둔다 — 라우트도 CRC 를 안 본다(브라우저가 볼 뿐이다). */
+function apng(extra: string = "acTL"): Uint8Array {
+  const b = new Uint8Array(45);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  b.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8); // IHDR 길이 13
+  new DataView(b.buffer).setUint32(16, 100);
+  new DataView(b.buffer).setUint32(20, 100);
+  // IHDR 청크 끝 = 8 + 12 + 13 = 33. 그 자리에 다음 청크를 놓는다.
+  b.set([0, 0, 0, 8], 33);
+  b.set(
+    [...extra].map((c) => c.charCodeAt(0)),
+    37,
+  );
+  return b;
+}
+
+/* 애니메이션 WebP: VP8X 의 flags 바이트(청크 데이터 첫 바이트 = offset 20)에서 ANIMATION 비트가
+   MSB 기준 6번째다(0x02). 그 한 비트가 정적 VP8X 와 애니메이션을 가른다. */
+function webpVp8xFlags(flags: number): Uint8Array {
+  const b = vp8xWith(300, 400);
+  b[20] = flags;
+  return b;
+}
+
 describe("readImageDimensions", () => {
   it("PNG IHDR 을 읽는다", () => {
     expect(readImageDimensions(pngWith(1200, 1600), "png")).toEqual({ width: 1200, height: 1600 });
@@ -354,5 +380,42 @@ describe("isFanartSizeAcceptable", () => {
     expect(isFanartSizeAcceptable(-1, 1000)).toBe(false);
     expect(isFanartSizeAcceptable(800.5, 600)).toBe(false);
     expect(isFanartSizeAcceptable(NaN, 600)).toBe(false);
+  });
+});
+
+describe("isAnimatedImage", () => {
+  /* **받지 않는 이유가 접근성이다** — `<img>` 로 재생되는 애니메이션은 CSS 의
+     `prefers-reduced-motion` 가드가 못 막는데, 이 저장소의 기준은 "새 애니메이션은 그 가드 안에
+     둔다"다. 덤으로 gif 를 뺀 근거("팬아트 한 장")를 APNG·애니메이션 WebP 가 우회하던 것도 닫힌다
+     (GitHub codex 리뷰 P2). */
+  it("APNG 는 acTL 청크로 걸린다", () => {
+    expect(isAnimatedImage(apng(), "png")).toBe(true);
+  });
+
+  it("정적 PNG 는 통과한다 — IDAT 를 만나면 그만 본다", () => {
+    expect(isAnimatedImage(pngWith(100, 100), "png")).toBe(false);
+    // acTL 이 아닌 청크(sRGB 등)는 애니메이션이 아니다.
+    expect(isAnimatedImage(apng("sRGB"), "png")).toBe(false);
+    /* IDAT 뒤엔 acTL 이 못 온다(규격) — 거기서 멈추는지 본다. 멈추지 않으면 큰 파일을 끝까지
+       훑어 요청 경로에서 낭비가 된다. */
+    expect(isAnimatedImage(apng("IDAT"), "png")).toBe(false);
+  });
+
+  it("애니메이션 WebP 는 VP8X 의 ANIMATION 비트로 걸린다", () => {
+    expect(isAnimatedImage(webpVp8xFlags(0x02), "webp")).toBe(true);
+    // 다른 플래그(ICC·Alpha·EXIF·XMP)가 켜져 있어도 그 비트만 본다.
+    expect(isAnimatedImage(webpVp8xFlags(0x02 | 0x20 | 0x08), "webp")).toBe(true);
+  });
+
+  it("정적 WebP 세 변종은 통과한다", () => {
+    expect(isAnimatedImage(webpVp8xFlags(0x00), "webp")).toBe(false);
+    expect(isAnimatedImage(webpVp8xFlags(0x10), "webp")).toBe(false); // Alpha 만
+    // VP8·VP8L 은 애니메이션을 담을 수 없다(컨테이너가 VP8X 여야 한다).
+    expect(isAnimatedImage(vp8With(300, 400), "webp")).toBe(false);
+    expect(isAnimatedImage(vp8lWith(300, 400), "webp")).toBe(false);
+  });
+
+  it("JPEG 은 애니메이션이 없다", () => {
+    expect(isAnimatedImage(jpegWith(800, 600), "jpeg")).toBe(false);
   });
 });

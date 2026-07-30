@@ -193,6 +193,19 @@ describe("POST /api/fanart — 본문 판정", () => {
     expect((await upload(wide)).status).toBe(413);
   });
 
+  it("APNG 는 415 — gif 를 뺀 이유를 애니메이션 PNG 가 우회한다", async () => {
+    /* `<img>` 로 재생되는 애니메이션은 CSS 의 prefers-reduced-motion 가드가 못 막는다(접근성
+       기준). 판정은 acTL 청크 하나이고 경계는 core/fanart 단위 테스트가 본다. */
+    const apng = new Uint8Array(45);
+    apng.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    apng.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
+    new DataView(apng.buffer).setUint32(16, 100);
+    new DataView(apng.buffer).setUint32(20, 100);
+    apng.set([0, 0, 0, 8], 33);
+    apng.set([0x61, 0x63, 0x54, 0x4c], 37); // "acTL"
+    expect((await upload(apng)).status).toBe(415);
+  });
+
   it("헤더를 못 읽으면 415 — 치수 힌트와 반대로 fail-closed 다", async () => {
     /* 통과시키면 위 폭탄 방어에 우회로가 생긴다. 매직 바이트를 이미 지난 파일이므로 "그 형식이라고
        주장하는데 헤더가 규격과 다르다"는 뜻이고, 그런 파일은 브라우저도 못 그린다. */

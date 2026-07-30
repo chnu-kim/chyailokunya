@@ -214,6 +214,41 @@ function webpSize(b: Uint8Array) {
   return null;
 }
 
+/* 애니메이션인가 — **받지 않는다.**
+
+   이유가 셋이다(GitHub codex 리뷰 P2). (1) gif 를 뺀 근거("팬아트 한 장이라는 쓰임에 없다")를
+   APNG·애니메이션 WebP 가 그대로 우회한다. (2) **`<img>` 로 재생되는 애니메이션은 CSS 의
+   `prefers-reduced-motion` 가드가 못 막는다** — 이 저장소의 접근성 기준은 "새 애니메이션은 그
+   가드 안에 둔다"이고, 그 기준을 지킬 수 없는 콘텐츠가 공개 화면에 들어오면 안 된다.
+   (3) 픽셀 예산은 캔버스 한 장만 세므로 프레임 반복 디코드를 안 센다.
+
+   판정도 헤더만 본다:
+     APNG — `acTL` 청크. 규격이 **IDAT 앞**에 오도록 못박았으므로 IDAT 를 만나면 그만 본다.
+     WebP — VP8X flags 바이트의 ANIMATION 비트(MSB 기준 6번째 = 0x02).
+     JPEG — 애니메이션이 없다.
+   청크 순회에 상한을 둔다(요청 경로다 — JPEG 세그먼트 상한과 같은 이유). */
+const PNG_MAX_CHUNKS = 32;
+export function isAnimatedImage(bytes: Uint8Array, type: FanartImageType): boolean {
+  if (type === "jpeg") return false;
+  if (type === "webp") {
+    if (String.fromCharCode(...bytes.slice(12, 16)) !== "VP8X") return false;
+    // 청크 데이터 첫 바이트가 flags 다(offset 12 fourcc + 4 size = 20).
+    return bytes.length > 20 && (bytes[20]! & 0x02) !== 0;
+  }
+  let at = 8; // PNG 시그니처 다음
+  for (let i = 0; i < PNG_MAX_CHUNKS; i++) {
+    const len = beU32(bytes, at);
+    if (len === null) return false;
+    const kind = String.fromCharCode(...bytes.slice(at + 4, at + 8));
+    if (kind === "acTL") return true;
+    // 첫 IDAT 뒤엔 acTL 이 못 온다(규격) — 거기서 멈추면 큰 파일을 끝까지 훑지 않는다.
+    if (kind === "IDAT" || kind === "IEND") return false;
+    at += 12 + len; // 길이(4) + 타입(4) + 데이터 + CRC(4)
+    if (at >= bytes.length) return false;
+  }
+  return false;
+}
+
 /* 형식 헤더에서 픽셀 치수를 읽는다 — **디코드가 아니다.** 규격이 파일 앞머리에 못박은 정수를
    몇 개 읽는 것이라 CPU 가 매직 바이트 판정과 같은 급이고, ADR-0028 의 "요청 경로에서 이미지를
    만지지 않는다"와 충돌하지 않는다(그 결정이 막은 것은 디코드·재인코딩이다).

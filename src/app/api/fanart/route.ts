@@ -19,6 +19,7 @@ import {
   fanartContentType,
   fanartKey,
   fanartObjectKey,
+  isAnimatedImage,
   isFanartSizeAcceptable,
   isOverFanartLimit,
   readImageDimensions,
@@ -119,6 +120,16 @@ export async function POST(req: Request) {
      이쪽은 "우리 origin 에서 서빙해도 되는가"를 결정한다.
 
      상태 코드는 크기 거절과 같은 413 이다 — 사용자가 할 일도 같다(더 작은 그림으로 다시). */
+  /* 애니메이션은 받지 않는다(core/fanart 의 isAnimatedImage) — gif 를 뺀 이유를 APNG·애니메이션
+     WebP 가 우회하고, `<img>` 로 재생되는 애니메이션은 CSS 의 prefers-reduced-motion 가드가 못
+     막는다(접근성 기준). 형식이 아닌 것과 같은 자리·같은 415 다. */
+  if (isAnimatedImage(bytes, type)) {
+    return Response.json(
+      { error: "움직이는 이미지는 올릴 수 없습니다. 한 장짜리 그림으로 올려 주십시오." },
+      { status: 415 },
+    );
+  }
+
   const size = readImageDimensions(bytes, type);
   if (!size) {
     return Response.json(
