@@ -197,6 +197,54 @@ async function probe(path, { expectHtml, expectType }, { allowRetry }) {
   return { ok: true, url, body };
 }
 
+/* **서버의 "오늘"이 진짜 오늘인지 본다**(2026-07-31 인시던트). `?week=` 없는 `/schedule` 은
+   서버가 KST 로 계산한 이번 주를 그리는데, 배포된 Workers 에서 그 시계가 **에포크 0** 을
+   돌려줘 1969-12-29 주가 나갔다 — 원인은 프로덕션 workerd 의 **네이티브 Temporal** 이고
+   그 `Now` 가 요청 시계에 안 물려 있다(core/calendar.ts 의 todayKST 주석).
+
+   **이 층 말고는 볼 수가 없다.** 유닛은 `today` 를 인자로 받아 고정값을 넣고, 로컬
+   preview(wrangler dev)·vitest workerd 엔 네이티브 Temporal 이 없어 폴리필이 맞는 답을 주며,
+   e2e 는 `next dev`(Node)라 아예 다른 런타임이다 — 셋 다 초록인 채 라이브만 1970 이었다.
+   층 4(로컬 번들 스모크)도 같은 이유로 못 본다.
+
+   기대값은 이 스크립트가 **자기 시계로** 계산한다(Node 는 정상). 페이지는 주 범위를
+   `M.D – M.D` 로 적으므로 그 문자열을 만들어 대조한다 — 서버와 스크립트가 KST 자정을 사이에
+   두고 갈릴 수 있어 **어제·오늘 두 날 기준을 모두 허용한다**(자정 근처 오탐 방지). 1970 은
+   그 창을 어떤 방향으로도 못 맞춘다. */
+const CURRENT_WEEK_PATH = "/schedule";
+
+function kstWeekRangeLabel(epochMs) {
+  // KST 는 DST 가 없어 고정 +9 — 스크립트는 순수 산술만 하고 존 DB 를 안 쓴다.
+  const kst = new Date(epochMs + 9 * 60 * 60 * 1000);
+  const dow = (kst.getUTCDay() + 6) % 7; // 월=0
+  const monday = new Date(kst.getTime() - dow * 86400000);
+  const sunday = new Date(monday.getTime() + 6 * 86400000);
+  const md = (d) => `${d.getUTCMonth() + 1}.${d.getUTCDate()}`;
+  return `${md(monday)} – ${md(sunday)}`;
+}
+
+function checkCurrentWeek(body) {
+  /* 그 요소의 **안쪽 전체**를 잡고 마크업을 걷어낸다 — React 가 텍스트 노드 사이에
+     `<!-- -->` 를 끼우므로(실측: `12.29<!-- --> – <!-- -->1.4`) `[^<]+` 로는 앞 조각만
+     읽힌다. 그러면 기대값과 영영 안 맞아 **고친 뒤에도 계속 빨간** 게이트가 된다. */
+  const inner = body.match(/class="sched__range"[^>]*>([\s\S]*?)<\/p>/)?.[1];
+  const shown = inner
+    ?.replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!shown) {
+    return `주 범위(.sched__range)를 못 읽었다 — 마크업이 바뀌었으면 이 정규식도 같이 고친다`;
+  }
+  const now = Date.now();
+  const allowed = [kstWeekRangeLabel(now), kstWeekRangeLabel(now - 86400000)];
+  if (allowed.includes(shown)) return null;
+  return (
+    `서버가 그린 이번 주가 "${shown}" 인데 실제 KST 이번 주는 "${allowed[0]}" 다 — ` +
+    `서버 시계가 틀렸다(1970 이면 Temporal.Now 회귀를 먼저 의심한다)`
+  );
+}
+
 /* 각 경로를 **두 번** 두드린다. 1102 는 한 요청이 isolate 를 죽이고 **그 뒤 무관한 요청까지**
    연쇄로 실패하는 모양이라(2026-07-27 실측: favicon.ico 까지 같이 죽었다), 한 번씩만 보면
    첫 요청은 통과하고 두 번째가 죽는 패턴을 놓친다. 정적 자산을 섞는 것도 같은 이유다 — 가벼운
@@ -306,6 +354,13 @@ async function main() {
       const result = await probe(target.path, target, { allowRetry: round === 1 });
       console.log(`  [${round}/${ROUNDS}] ${result.ok ? "ok  " : "FAIL"} ${result.url}`);
       if (!result.ok) failures.push(`${result.url} — ${result.reason}`);
+      if (result.ok && target.path === CURRENT_WEEK_PATH && result.body) {
+        const weekProblem = checkCurrentWeek(result.body);
+        console.log(
+          `  [${round}/${ROUNDS}] ${weekProblem ? "FAIL" : "ok  "} ${result.url} (이번 주)`,
+        );
+        if (weekProblem) failures.push(`${result.url} — ${weekProblem}`);
+      }
       if (round === 1 && target.expectHtml && result.body) htmlBodies.push(result.body);
     }
   }

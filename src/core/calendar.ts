@@ -73,10 +73,25 @@ function branded(plain: Temporal.PlainDate): IsoDate {
 
 /* 지금 KST 로 며칠인가. 서버(Workers·UTC)와 브라우저(사용자 존)가 같은 답을 내야 하므로
    실행 환경의 로컬 존을 절대 쓰지 않는다 — 이 사이트의 "오늘"은 방송을 보는 사람의 하루,
-   즉 KST 다. */
+   즉 KST 다.
+
+   ── **시계는 `Date.now()` 로만 읽는다 — `Temporal.Now` 를 쓰지 않는다** ─────────────────
+   프로덕션 인시던트(2026-07-31). `Temporal.Now.plainDateISO(KST)` 가 배포된 Workers 에서
+   **에포크 0**(1970-01-01)을 돌려줘, `?week=` 없는 `/schedule` 이 1969-12-29 주를 그리고 "오늘"
+   칩이 어느 주에서도 안 떴다. 원인은 `temporal-polyfill` 의 진입점이
+   `const Temporal = NativeTemporal || 폴리필` 이라는 것이다 — 프로덕션 workerd 엔 **네이티브
+   `Temporal` 이 있고 그 `Now` 가 요청 시계에 안 물려 있다.** 같은 런타임에서 `Date.now()` 는
+   멀쩡하고(로그인 라우트가 세우는 쿠키 `Expires` 가 정확했다) Temporal 의 **산술·존 변환도
+   멀쩡하다**(명시된 `?week=` 는 정상이었다) — 깨진 건 `Now` 하나다.
+
+   **로컬 게이트는 이걸 구조적으로 못 본다.** 유닛(vitest workerd)·로컬 preview(wrangler dev)엔
+   네이티브 Temporal 이 없어 폴리필이 답하고, e2e 는 `next dev`(Node)라 아예 다른 런타임이다 —
+   셋 다 초록인 채로 라이브만 1970 이었다. 그래서 배포 후 스모크가 이 자리를 직접 잰다
+   (`scripts/post-deploy-smoke.mjs` 의 "이번 주" 검사).
+
+   `dateOfInstantKST` 는 순수 변환이라(시계를 안 읽는다) 네이티브든 폴리필이든 같은 답을 낸다. */
 export function todayKST(): IsoDate {
-  // 실시간 클록이라 5자리 연도가 나올 수 없지만, IsoDate 를 만드는 통로를 하나로 둔다.
-  return branded(Temporal.Now.plainDateISO(KST));
+  return dateOfInstantKST(Date.now());
 }
 
 /* 절대 순간(epoch ms) → KST 로 며칠인가. `_at` 컬럼(created_at 같은 진짜 시각)을 화면에 날짜로

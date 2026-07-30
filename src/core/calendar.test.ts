@@ -81,7 +81,13 @@ describe("todayKST", () => {
   });
 
   /* 이 두 케이스가 "KST 로 읽는다"는 도메인 약속을 못박는다. UTC 로 계산했다면 둘 다
-     7-23 이 나오고, 서버(Workers·UTC)에서 자정 직후에 만든 일정이 하루 앞 주에 붙는다. */
+     7-23 이 나오고, 서버(Workers·UTC)에서 자정 직후에 만든 일정이 하루 앞 주에 붙는다.
+
+     **"어느 시계를 읽는가"는 여기서 못 잰다**(2026-07-31 인시던트). `vi.setSystemTime` 은
+     `Date.now()` 를 갈아 끼우는데, 이 런타임엔 네이티브 Temporal 이 없어 폴리필의
+     `Temporal.Now` 도 결국 같은 `Date.now()` 를 읽는다 — 두 구현이 여기서 구분이 안 된다.
+     프로덕션에선 네이티브 `Temporal.Now` 가 에포크 0 을 돌려주면서 갈렸다. 그 자리는
+     eslint 의 `no-restricted-syntax`(Temporal.Now 금지)와 배포 후 스모크가 맡는다. */
   it("KST 자정 직전은 아직 그날", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-23T14:59:59Z")); // KST 23:59:59
