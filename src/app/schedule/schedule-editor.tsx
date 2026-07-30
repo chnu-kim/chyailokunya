@@ -1,9 +1,15 @@
 "use client";
 
 import { useMachine } from "@xstate/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
-import { isAborted } from "@/core/error-message";
+import {
+  FanartUploadFailed,
+  fanartUploadErrorMessage,
+  fanartUploadErrorText,
+  isAborted,
+} from "@/core/error-message";
+import { FANART_IMAGE_TYPES } from "@/core/fanart";
 import {
   dayOf,
   draftDayInputs,
@@ -13,7 +19,7 @@ import {
   type DraftEntry,
   type WeekDraft,
 } from "@/core/schedule-editor";
-import { scheduleSaveMachine } from "@/core/schedule-save.machine";
+import { scheduleSaveMachine, type FanartUploadResult } from "@/core/schedule-save.machine";
 import type { GameOption } from "@/features/games/service";
 import { buildWeekCard } from "@/features/schedule/card";
 import type { WeekView } from "@/features/schedule/service";
@@ -65,8 +71,19 @@ function weekToDraft(week: WeekView): WeekDraft {
     days: Object.fromEntries(
       week.days.map((d) => [d.scheduledDate, { startTime: d.startTime ?? "", rest: d.rest }]),
     ),
+    /* 팬아트(ADR-0028). 키는 null 그대로 옮기고 표기만 '' 로 접는다 — WeekDraft 가 두 타입을
+       갈라 두는 이유는 그 파일 주석에 있다. **치수는 draft 에 없다**: 저장에 안 실리고, 편집기
+       미리보기가 CSS 고정 슬롯이라 화면이 그 값을 쓸 일이 없다(ADR-0030). */
+    fanartImageKey: week.fanartImageKey,
+    fanartCredit: week.fanartCredit ?? "",
   };
 }
+
+/* 파일 선택 대화상자가 받아들일 형식. **core/fanart 의 배열에서 유도한다** — 손으로 적으면
+   서버가 받는 형식과 갈려, 대화상자가 고를 수 있게 해 준 파일이 업로드에서 415 로 거절된다.
+   이건 편의일 뿐 방어선이 아니다(사용자는 "모든 파일"로 바꿔 고를 수 있고, 진짜 판정은
+   서버의 매직 바이트다). */
+const FANART_ACCEPT = FANART_IMAGE_TYPES.map((t) => `image/${t}`).join(",");
 
 /* 저장 실패 문구. 게임 보드의 writeErrorMessage 를 그대로 못 쓰는 건 어휘가 게임 보드 전용
    ("보드에 있는 게임")이라서다 — 원칙(우리가 확인한 것만 말한다)은 그대로 잇되 일정 어휘로 쓴다. */
@@ -117,12 +134,43 @@ export function ScheduleEditor({
         const saved = await trpc.schedule.publishWeek.mutate(values, { signal });
         return { published: saved.publishedAt !== null, revision: saved.revision };
       },
+      /* 팬아트 업로드(ADR-0028). tRPC 가 아니라 Route Handler 라 여기만 `fetch` 다 — 파일
+         바이트를 JSON 경계로 넘기면 base64 로 부풀고 그 비용이 Worker CPU 예산에 얹힌다.
+         본문은 raw 바이트다(multipart 가 아니다 — 파일 하나뿐이라 폼이 표현할 게 없다). */
+      uploadRun: async ({ file }, signal) => {
+        const res = await fetch("/api/fanart", { method: "POST", body: file, signal });
+        if (!res.ok) {
+          /* **응답을 읽는 것은 여기(app)의 일이다** — core 의 매퍼는 이미 파싱된 봉투에서 문구만
+             꺼낸다(레이어 계약: core 는 HTTP 를 모른다). JSON 이 아니면(502 HTML 등) 문구가 없는
+             것으로 두고, 매퍼가 원인을 단정하지 않는 일반 문구로 떨어진다. */
+          let envelope: unknown = null;
+          try {
+            envelope = await res.json();
+          } catch {
+            envelope = null;
+          }
+          throw new FanartUploadFailed(res.status, fanartUploadErrorText(envelope));
+        }
+        /* **키만 받는다.** 치수는 업로드가 R2 객체 메타에 묶고 저장 경로가 거기서 읽으므로
+           (ADR-0030) 화면이 만질 값이 아니다 — 한때 여기서 `createImageBitmap` 으로 직접 읽었고
+           그다음엔 응답으로 받았는데, 둘 다 그 값을 클라이언트 주장으로 만드는 경로였다. */
+        return (await res.json()) as FanartUploadResult;
+      },
       mapError: saveErrorMessage,
+      mapUploadError: fanartUploadErrorMessage,
     },
   });
-  const { draft, baseline, revision, error, publishError, announcement } = state.context;
+  const { draft, baseline, revision, error, publishError, fanartError, announcement } =
+    state.context;
   const saving = state.matches("saving");
   const publishing = state.matches("publishing");
+  const uploading = state.matches("uploading");
+  /* 팬아트 조작은 **`ready` 에서만** 받는다(머신) — 그래서 화면도 저장 중까지 함께 잠근다.
+     `uploading` 만 보면 저장 중에 파일을 고르거나 내리기를 눌러도 이벤트가 조용히 드롭되고
+     아무 문구도 안 뜬다(그때 input 은 value 까지 비워져, 같은 파일을 다시 골라도 change 가
+     안 난다) — 저장 버튼에 uploading 을 더한 것과 같은 근거를 반대 방향으로 적용한 자리다.
+     발행 중(`publishing`)은 확인창이 `showModal()` 이라 배경이 inert 여서 이미 닫혀 있다. */
+  const fanartLocked = uploading || saving;
   /* games prop 을 로컬 상태로 승격한다 — 편집기 안에서 새 게임을 추가하면(ScheduleGameSearch)
      서버가 다시 내려주기 전까지는 이 목록에만 존재한다. 주가 바뀌면 이 컴포넌트가 key 로
      리마운트되므로(page.tsx) 초기값만으로 충분하다. */
@@ -229,6 +277,14 @@ export function ScheduleEditor({
   function onSave() {
     send({ type: "SAVE" });
   }
+  function onPickFanart(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    /* **값을 비운다.** 같은 파일을 다시 고르면 input 의 value 가 그대로여서 change 가 아예
+       안 나고, 실패 후 "같은 파일로 재시도"가 조용히 안 먹는다(사용자에겐 버튼이 죽은 것으로
+       보인다). 비우는 시점은 send 앞이어야 한다 — 뒤에 두면 리렌더가 끼는 순서에 달린다. */
+    e.target.value = "";
+    if (file) send({ type: "FANART_UPLOAD", file });
+  }
 
   return (
     <section className="sched sched--edit" data-od-id="schedule-editor">
@@ -260,6 +316,103 @@ export function ScheduleEditor({
             onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
           />
         </label>
+
+        {/* 팬아트(ADR-0028) — 주에 딸린 부가 정보라 공지 바로 아래다. **입력 컨트롤이 있으므로
+            사진지 섬(.polaroid)을 쓰지 않는다**: 그 섬은 다크에서 라이트 토큰을 국소 재선언한
+            크림 종이라 폼 컨트롤의 테두리·포커스 대비가 거기서 씻긴다(kunya-design §4). 읽기
+            화면은 조작이 없어 그쪽이 폴라로이드다 — 같은 값을 두 화면이 다른 부품으로 그리는
+            게 맞는 자리다.
+
+            미리보기는 **실제 서빙 경로**(/api/fanart/…)로 그린다. objectURL 이 아니라 그걸 쓰면
+            "저장하면 팬이 볼 그림" 그대로를 보고, 서빙 라우트까지 이 화면에서 함께 검증된다. */}
+        <div
+          className="sched-fanart"
+          role="group"
+          aria-labelledby="sched-fanart-label"
+          data-od-id="schedule-fanart"
+        >
+          <span className="sched-note__label" id="sched-fanart-label">
+            팬아트 (선택)
+          </span>
+
+          <div className="sched-fanart__row">
+            {draft.fanartImageKey && (
+              /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
+                 비율이 아니라, 그림마다 높이가 변해 아래 요일 목록이 밀리는 것보다 안정된
+                 자리가 낫다(읽기 화면은 반대로 실제 치수로 예약한다). */
+              <img
+                className="sched-fanart__thumb"
+                src={`/api/fanart/${draft.fanartImageKey}`}
+                alt="올린 팬아트"
+                width={96}
+                height={96}
+                data-od-id="schedule-fanart-thumb"
+              />
+            )}
+            <div className="sched-fanart__acts">
+              {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
+                  input 이 받고(sr-only 는 clip 이라 포커스가 살아 있다), 링은 아래 CSS 의
+                  :focus-within 이 label 에 그린다. */}
+              <label className="btn btn--secondary sched-fanart__pick">
+                {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
+                <input
+                  type="file"
+                  className="sr-only"
+                  accept={FANART_ACCEPT}
+                  disabled={fanartLocked}
+                  data-od-id="schedule-fanart-file"
+                  onChange={onPickFanart}
+                />
+              </label>
+              {draft.fanartImageKey && (
+                <button
+                  type="button"
+                  className="btn btn--secondary sched-fanart__del"
+                  disabled={fanartLocked}
+                  data-od-id="schedule-fanart-remove"
+                  onClick={() => send({ type: "FANART_REMOVED" })}
+                >
+                  내리기
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
+              그림은 미리 줄여 올려야 한다. 값 칸이라 문장이 아니라 표기다(AGENTS). */}
+          <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
+
+          {uploading && (
+            <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">
+              올리는 중…
+            </p>
+          )}
+          {fanartError && (
+            <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
+              {fanartError}
+            </p>
+          )}
+
+          {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
+              CHECK 가 둘 다 거절하므로, 화면이 애초에 못 만들게 하는 게 가장 조용한 방어다.
+              업로드 중에는 잠근다: 성공하면 표기가 비워지므로(새 그림에 옛 이름을 안 붙인다)
+              그 사이 타이핑한 값이 사라져 보인다. */}
+          {draft.fanartImageKey && (
+            <label className="sched-note sched-fanart__credit">
+              <span className="sched-note__label">작가 표기 (선택)</span>
+              <input
+                className="sched-field"
+                type="text"
+                maxLength={100}
+                placeholder="그린 사람"
+                value={draft.fanartCredit}
+                disabled={uploading}
+                data-od-id="schedule-fanart-credit"
+                onChange={(e) => send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })}
+              />
+            </label>
+          )}
+        </div>
 
         <ol className="sched__days" data-od-id="schedule-days">
           {days.map((date, i) => {
@@ -430,7 +583,12 @@ export function ScheduleEditor({
               type="button"
               className="btn btn--secondary sched-status__btn"
               data-od-id="schedule-publish-toggle"
-              disabled={baseline.published ? !canUnpublish : !canPublish}
+              /* **업로드 중에도 잠근다.** 머신은 `PUBLISH`·`UNPUBLISH` 를 `ready` 에서만 받으므로
+                 (uploading 상태에 핸들러가 없다) 이 자리를 안 잠그면 확인창을 거쳐 이벤트가
+                 드롭되고, `publishing` 이 false 이고 오류도 없어 **확인창이 성공처럼 닫힌다**
+                 (plain 리뷰 10라운드). 저장 버튼에 uploading 을 더한 것과 같은 부류인데 그때
+                 이 버튼을 빠뜨렸다 — dirty 는 업로드가 성공할 때까지 false 라 가드도 안 걸린다. */
+              disabled={uploading || (baseline.published ? !canUnpublish : !canPublish)}
               onClick={() => setConfirmMode(baseline.published ? "unpublish" : "publish")}
             >
               {baseline.published ? "비공개로 전환" : "발행하기"}
@@ -462,10 +620,12 @@ export function ScheduleEditor({
             </p>
           )}
 
+          {/* 업로드 중에도 잠근다 — 머신이 그 이벤트를 무시하지만(uploading 상태에 on 이 없다)
+              눌리는 것처럼 보이면 관리자는 저장이 된 줄 안다. 방어선은 머신이고 이건 표시다. */}
           <button
             className="btn btn--primary sched-bar__save"
             type="button"
-            disabled={saving || !dirty}
+            disabled={saving || uploading || !dirty}
             data-od-id="schedule-save"
             onClick={onSave}
           >

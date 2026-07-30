@@ -1,5 +1,6 @@
+import { fileURLToPath } from "node:url";
 import { expect, test, type APIRequestContext, type Browser } from "@playwright/test";
-import { E2E_FAN, signIn } from "./session";
+import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
 /* 팬아트 업로드·서빙 라우트(ADR-0028). 파일 바이트가 오가는 경계라 tRPC 단위 테스트가 못 닿는다
    — 인가·CSRF·형식 판정·상한이 전부 HTTP 계층에 있고, R2 왕복까지 실제로 돌아야 계약이 증명된다.
@@ -10,10 +11,17 @@ import { E2E_FAN, signIn } from "./session";
 
 const UPLOAD = "/api/fanart";
 
-// 각 형식의 실제 앞머리 + 뒤에 아무 바이트. 판정은 앞머리만 보므로 이걸로 충분하다.
-const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-]);
+/* PNG 시그니처 + **IHDR 까지** 채운 앞머리(8×8). 매직 바이트만으론 이제 부족하다 — 라우트가
+   IHDR 에서 치수를 읽어 픽셀 예산을 보고, 못 읽으면 415 로 거절한다(fail-closed). 픽셀 데이터는
+   여전히 필요 없다: 라우트는 어느 경로에서도 디코드하지 않는다. */
+const PNG_BYTES = (() => {
+  const b = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+  Buffer.from([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(b, 8);
+  b.writeUInt32BE(8, 16);
+  b.writeUInt32BE(8, 20);
+  return b;
+})();
 
 /* Origin 을 손으로 싣는다 — 상태를 바꾸는 요청은 Origin 이 AUTH_URL 과 정확히 일치할 때만
    통과한다(rejectForeignOrigin, fail-closed). 브라우저는 이걸 자동으로 붙이지만 API 요청
@@ -111,6 +119,36 @@ test("확장자·Content-Type 이 아니라 바이트로 판정한다", async ({
   await context.close();
 });
 
+test("픽셀 폭탄은 R2 에 들어가기 전에 거절된다 — 바이트 상한이 못 막는 축이다", async ({
+  browser,
+  baseURL,
+}) => {
+  /* IHDR 이 20000×20000(4억 화소)을 주장하는 **24바이트** PNG. 이 테스트가 싼 이유가 이 방어가
+     싼 이유와 같다: 라우트는 헤더의 정수 몇 개만 읽으므로 거대한 본문이 필요 없다. **실제 폭탄도
+     같은 헤더를 갖는다** — 단색 이미지는 그 픽셀 수가 5MB 안에 압축되고, 방문자 브라우저가
+     디코드하면 1.6GB 로 펼쳐진다(적대적 리뷰 2라운드).
+
+     바이트 상한(413)을 e2e 로 못 재는 이유(아래 주석)와 대조적이다 — 같은 상태 코드인데 이쪽은
+     본문이 24바이트라 dev 서버를 묶지 않는다. */
+  const bomb = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bomb, 0);
+  Buffer.from([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(bomb, 8);
+  bomb.writeUInt32BE(20000, 16);
+  bomb.writeUInt32BE(20000, 20);
+
+  const context = await contextAs(browser, baseURL!);
+  const res = await upload(context.request, baseURL!, bomb);
+  expect(res.status()).toBe(413);
+  // 서버가 이유를 말하고 화면은 그 문구를 그대로 쓴다(fanartUploadErrorMessage).
+  expect(((await res.json()) as { error: string }).error).toContain("화소");
+
+  // 헤더를 못 읽는 파일은 415 다 — fail-closed(통과시키면 이 방어에 우회로가 생긴다).
+  const truncated = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+  expect((await upload(context.request, baseURL!, truncated)).status()).toBe(415);
+
+  await context.close();
+});
+
 /* **크기 상한(413)은 여기서 안 잰다.** 재려면 5MB 본문을 실제로 전송해야 하는데, 그러면
    `next dev` 서버가 그 요청에 묶여 **무관한 스펙들이 줄줄이 타임아웃된다** — 실측으로 전체
    e2e 가 2.7분·5개 실패였다가, 그 테스트 하나를 빼니 1.2분·122개 전부 통과였다(실패하는
@@ -121,6 +159,111 @@ test("확장자·Content-Type 이 아니라 바이트로 판정한다", async ({
    `isOverFanartLimit` — 상한 정확히·+1·헤더 부재·쓰레기 헤더). 이 파일이 증명하는 것은
    "라우트가 거절을 실제 상태 코드로 낸다"이고 그 계약은 아래 415·400 이 이미 보여 준다.
    상한만 유일하게 e2e 밖에 남는 것이 아니라, **같은 종류의 거절을 재는 경로가 이미 있다.** */
+
+/* ── 화면 왕복(PR 2) ────────────────────────────────────────────────────────────
+   위 테스트들은 라우트 계약을, 이 하나는 **관리자가 올린 그림이 팬 화면에 뜨는 전 구간**을 본다:
+   파일 선택 → 업로드 → 미리보기 → 저장 → 발행 → 비로그인 읽기. 단위 테스트는 이 구간을 못
+   잇는다(브라우저의 파일 선택·치수 판독과 서버 저장·서빙이 각각 다른 층에 있다).
+
+   **먼 주를 쓰고 발행한다.** e2e 는 D1 픽스처 하나를 공유하므로(AGENTS) 현재 주를 발행하면
+   schedule.spec 의 "미발행 현재 주 = 준비 중"이 조용히 깨진다. 2033-03-07 은 다른 스펙이 안
+   읽는 월요일이다. */
+/* 손으로 인코딩한 2×3 PNG. **1×1 을 쓰지 않는 이유**: 폭과 높이가 같으면 둘이 뒤바뀌어도
+   단언이 통과한다(치수는 두 컬럼·두 Zod 필드·두 img 속성을 거치는데 그 전 구간에서 뒤바뀜이
+   안 잡힌다). 그리고 **CRC 가 맞아야 한다** — 널리 복사되는 1×1 base64 중 IDAT CRC 가 깨진
+   판이 있고, 그걸 쓰면 브라우저가 디코드를 거부해(InvalidStateError) 치수가 null 로 저장된다.
+   `file(1)` 은 헤더만 보므로 그 상태를 통과시킨다(실측 2026-07-30). */
+const FANART_PNG = fileURLToPath(new URL("./fixtures/fanart-2x3.png", import.meta.url));
+const FANART_WEEK = "2033-03-07";
+/* 극단 비율(20×2000 = 4만 화소). **픽셀 예산·한 변 상한 둘 다 통과하는 정당한 업로드**다.
+   표시 상한(schedule.css 의 max-height)을 지우면 이 그림의 렌더 높이가 **2000px** 로 잡힌다
+   (실측 — 폭이 20px 이라 `.sched-fanart-card` 의 `fit-content` 가 그 폭을 그대로 준다: 뷰포트
+   800 의 2.5배다). 폭이 큰 쪽이 더 나쁘다 — 1200×20000 이면 420px 상한에서 7000px 이 된다. */
+const TALL_PNG = fileURLToPath(new URL("./fixtures/fanart-20x2000.png", import.meta.url));
+
+test("관리자가 올린 그림을 저장·발행하면 팬이 그걸 본다", async ({ browser, baseURL }) => {
+  const admin = await contextAs(browser, baseURL!);
+  const page = await admin.newPage();
+  await page.goto(`/schedule?week=${FANART_WEEK}`);
+  await expectSignedIn(page);
+
+  // 빈 주는 발행할 수 없다(결정 22) — 항목을 하나 만들어 둔다.
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("팬아트 주");
+
+  /* 파일을 고르면 업로드가 곧바로 나간다(별도 "올리기" 버튼이 없다) — 성공하면 미리보기가
+   **실제 서빙 경로**로 뜬다. objectURL 이 아니라 그걸 쓰는 것이 이 화면의 계약이다. */
+  await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(FANART_PNG);
+  const thumb = page.locator('[data-od-id="schedule-fanart-thumb"]');
+  await expect(thumb).toBeVisible();
+  await expect(thumb).toHaveAttribute("src", /^\/api\/fanart\/[0-9a-f-]{36}\.png$/);
+
+  // 표기 칸은 **그림이 있을 때만** 열린다(그림 없이 표기만 있는 조합을 화면이 못 만든다).
+  await page.locator('[data-od-id="schedule-fanart-credit"]').fill("e2e 그린 사람");
+
+  const save = page.locator('[data-od-id="schedule-save"]');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  // 발행해야 공개 읽기가 그 주를 준다(ADR-0022).
+  await page.locator('[data-od-id="schedule-publish-toggle"]').click();
+  await page.locator('[data-od-id="schedule-publish-confirm-confirm"]').click();
+  await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("공개 중");
+
+  /* 팬이 보는 화면은 **다른 컨텍스트**로 연다 — 관리자에겐 편집기가 뜨므로 같은 세션으로는
+     읽기 화면 자체를 못 본다(서버가 신원으로 뷰를 가른다). */
+  const fanContext = await browser.newContext({ baseURL });
+  const fan = await fanContext.newPage();
+  await fan.goto(`/schedule?week=${FANART_WEEK}`);
+
+  const fanart = fan.locator('[data-od-id="schedule-fanart"]');
+  await expect(fanart).toBeVisible();
+  await expect(fanart.getByText("e2e 그린 사람")).toBeVisible();
+
+  const img = fanart.locator("img");
+  /* 치수가 실려 그림이 뜨기 전에 자리를 예약한다 — 1×1 PNG 를 올렸으니 그 값이다. 관리자
+     브라우저가 읽어 보낸 값이 컬럼을 거쳐 여기까지 오는지가 이 단언의 질문이다. 폭≠높이인
+     그림을 쓰는 이유는 위 상수 주석에 있다(뒤바뀜을 잡는다). */
+  await expect(img).toHaveAttribute("width", "2");
+  await expect(img).toHaveAttribute("height", "3");
+  /* 그림이 실제로 서빙되는지 — naturalWidth 가 0 이 아니면 브라우저가 바이트를 받아 디코드했다.
+     src 만 보면 404 여도 통과한다(그게 dangling key 의 증상이다). */
+  await expect
+    .poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth))
+    .toBeGreaterThan(0);
+
+  /* ── 극단 비율을 표시가 제한한다(적대적 리뷰 4라운드) ────────────────────────────────
+     같은 주의 그림을 20×2000 으로 **교체한다**(4만 화소 — 픽셀 예산·한 변 상한 둘 다 안이라
+     업로드가 정당하게 통과한다). max-height 를 지우면 렌더 높이가 2000px 로 잡히고(실측), 폭이
+     큰 그림이면 더 나쁘다(1200×20000 → 7000px) — 발행된 주를 여는 방문자가 그 아래를 못 본다.
+
+     교체를 쓰는 이유가 둘이다: 발행된 주를 하나 더 만들지 않아 픽스처 오염이 안 늘고, "키를
+     바꾸면 옛 객체를 치운다"는 서버 계약이 같은 흐름에서 한 번 더 돈다. */
+  await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(TALL_PNG);
+  await expect(thumb).toHaveAttribute("src", /^\/api\/fanart\/[0-9a-f-]{36}\.png$/);
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  await fan.reload();
+  const tall = fan.locator('[data-od-id="schedule-fanart"] img');
+  // 저장된 치수는 그대로다 — 제한은 데이터가 아니라 표시에 있다(그래야 레거시 행도 덮인다).
+  await expect(tall).toHaveAttribute("height", "2000");
+  await expect
+    .poll(() => tall.evaluate((el: HTMLImageElement) => el.naturalHeight))
+    .toBeGreaterThan(0);
+
+  const box = (await tall.boundingBox())!;
+  /* 720px 이 CSS 상한이다(min(720px, 80vh) — 이 뷰포트는 720 쪽이 작다). 상한이 없으면 여기가
+     42000 근처로 잡힌다. 1px 여유는 소수점 레이아웃의 반올림 몫이다. */
+  expect(box.height).toBeLessThanOrEqual(721);
+  // 문서가 그 그림 때문에 비정상적으로 길어지지도 않는다 — 상한이 실제 레이아웃에 먹었다는 뜻.
+  const docHeight = await fan.evaluate(() => document.documentElement.scrollHeight);
+  expect(docHeight).toBeLessThan(4000);
+
+  await fanContext.close();
+  await admin.close();
+});
 
 test("서빙: 키 형식이 아니거나 없는 객체는 404", async ({ request }) => {
   // 경로 순회. 키 검증이 이 한 자리에서 막으므로 R2 를 두드리지도 않는다.

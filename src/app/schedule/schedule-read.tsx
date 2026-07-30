@@ -141,6 +141,37 @@ export function ScheduleReadView({
                 );
               })}
             </ol>
+
+            {/* 팬아트는 **목록 아래**다(ADR-0028) — 이 화면의 주인공은 일정이고, 팬아트는 그 주에
+                딸린 보너스라 일정을 밀어내면 안 된다. 부품은 사진지 섬(.polaroid)을 그대로 쓴다:
+                이 사이트에서 "사진"의 모양은 이미 정해져 있고 라이트·다크 양쪽이 검증돼 있다
+                (kunya-design §3). figcaption 의 크기·색은 안 건드린다 — --brand-taupe 는
+                --text-xl(25px)에서만 대비를 통과해, 한 단계만 줄이면 두 테마가 동시에 미달한다.
+
+                편집기는 같은 값을 폴라로이드로 안 그린다(조작이 들어 있어 섬 안 대비가 씻긴다,
+                schedule.css 주석) — 부품이 갈리는 것이 의도다.
+
+                **치수가 있으면 width/height 로 자리를 예약한다.** 없으면 속성을 안 단다: 반쪽을
+                주면 브라우저가 비율을 잘못 잡아 그림이 늘어난다(치수는 항상 쌍으로만 저장되므로
+                한쪽만 있는 경우는 없지만, 이 분기가 그 사실에 기대지 않게 둘을 함께 본다).
+                예약이 없는 그림은 로드되며 아래를 한 번 밀 뿐 사라지지는 않는다.
+
+                referrerPolicy 는 없다 — same-origin 이라 가릴 주소가 없다(외부 URL 시절의
+                흔적이고, R2 로 옮겨 온 이유가 바로 그 유출을 없애는 것이었다). */}
+            {week.fanartImageKey && (
+              <figure className="polaroid sched-fanart-card" data-od-id="schedule-fanart">
+                <img
+                  className="sched-fanart-card__img"
+                  src={`/api/fanart/${week.fanartImageKey}`}
+                  alt="팬아트"
+                  loading="lazy"
+                  {...(week.fanartImageWidth !== null && week.fanartImageHeight !== null
+                    ? { width: week.fanartImageWidth, height: week.fanartImageHeight }
+                    : {})}
+                />
+                {week.fanartCredit && <figcaption>{week.fanartCredit}</figcaption>}
+              </figure>
+            )}
           </>
         ) : (
           <div className="sched__empty" data-od-id="schedule-empty">

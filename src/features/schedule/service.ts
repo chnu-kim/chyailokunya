@@ -4,7 +4,7 @@
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { toIsoDate, weekDates, weekStartOf } from "@/core/calendar";
-import { fanartObjectKey } from "@/core/fanart";
+import { fanartObjectKey, isFanartSizeAcceptable } from "@/core/fanart";
 import {
   games,
   scheduleDays,
@@ -22,8 +22,23 @@ import type { PublishWeekInput, SaveWeekInput } from "./schema";
    가리키는 객체가 **있는지 묻고**(head), 아무도 안 가리키게 된 것을 **치운다**(delete). */
 export type FanartObjectStore = {
   delete(key: string): Promise<void>;
-  head(key: string): Promise<unknown | null>;
+  /* `customMetadata` 를 함께 본다 — 업로드가 헤더에서 읽은 치수를 거기 묶어 두고(ADR-0030),
+     이 경로가 **그 값을 치수의 정본으로 읽는다.** R2 의 head 응답이 이미 담고 있으므로 왕복이
+     늘지 않는다. 구조적 타이핑이라 실제 바인딩·테스트 스텁 둘 다 이 모양을 만족한다. */
+  head(key: string): Promise<{ customMetadata?: Record<string, string> } | null>;
 };
+
+/* R2 객체 메타의 치수를 저장할 수 있는 값으로 읽는다. **메타가 정본이라 여기서 검증까지 한다** —
+   문자열만 담기는 자리라 파싱이 필요하고, 손으로 넣은 값이나 이 가드 이전에 올라간 객체를
+   그대로 믿으면 컬럼 제약(CHECK)이 batch 를 죽인다. 못 읽으면 null 이고 그 주는 예약 없이
+   그려진다(치수는 레이아웃 힌트다 — ADR-0030). */
+export function fanartSizeFromMetadata(
+  meta: Record<string, string> | undefined,
+): { width: number; height: number } | null {
+  const width = Number(meta?.w);
+  const height = Number(meta?.h);
+  return isFanartSizeAcceptable(width, height) ? { width, height } : null;
+}
 
 /* 한 주의 뷰 — 메타(공지·발행) + 그 주 7일의 항목들. 편집 화면이 불러오고, 저장이 되돌려준다.
    주 자체는 저장하지 않고 날짜에서 유도하므로(결정 2) 항목은 week_id FK 가 아니라 scheduled_date
@@ -50,6 +65,10 @@ export type WeekView = {
      같은 origin 에서 뜬다), 라우트를 옮길 때 저장된 값이 아니라 조립부 한 곳만 바뀐다. */
   fanartImageKey: string | null;
   fanartCredit: string | null;
+  /* 그 그림의 픽셀 치수. 읽기 화면이 자리를 예약하는 데만 쓴다 — **없을 수 있다**(관리자
+     브라우저가 파일을 못 디코드한 경우). 그때 화면은 예약 없이 그린다(db/schema.ts). */
+  fanartImageWidth: number | null;
+  fanartImageHeight: number | null;
   entries: ScheduleEntry[];
   /* 그 주 7일 중 **기본값이 아닌 날만**(시각이 있거나 휴방인 날). 행이 없는 날은 "시각 미정 ·
      휴방 아님"과 같은 뜻이라 목록에 안 실린다(db/schema.ts 의 "행이 없는 것 = 기본값").
@@ -109,6 +128,8 @@ export async function getWeekForEdit(db: Db, weekStartDate: string): Promise<Wee
     publishedAt: meta?.publishedAt ?? null,
     fanartImageKey: meta?.fanartImageKey ?? null,
     fanartCredit: meta?.fanartCredit ?? null,
+    fanartImageWidth: meta?.fanartImageWidth ?? null,
+    fanartImageHeight: meta?.fanartImageHeight ?? null,
     /* 메타가 없는 주의 draft 는 "관리자가 뭔가 정해 뒀나"로 가른다 — 휴방만 있는 주도 정해 둔
        주다(결정 9). 항목 수만 보면 그런 주가 "아직 아무도 안 짠 새 주"로 읽혀 보드에서 사라진다. */
     draft: meta?.draft ?? !weekHasContent(entries.length, days.filter((d) => d.rest).length),
@@ -190,11 +211,26 @@ export class FanartImageMissing extends Error {
    2. **그림을 바꾸면 표기를 안 물려준다.** 새 그림에 옛 작가 이름이 붙는 건 **잘못된 귀속**이라
       값이 사라지는 것보다 나쁘다(코드 리뷰 지적). 새 표기를 함께 보내면 그 값이 쓰인다.
    3. 그림 없이 표기만 남는 조합은 거절한다 — 위 두 규칙을 지나고도 남는 경우는 "표기만 보냈는데
-      걸린 그림이 없다"뿐이고, 그건 화면이 만들 수 없는 요청이다. */
+      걸린 그림이 없다"뿐이고, 그건 화면이 만들 수 없는 요청이다.
+   4. **치수는 항상 한 쌍으로, 그림과 함께 움직인다.** 표기와 같은 규칙(보냈으면 그 값 · 키가
+      바뀌었으면 버림)에 둘을 갈라 받지 않는다는 조건이 더 붙는다 — 반쪽 조합이 DB CHECK 를
+      깨기 때문이다. 그림이 없어지면 치수는 **조용히 접는다**(표기처럼 던지지 않는다): 표기는
+      사람이 입력한 값이라 사라지는 걸 알려야 하지만 치수는 파일에서 파생된 값이라 잃을 것이
+      없고, 여기서 접으면 batch 가 CHECK 로 죽는 경로가 확실히 닫힌다. */
 export function nextFanart(
   input: Pick<SaveWeekInput, "fanartImageKey" | "fanartCredit">,
-  existing: { fanartImageKey: string | null; fanartCredit: string | null } | undefined,
-): { key: string | null; credit: string | null } {
+  existing:
+    | {
+        fanartImageKey: string | null;
+        fanartCredit: string | null;
+        fanartImageWidth: number | null;
+        fanartImageHeight: number | null;
+      }
+    | undefined,
+  /* 새로 거는 그림의 치수 — **호출자가 R2 객체 메타에서 읽어 넘긴다**(saveWeek). 키가 안 바뀌면
+     쓰이지 않는다(기존 값을 유지한다). */
+  serverSize?: { width: number; height: number } | null,
+): { key: string | null; credit: string | null; width: number | null; height: number | null } {
   const currentKey = existing?.fanartImageKey ?? null;
   const key = input.fanartImageKey !== undefined ? input.fanartImageKey : currentKey;
 
@@ -204,8 +240,30 @@ export function nextFanart(
   else if (key !== currentKey) credit = null;
   else credit = existing?.fanartCredit ?? null;
 
+  /* 치수는 **클라이언트가 못 정한다** — 키가 바뀌면 호출자가 R2 메타에서 읽어 준 값을 쓰고, 키가
+     그대로면 DB 의 기존 값을 유지한다(적대적 리뷰 9라운드: 저장 경로가 클라이언트 에코를 믿으면
+     불변식 2 가 이 필드에서만 빠진다). 치수는 키에 딸린 값이라 **키가 같은데 치수만 바뀌는 정당한
+     경로가 없다** — 그래서 입력에서 아예 받지 않는다(안 쓰는 필드를 받아 두면 다음 사람이 그게
+     쓰인다고 믿는다). 옛 그림의 치수를 새 그림에 물려주지 않는 것은 표기의 "잘못된 귀속"과 같은
+     결이고, 여기선 결과가 눈에 보인다: 예약한 자리와 실제 비율이 달라 레이아웃이 튄다. */
+  let width: number | null;
+  let height: number | null;
+  if (key !== currentKey) {
+    width = serverSize?.width ?? null;
+    height = serverSize?.height ?? null;
+  } else {
+    width = existing?.fanartImageWidth ?? null;
+    height = existing?.fanartImageHeight ?? null;
+  }
+
   if (key === null && credit !== null) throw new FanartCreditWithoutImage();
-  return { key, credit };
+  /* 그림이 없으면 치수는 정의상 존재할 수 없다. 도달 경로는 "키를 안 보내(유지) 걸린 그림이
+     없는데 치수만 보냈다"뿐이라 Zod(`fanartImageKey === null` 만 본다)가 못 보는 자리다. */
+  if (key === null) {
+    width = null;
+    height = null;
+  }
+  return { key, credit, width, height };
 }
 
 /* 다음 revision. revision 은 그 주 메타의 last_updated_at 이지만 **단조 증가가 정본이다** —
@@ -346,6 +404,10 @@ export async function saveWeek(
         // 둘 다 필요하다 — 키만 보고 credit 을 그대로 두면 아래 nextFanart 의 두 사고가 난다.
         fanartImageKey: scheduleWeeks.fanartImageKey,
         fanartCredit: scheduleWeeks.fanartCredit,
+        // 치수도 부분 갱신 대상이라 같은 이유로 읽는다 — 안 보낸 요청이 옛 치수를 유지하려면
+        // 그 값을 알아야 한다(키만 보고 치수를 그대로 두면 새 그림에 옛 비율이 붙는다).
+        fanartImageWidth: scheduleWeeks.fanartImageWidth,
+        fanartImageHeight: scheduleWeeks.fanartImageHeight,
       })
       .from(scheduleWeeks)
       .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate)),
@@ -373,16 +435,29 @@ export async function saveWeek(
   const existing = metaRows[0];
   /* **청구 전에** 계산한다 — 이게 던지면 revision 이 아직 안 올라 편집기가 멀쩡한 상태로
      오류만 받는다(nextFanart 주석). 청구 뒤로 미루면 거절이 그 주를 stale 하게 만든다. */
-  const fanartNext = nextFanart(input, existing);
   /* 새로 거는 그림은 **실제로 R2 에 있어야 한다.** 0단계의 gameId 확인과 같은 규율이다 —
      참조 무결성을 경계에서 먼저 보고, 여기서 거절하면 청구 전이라 revision 이 안 오른다.
 
      **키가 바뀔 때만** 묻는다: 이미 걸려 있던 키는 저장되던 시점에 확인됐으므로, 매 저장마다
      R2 왕복을 하나씩 더할 이유가 없다(편집기는 전체 교체라 같은 키를 매번 다시 보낸다).
-     바인딩이 없으면(단위 테스트 기본값) 건너뛴다 — 확인할 저장소 자체가 없다. */
-  if (fanart && fanartNext.key !== null && fanartNext.key !== (existing?.fanartImageKey ?? null)) {
-    if (!(await fanart.head(fanartObjectKey(fanartNext.key)))) throw new FanartImageMissing();
+     바인딩이 없으면(단위 테스트 기본값) 건너뛴다 — 확인할 저장소 자체가 없다.
+
+     **같은 head 응답에서 치수를 읽는다**(ADR-0030, 적대적 리뷰 9라운드). 업로드가 헤더에서 읽어
+     객체 메타에 묶어 둔 값이라 이것이 정본이고, 그래서 클라이언트는 치수를 보내지 않는다 —
+     저장 경로가 에코된 값을 믿으면 불변식 2("입력은 신뢰하지 않는다")가 이 필드에서만 빠진다.
+     왕복은 이미 있던 것이라 비용이 안 늘고, 메타가 없는 객체(이 가드 이전에 올라간 것)는 치수
+     없이 저장돼 예약 없이 그려진다. */
+  const changingKey =
+    input.fanartImageKey !== undefined &&
+    input.fanartImageKey !== null &&
+    input.fanartImageKey !== (existing?.fanartImageKey ?? null);
+  let serverSize: { width: number; height: number } | null = null;
+  if (fanart && changingKey) {
+    const object = await fanart.head(fanartObjectKey(input.fanartImageKey!));
+    if (!object) throw new FanartImageMissing();
+    serverSize = fanartSizeFromMetadata(object.customMetadata);
   }
+  const fanartNext = nextFanart(input, existing, serverSize);
   const publishedAt = input.published ? (existing?.publishedAt ?? now) : null;
   /* 저장 **전**의 주가 내용이 있었는가. claim placeholder 와 draft 유도가 같은 값을 봐야 한다
      — 갈리면 2단계 실패 시 placeholder 가 "행 없음"과 다른 뜻이 된다(아래 claim 주석). */
@@ -472,6 +547,8 @@ export async function saveWeek(
       publishedAt,
       fanartImageKey: fanartNext.key,
       fanartCredit: fanartNext.credit,
+      fanartImageWidth: fanartNext.width,
+      fanartImageHeight: fanartNext.height,
     })
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const clearEntries = db

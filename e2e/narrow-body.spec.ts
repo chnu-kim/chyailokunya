@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
@@ -14,6 +15,9 @@ import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
 const PAGES = ["/", "/landing", "/games"] as const;
 const NARROW = [320, 390] as const;
+/* 팬아트 업로드용 1×1 PNG(fanart.spec 과 같은 파일). 여기선 그림이 **떠 있는 상태**를 만드는
+   용도이고(내리기·표기 칸이 그때만 DOM 에 있다) 치수는 재지 않는다. */
+const FANART_PNG = fileURLToPath(new URL("./fixtures/fanart-2x3.png", import.meta.url));
 
 /* WCAG 1.4.10 reflow 의 판정 그대로 — 320px 에서 가로 스크롤이 생기면 안 된다.
    scrollWidth·clientWidth 는 정수로 반올림되므로 0 이 "완전히 딱 맞음"이 아니라 "1px 미만
@@ -657,6 +661,31 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
         page.locator('[data-od-id="schedule-publish-toggle"]'),
         "발행 상태 전환",
       );
+
+      /* 팬아트 조작(이슈 #120) — 새 조작이라 여기 적어야 검사에 든다(이 스펙은 셀렉터를 손으로
+         열거한다). 두 가지를 조심해야 한다:
+
+         1. **44 는 label(`.sched-fanart__pick`)로 잰다.** 안의 file input 은 `.sr-only` 1px
+            상자라 그걸 재면 늘 미달이고, 사람이 실제로 누르는 것도 label 이다(주입 셀렉터와
+            배포 셀렉터를 같게 — kunya-design §6).
+         2. **썸네일·내리기·표기 칸은 그림이 있을 때만 DOM 에 있다.** globalSetup 이 schedule
+            테이블을 비우므로, 올리지 않고 셀렉터만 더하면 세 검사가 **0건을 재고 통과한다** —
+            이 저장소가 두 번 만든 그 초록이다. 그래서 먼저 실제로 올린다. */
+      const pick = page.locator('[data-od-id="schedule-fanart"] .sched-fanart__pick');
+      await expectTouchTarget(pick, "팬아트 그림 올리기");
+      await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(FANART_PNG);
+      await expect(page.locator('[data-od-id="schedule-fanart-thumb"]')).toBeVisible();
+      await expectTouchTarget(
+        page.locator('[data-od-id="schedule-fanart-remove"]'),
+        "팬아트 내리기",
+      );
+      await expectTouchTarget(
+        page.locator('[data-od-id="schedule-fanart-credit"]'),
+        "팬아트 작가 표기",
+      );
+      /* 96px 고정 슬롯 + 버튼 스택이 한 행에 서는 유일한 자리다 — 320 에서 그 조합이 넘치지
+         않는지 본다(고정 px 트랙은 해제 폭 없이 두면 그 값이 그대로 가로 넘침이다). */
+      expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
 
       // 항목을 하나 만들어야 게임 검색 트리거가 존재한다.
       await page.locator('[data-od-id^="schedule-day-add-"]').first().click();

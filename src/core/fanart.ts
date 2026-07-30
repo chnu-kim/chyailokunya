@@ -33,6 +33,275 @@ export function isOverFanartLimit(byteLength: number): boolean {
   return Number.isFinite(byteLength) && byteLength > FANART_MAX_BYTES;
 }
 
+/* 저장할 수 있는 픽셀 치수의 상한(읽기 화면의 자리 예약, ADR-0028). 저장 Zod 와 **치수를 읽는
+   화면**이 같은 값을 봐야 한다 — 갈리면 화면이 읽어 보낸 값이 경계에서 거절돼 **그림 자체를 못
+   거는** 상태가 된다(치수는 레이아웃 힌트일 뿐인데 그것 때문에 업로드가 통째로 무의미해진다).
+   그래서 상한을 넘는 치수는 화면이 미리 버리고(null = 예약 없이 그린다) 그림만 저장한다.
+
+   20000 은 현실적인 이미지 치수의 위쪽이고, 상한 자체가 필요한 이유는 위조 클라이언트가 거대한
+   정수를 보내면 그 값이 그대로 img 속성에 실려 그림 한 장이 화면을 통째로 밀어낸다는 것이다. */
+export const FANART_MAX_DIMENSION = 20000;
+
+/* 픽셀 예산 — **바이트 상한과 다른 축이다.** 5MB 안에도 수억 픽셀이 들어간다: 단색 20000×20000
+   PNG 는 압축 상태로 수 KB 인데 브라우저가 디코드하면 픽셀당 4바이트로 펼쳐져 1.6GB 가 된다.
+   그 파일이 발행된 주에 걸리면 **그 주를 여는 모든 방문자의 탭이 죽는다** — 업로드하는 관리자
+   탭도 함께 죽는다(치수를 읽는 `createImageBitmap` 자체가 그 비트맵을 할당한다).
+
+   `FANART_MAX_DIMENSION` 과 **함께** 봐야 한다: 한 변 상한만으로는 19000×19000(361MP)이 통과한다.
+   40MP 는 실사용 일러스트의 위쪽이다(6000×6000 = 36MP · 트위터 업로드 상한도 이 근처다). */
+export const FANART_MAX_PIXELS = 40_000_000;
+
+/* 저장까지 갈 수 있는 치수인가 — **업로드 라우트가 이 하나로 판정한다.** 두 상한을 함께 보는
+   이유는 그 둘이 다른 것을 막기 때문이다:
+
+     픽셀 예산(40MP) — 방문자 브라우저의 **디코드 메모리**. 5MB 안에도 수억 픽셀이 들어간다.
+     한 변 상한(20000) — 저장 경계(Zod)가 거는 값. **여기서 같이 안 보면 계약이 갈린다:**
+       20001×1 은 2만 화소라 예산을 통과하는데 저장에서 BAD_REQUEST 로 죽어, 업로드는 성공하고
+       그림은 어디에도 못 걸리는 상태가 된다. 거절을 업로드 시점으로 앞당겨야 관리자가 이유를
+       바로 듣는다.
+
+   그래서 **업로드가 통과시킨 치수는 저장도 통과한다**가 계약이 된다 — 화면이 그 값을 다시
+   정규화할 필요가 없다(ADR-0030). */
+export function isFanartSizeAcceptable(width: number, height: number): boolean {
+  if (!Number.isInteger(width) || !Number.isInteger(height)) return false;
+  if (width <= 0 || height <= 0) return false;
+  if (width > FANART_MAX_DIMENSION || height > FANART_MAX_DIMENSION) return false;
+  return width * height <= FANART_MAX_PIXELS;
+}
+
+/* 빅엔디안·리틀엔디안 u16/u24/u32. 형식마다 바이트 순서가 다르다 — PNG/JPEG 는 BE, WebP 는
+   RIFF 계열이라 LE 다. 범위를 넘으면 null(호출자가 "못 읽었다"로 다룬다). */
+function beU32(b: Uint8Array, at: number): number | null {
+  if (b.length < at + 4) return null;
+  return ((b[at]! << 24) | (b[at + 1]! << 16) | (b[at + 2]! << 8) | b[at + 3]!) >>> 0;
+}
+function beU16(b: Uint8Array, at: number): number | null {
+  if (b.length < at + 2) return null;
+  return (b[at]! << 8) | b[at + 1]!;
+}
+function leU16(b: Uint8Array, at: number): number | null {
+  if (b.length < at + 2) return null;
+  return b[at]! | (b[at + 1]! << 8);
+}
+function leU24(b: Uint8Array, at: number): number | null {
+  if (b.length < at + 3) return null;
+  return b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16);
+}
+
+/* PNG: 시그니처 8 + 청크 길이 4 + "IHDR" 4 뒤에 폭·높이가 BE u32 로 온다(규격이 IHDR 을 **첫
+   청크로 못박았다**). 고정 오프셋이라 스캔이 없다. */
+function pngSize(b: Uint8Array) {
+  const width = beU32(b, 16);
+  const height = beU32(b, 20);
+  return width !== null && height !== null ? { width, height } : null;
+}
+
+/* JPEG: 세그먼트를 훑어 SOF(Start Of Frame) 를 찾는다. 마커는 `FF xx` 이고 대부분 뒤에 길이
+   u16(자기 포함)이 붙는데, SOI·EOI·RST·TEM 은 **길이가 없어** 건너뛰는 방식이 다르다.
+   SOF 페이로드: 길이(2) + 정밀도(1) + 높이(2) + 폭(2) — 높이가 먼저다.
+
+   **상한이 둘 필요하다 — 세그먼트 수만으로는 비용이 안 묶인다.**
+     세그먼트 수(64) — 길이 0·1 같은 값을 넣으면 오프셋이 안 늘어 무한 루프가 된다. 정상 JPEG 의
+       SOF 는 앞쪽 몇 개 세그먼트 안에 온다.
+     마커 앞 패딩(16) — 마커는 `FF` 로 시작하고 그 앞에 패딩 `FF` 가 올 수 있어 건너뛰는데, **그
+       스킵에 상한이 없으면 5MB 를 전부 `0xff` 로 채운 파일이 한 반복에서 ~500만 회를 돈다**
+       (GitHub codex 리뷰 P1). 세그먼트 예산은 그때까지 1 도 안 줄어들어 아무 보호가 되지 않는다.
+       정상 JPEG 의 패딩은 0~몇 개이고, 상한을 넘으면 깨진 파일로 보고 거절한다(fail-closed —
+       APNG 스캔 예산과 같은 방향).
+   요청 경로에서 도는 코드라 이 상한들이 없으면 **방어 코드 자체가 10ms CPU 한도를 먹는다**
+   (이 저장소는 그 한도로 프로덕션 인시던트를 냈다 — Error 1102). */
+const JPEG_MAX_SEGMENTS = 64;
+const JPEG_MAX_PADDING = 16;
+const SOF_MARKERS = new Set([
+  0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
+]);
+
+/* EXIF Orientation(APP1) — **5~8 이면 표시 치수가 SOF 의 폭·높이와 뒤바뀐다.**
+
+   왜 봐야 하나: 브라우저는 `image-orientation: from-image` 가 기본값이라 EXIF 회전을 적용해
+   그린다. 그런데 SOF 가 적은 것은 **회전 전 픽셀 행렬**이라, 그 값을 `<img width height>` 에
+   그대로 실으면 예약 비율이 뒤집혀 로드 순간 화면이 튄다 — 이 컬럼이 막으려던 바로 그 시프트다
+   (plain 리뷰 6라운드). 폰으로 찍어 올린 세로 그림이 정확히 이 부류이고, 팬아트 맥락에서 흔하다.
+
+   파싱은 IFD0 의 태그 0x0112 하나만 본다. TIFF 헤더가 엔디안을 스스로 밝히므로(`II`/`MM`) 두
+   경로가 필요하고, 엔트리 순회에는 상한을 둔다 — 여기도 요청 경로다(JPEG_MAX_SEGMENTS 와 같은
+   이유). 못 읽으면 null 이고 그때는 **스왑하지 않는다**: 회전 정보가 없는 JPEG(대부분)와 같은
+   취급이라 안전한 기본값이다. */
+const EXIF_MAX_IFD_ENTRIES = 256;
+function exifOrientation(b: Uint8Array, at: number, len: number): number | null {
+  // "Exif\0\0" 뒤부터 TIFF 헤더다. APP1 이지만 XMP 인 경우도 있어 이 서명으로 가른다.
+  const sig = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
+  if (!startsWith(b, sig, at + 2)) return null;
+  const tiff = at + 2 + sig.length;
+  const le = b[tiff] === 0x49 && b[tiff + 1] === 0x49;
+  const be = b[tiff] === 0x4d && b[tiff + 1] === 0x4d;
+  if (!le && !be) return null;
+  const u16 = (o: number) => (le ? leU16(b, o) : beU16(b, o));
+  const u32 = (o: number) =>
+    le
+      ? b.length < o + 4
+        ? null
+        : (b[o]! | (b[o + 1]! << 8) | (b[o + 2]! << 16) | (b[o + 3]! << 24)) >>> 0
+      : beU32(b, o);
+
+  const ifd0 = u32(tiff + 4);
+  // 오프셋은 **TIFF 헤더 시작 기준**이다(파일 시작이 아니다) — 이걸 틀리면 엉뚱한 바이트를 읽는다.
+  if (ifd0 === null || ifd0 < 8) return null;
+  const dir = tiff + ifd0;
+  const count = u16(dir);
+  if (count === null) return null;
+  // 세그먼트 밖을 읽지 않는다 — 길이가 거짓인 파일이 다음 세그먼트를 침범해 읽는 걸 막는다.
+  const end = Math.min(at + len, b.length);
+  for (let i = 0; i < Math.min(count, EXIF_MAX_IFD_ENTRIES); i++) {
+    const e = dir + 2 + i * 12;
+    if (e + 12 > end) return null;
+    if (u16(e) !== 0x0112) continue;
+    /* SHORT(type 3) 이고 값이 4바이트 자리에 인라인으로 들어 있다 — 이 태그는 규격상 항상
+       그렇다. 엔디안에 따라 앞 2바이트가 값이다. */
+    const value = u16(e + 8);
+    return value !== null && value >= 1 && value <= 8 ? value : null;
+  }
+  return null;
+}
+
+function jpegSize(b: Uint8Array) {
+  let at = 2; // FF D8(SOI) 다음
+  // APP1 은 보통 SOF 보다 앞에 온다 — 만나면 기억해 두고 SOF 에서 적용한다(스캔 한 번으로 끝난다).
+  let orientation: number | null = null;
+  for (let hops = 0; hops < JPEG_MAX_SEGMENTS; hops++) {
+    // 마커는 FF 로 시작한다. 패딩 FF 가 여러 개 올 수 있어 건너뛴다 — **그 스킵에도 상한이
+    // 있다**(위 주석: 세그먼트 예산은 이 안쪽 비용을 못 묶는다).
+    let pad = 0;
+    while (at < b.length && b[at] === 0xff) {
+      at++;
+      if (++pad > JPEG_MAX_PADDING) return null;
+    }
+    if (at >= b.length) return null;
+    const marker = b[at]!;
+    at++;
+    // 길이 없는 마커: RST0~7(D0-D7) · SOI(D8) · EOI(D9) · TEM(01).
+    if ((marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) continue;
+    const len = beU16(b, at);
+    if (len === null || len < 2) return null; // 길이가 자기(2)보다 작으면 깨진 파일이다
+    if (marker === 0xe1 && orientation === null) {
+      orientation = exifOrientation(b, at, len);
+    }
+    if (SOF_MARKERS.has(marker)) {
+      const height = beU16(b, at + 3);
+      const width = beU16(b, at + 5);
+      if (width === null || height === null) return null;
+      /* 5~8 은 90°/270° 를 포함하는 값이라(transpose·rotate90·transverse·rotate270) 표시
+         치수가 뒤바뀐다. 1~4 는 회전이 없거나 180°·거울이라 그대로다. */
+      return orientation !== null && orientation >= 5 && orientation <= 8
+        ? { width: height, height: width }
+        : { width, height };
+    }
+    at += len;
+  }
+  return null;
+}
+
+/* WebP: RIFF 컨테이너라 LE 다. 청크 fourcc(offset 12)에 따라 치수 자리가 셋으로 갈린다 —
+   **하나만 파싱하면 정상 파일의 2/3 를 거절한다.**
+     VP8  (lossy)    — 청크 데이터 + 6 부터 14비트 폭·높이(상위 2비트는 스케일)
+     VP8L (lossless) — 청크 데이터 + 1 부터 28비트에 (폭-1, 높이-1) 각 14비트
+     VP8X (extended) — 청크 데이터 + 4 부터 24비트 (캔버스 폭-1, 높이-1) */
+function webpSize(b: Uint8Array) {
+  const fourcc = String.fromCharCode(...b.slice(12, 16));
+  if (fourcc === "VP8 ") {
+    const w = leU16(b, 26);
+    const h = leU16(b, 28);
+    // 상위 2비트는 스케일 힌트라 치수에서 뺀다(14비트 폭·높이).
+    return w !== null && h !== null ? { width: w & 0x3fff, height: h & 0x3fff } : null;
+  }
+  if (fourcc === "VP8L") {
+    if (b.length < 25) return null;
+    const bits = (b[21]! | (b[22]! << 8) | (b[23]! << 16) | (b[24]! << 24)) >>> 0;
+    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+  }
+  if (fourcc === "VP8X") {
+    const w = leU24(b, 24);
+    const h = leU24(b, 27);
+    return w !== null && h !== null ? { width: w + 1, height: h + 1 } : null;
+  }
+  return null;
+}
+
+/* 애니메이션인가 — **받지 않는다.**
+
+   이유가 셋이다(GitHub codex 리뷰 P2). (1) gif 를 뺀 근거("팬아트 한 장이라는 쓰임에 없다")를
+   APNG·애니메이션 WebP 가 그대로 우회한다. (2) **`<img>` 로 재생되는 애니메이션은 CSS 의
+   `prefers-reduced-motion` 가드가 못 막는다** — 이 저장소의 접근성 기준은 "새 애니메이션은 그
+   가드 안에 둔다"이고, 그 기준을 지킬 수 없는 콘텐츠가 공개 화면에 들어오면 안 된다.
+   (3) 픽셀 예산은 캔버스 한 장만 세므로 프레임 반복 디코드를 안 센다.
+
+   판정도 헤더만 본다:
+     APNG — `acTL` 청크. 규격이 **IDAT 앞**에 오도록 못박았으므로 IDAT 를 만나면 그만 본다.
+     WebP — VP8X flags 바이트의 ANIMATION 비트(MSB 기준 6번째 = 0x02).
+     JPEG — 애니메이션이 없다.
+   ── 스캔 예산은 두고, 소진하면 **거절한다** ─────────────────────────────────────────
+   두 번 틀렸고 두 지적이 각각 반쪽이었다:
+     1판(상한 32 · 초과는 "정적") — `acTL` 앞에 청크가 그보다 많은 **유효한 APNG** 가 통과했다.
+       상한을 CPU 방어로 두면서 초과를 fail-open 으로 처리한 것이 문제였다.
+     2판(상한 없음 · 파일 끝까지) — 5MB 에 길이 0 청크를 채우면 ~43만 회를 돈다. 그때 내가 주석에
+       "회당 4바이트 읽기 + 비교"라고 적었는데 **사실이 아니었다**: 회당 `slice` + 문자열 생성으로
+       할당이 두 번 일어난다. 이 저장소는 요청당 CPU 10ms 로 프로덕션 인시던트를 낸 적이 있다
+       (Error 1102) — 방어 코드가 그 한도를 먹는 것은 방어가 아니다.
+   3판이 지금 코드다: **예산을 두고 소진하면 애니메이션으로 간주해 거절한다**(fail-closed, 픽셀
+   가드와 같은 방향). 그리고 **fourcc 를 문자열로 만들지 않고 바이트로 비교**해 회당 할당을 0 으로
+   둔다 — 예산 안에서도 그게 이 스캔의 실제 비용을 정한다. 정상 PNG 는 IHDR 다음 몇 청크 안에
+   acTL/IDAT 를 만나므로 예산에 닿지 않는다. */
+const PNG_SCAN_BUDGET = 4096;
+
+// fourcc 를 문자열로 만들지 않고 4바이트로 비교한다 — 스캔이 수천 회 돌 수 있는 자리라 회당
+// 할당(slice + String.fromCharCode)이 그대로 CPU 가 된다(GitHub codex 리뷰 P1).
+function isChunk(b: Uint8Array, at: number, a: number, c: number, d: number, e: number): boolean {
+  return b[at] === a && b[at + 1] === c && b[at + 2] === d && b[at + 3] === e;
+}
+export function isAnimatedImage(bytes: Uint8Array, type: FanartImageType): boolean {
+  if (type === "jpeg") return false;
+  if (type === "webp") {
+    if (String.fromCharCode(...bytes.slice(12, 16)) !== "VP8X") return false;
+    // 청크 데이터 첫 바이트가 flags 다(offset 12 fourcc + 4 size = 20).
+    return bytes.length > 20 && (bytes[20]! & 0x02) !== 0;
+  }
+  let at = 8; // PNG 시그니처 다음
+  for (let scanned = 0; at + 8 <= bytes.length; scanned++) {
+    // 예산 소진 = 판정 불가다. **거절 쪽으로 떨어진다**(위 주석의 3판) — 여기서 통과시키면
+    // 청크를 잔뜩 앞세운 APNG 가 방어를 우회한다.
+    if (scanned >= PNG_SCAN_BUDGET) return true;
+    const len = beU32(bytes, at);
+    if (len === null) return false;
+    if (isChunk(bytes, at + 4, 0x61, 0x63, 0x54, 0x4c)) return true; // "acTL"
+    // 첫 IDAT 뒤엔 acTL 이 못 온다(규격) — 거기서 멈추면 큰 파일의 픽셀 데이터를 안 훑는다.
+    if (isChunk(bytes, at + 4, 0x49, 0x44, 0x41, 0x54)) return false; // "IDAT"
+    if (isChunk(bytes, at + 4, 0x49, 0x45, 0x4e, 0x44)) return false; // "IEND"
+    at += 12 + len; // 길이(4) + 타입(4) + 데이터 + CRC(4)
+  }
+  /* IDAT 도 acTL 도 없이 끝났다 = 잘렸거나 깨진 파일이다. 애니메이션은 아니므로 false 이고, 그
+     파일은 브라우저가 못 그릴 뿐 우리 쪽 위험이 아니다(ADR-0028 의 "디코드는 안 한다"와 같은 결). */
+  return false;
+}
+
+/* 형식 헤더에서 픽셀 치수를 읽는다 — **디코드가 아니다.** 규격이 파일 앞머리에 못박은 정수를
+   몇 개 읽는 것이라 CPU 가 매직 바이트 판정과 같은 급이고, ADR-0028 의 "요청 경로에서 이미지를
+   만지지 않는다"와 충돌하지 않는다(그 결정이 막은 것은 디코드·재인코딩이다).
+
+   **못 읽으면 null 이고, 라우트는 그걸 거절로 다룬다**(fail-closed). 이 판정은 치수 힌트
+   (ADR-0030 의 fail-open)와 **다른 결정이다** — 여기서 통과시키면 폭탄 방어에 우회로가 생기고,
+   반대로 못 읽는 파일은 브라우저도 디코드 못 할 가능성이 높아 통과시켜도 그림이 안 뜬다.
+   매직 바이트를 이미 지난 파일이므로 "그 형식이라고 주장하는데 헤더가 규격과 다르다"는 뜻이다. */
+export function readImageDimensions(
+  bytes: Uint8Array,
+  type: FanartImageType,
+): { width: number; height: number } | null {
+  const size =
+    type === "png" ? pngSize(bytes) : type === "jpeg" ? jpegSize(bytes) : webpSize(bytes);
+  // 0 이나 음수는 치수가 아니다 — 그런 헤더는 깨진 파일이고, 곱셈이 예산 판정을 우회한다.
+  if (!size || size.width <= 0 || size.height <= 0) return null;
+  return size;
+}
+
 const CONTENT_TYPES: Record<FanartImageType, string> = {
   png: "image/png",
   jpeg: "image/jpeg",

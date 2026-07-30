@@ -262,6 +262,20 @@ export const scheduleWeeks = sqliteTable(
        없다(ADR-0010 JIT). 필요해지면 그때 연다. */
     fanartImageKey: text("fanart_image_key"),
     fanartCredit: text("fanart_credit"),
+    /* 그림의 픽셀 치수. 읽기 화면이 `<img width height>` 로 **자리를 미리 예약**하는 데만 쓴다 —
+       없으면 lazy 로드가 끝나는 순간 그 아래(푸터)가 밀린다. 치수를 값으로 들고 있어야 하는 건
+       서빙 경로가 바이트를 안 만지기 때문이다(ADR-0028): 응답 어디에도 폭·높이가 없다.
+
+       **nullable 이다 — 키가 있어도 치수는 필수가 아니다.** 값은 업로드 라우트가 형식 헤더에서
+       읽어 응답에 실어 주지만(ADR-0030), **0013 이전에 걸린 그림엔 그 값이 없다** — 마이그레이션이
+       NULL 로 채웠고 R2 바이트에서 되읽는 경로를 만들지 않았다. 그 주는 예약 없이 그려진다.
+
+       헤더 읽기가 ADR-0028 의 "요청 경로에서 이미지를 만지지 않는다"와 충돌하지 않는 이유는 그
+       결정이 막은 것이 디코드·재인코딩이라는 점이다 — 규격이 파일 앞머리에 못박은 정수 몇 개를
+       읽는 것은 매직 바이트 판정과 같은 급이다. 그 판정이 저장 경계와 **같은 두 상한**(픽셀
+       예산·한 변)을 보므로, 업로드가 통과시킨 치수는 여기까지 그대로 온다. */
+    fanartImageWidth: integer("fanart_image_width"),
+    fanartImageHeight: integer("fanart_image_height"),
     createdAt: createdAt(),
     lastUpdatedAt: lastUpdatedAt(),
   },
@@ -273,6 +287,17 @@ export const scheduleWeeks = sqliteTable(
     check(
       "schedule_weeks_fanart",
       sql`${t.fanartCredit} IS NULL OR ${t.fanartImageKey} IS NOT NULL`,
+    ),
+    /* 치수는 **한 쌍이고 그림에 딸린다.** 셋을 막는다: 한쪽만 있는 행(예약 계산이 성립하지
+       않는다) · 그림 없이 치수만 있는 행(가리킬 그림이 없다) · 0 이하(나눗셈·비율이 깨진다).
+       `(w IS NULL) = (h IS NULL)` 이 SQLite 에서 서는 것은 스크래치 sqlite 로 확인했다
+       (`IS NULL` 이 0/1 을 내므로 `=` 비교가 성립 — 실측 2026-07-30). */
+    check(
+      "schedule_weeks_fanart_size",
+      sql`(${t.fanartImageWidth} IS NULL) = (${t.fanartImageHeight} IS NULL)
+          AND (${t.fanartImageWidth} IS NULL
+               OR (${t.fanartImageKey} IS NOT NULL
+                   AND ${t.fanartImageWidth} > 0 AND ${t.fanartImageHeight} > 0))`,
     ),
   ],
 );

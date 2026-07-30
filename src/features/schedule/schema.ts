@@ -95,6 +95,10 @@ export const saveWeekInput = z
         z.string().trim().max(100).nullable(),
       )
       .optional(),
+    /* **치수는 받지 않는다.** 업로드가 형식 헤더에서 읽어 R2 객체 메타에 묶어 두고, 저장 경로가
+       거기서 읽는다(ADR-0030) — 클라이언트가 에코하면 그 값이 다시 클라이언트 주장이 되어
+       불변식 2 가 이 필드에서만 빠진다(적대적 리뷰 9라운드). 안 쓰는 필드를 받아 두지도 않는다:
+       다음 사람이 그게 쓰인다고 믿는다. */
   })
   .superRefine((v, ctx) => {
     // weekStartDate 가 월요일인가 — weekStartOf 가 자기 자신이면 그 주의 시작이다.

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { makeDraftEntry, type WeekDraft } from "./schedule-editor";
 import {
   scheduleSaveMachine,
+  type FanartUploadResult,
+  type FanartUploadValues,
   type PublishWeekResult,
   type PublishWeekValues,
   type SaveWeekResult,
@@ -14,7 +16,15 @@ import {
    정확히 부모에게 되돌리는가다. */
 
 function draft(over: Partial<WeekDraft> = {}): WeekDraft {
-  return { note: "", published: false, entries: [], days: {}, ...over };
+  return {
+    note: "",
+    published: false,
+    entries: [],
+    days: {},
+    fanartImageKey: null,
+    fanartCredit: "",
+    ...over,
+  };
 }
 
 function deferred<T>() {
@@ -30,7 +40,9 @@ function deferred<T>() {
 function start(opts: {
   run: (values: SaveWeekValues, signal: AbortSignal) => Promise<SaveWeekResult>;
   publishRun?: (values: PublishWeekValues, signal: AbortSignal) => Promise<PublishWeekResult>;
+  uploadRun?: (values: FanartUploadValues, signal: AbortSignal) => Promise<FanartUploadResult>;
   mapError?: (e: unknown) => string;
+  mapUploadError?: (e: unknown) => string;
   initialDraft?: WeekDraft;
   initialRevision?: number | null;
 }) {
@@ -45,7 +57,13 @@ function start(opts: {
         (async () => {
           throw new Error("publishRun 이 이 테스트에서 안 쓰일 것으로 예상됐다");
         }),
+      uploadRun:
+        opts.uploadRun ??
+        (async () => {
+          throw new Error("uploadRun 이 이 테스트에서 안 쓰일 것으로 예상됐다");
+        }),
       mapError: opts.mapError ?? (() => "실패 문구"),
+      mapUploadError: opts.mapUploadError ?? (() => "업로드 실패 문구"),
     },
   });
   actor.start();
@@ -171,6 +189,11 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
       entries: [{ scheduledDate: "2027-01-04", title: "젤다", gameId: null }],
       // 하루 속성도 같은 페이로드로 나간다(이슈 #117) — 기본값인 날은 draftDayInputs 가 접는다.
       days: [],
+      /* 팬아트 둘이 **항상** 실린다(ADR-0028) — 화면은 서버의 `undefined = 유지` 규약에 기대지
+         않는다(그러면 "지움"을 표현할 수 없다). 치수는 여기 없다: 업로드가 R2 객체 메타에 묶고
+         저장 경로가 거기서 읽는다(ADR-0030). */
+      fanartImageKey: null,
+      fanartCredit: null,
     });
   });
 
@@ -191,7 +214,7 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
   });
 
   it("성공하면 draft·baseline 을 서버 응답으로 통째로 교체하고 announcement 를 세운다(발행)", async () => {
-    const saved: WeekDraft = { note: "공지", published: true, entries: [], days: {} };
+    const saved: WeekDraft = draft({ note: "공지", published: true });
     const actor = start({ run: async () => ({ draft: saved, revision: 42 }) });
     actor.send({ type: "SAVE" });
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 42);
@@ -204,7 +227,7 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
   });
 
   it("초안으로 저장하면 announcement 가 초안 문구다", async () => {
-    const saved: WeekDraft = { note: "", published: false, entries: [], days: {} };
+    const saved: WeekDraft = draft();
     const actor = start({ run: async () => ({ draft: saved, revision: 1 }) });
     actor.send({ type: "SAVE" });
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 1);
@@ -275,7 +298,7 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
 
   it("실패는 이전 성공의 announcement 를 지우지 않는다(원본이 실패 시 announcement 를 안 건드리던 것과 같다)", async () => {
     let attempt = 0;
-    const savedOnce: WeekDraft = { note: "", published: false, entries: [], days: {} };
+    const savedOnce: WeekDraft = draft();
     const actor = start({
       run: async () => {
         attempt += 1;
@@ -302,16 +325,207 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
     actor.send({ type: "NOTE_CHANGED", note: "저장 중에 고친 공지" });
     expect(actor.getSnapshot().context.draft.note).toBe("저장 중에 고친 공지");
 
-    const fromServer: WeekDraft = {
-      note: "서버가 되돌린 값",
-      published: false,
-      entries: [],
-      days: {},
-    };
+    const fromServer: WeekDraft = draft({ note: "서버가 되돌린 값" });
     resolve({ draft: fromServer, revision: 2 });
     await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 2);
     // 저장 중 편집("저장 중에 고친 공지")은 서버 응답에 덮인다.
     expect(actor.getSnapshot().context.draft).toBe(fromServer);
+  });
+});
+
+describe("scheduleSaveMachine — 팬아트 업로드 계약(ADR-0028)", () => {
+  const KEY = "0189d1f0-3a4b-7c8d-9e0f-1a2b3c4d5e6f.png";
+  // 업로드 자식에 실려 가는 건 바이트 그대로다 — 형식 판정은 서버가 매직 바이트로 한다.
+  const file = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" });
+
+  it("성공하면 키·치수가 draft 에 들어가고 표기는 비워진다", async () => {
+    /* **표기를 비우는 게 이 테스트의 핵심이다.** 편집기는 표기를 항상 함께 보내므로 서버의
+       "키가 바뀌면 옛 표기를 안 물려준다"(nextFanart 규칙 2)가 발동하지 않는다 — 화면이 안
+       지우면 옛 작가 이름이 새 그림에 붙어 **잘못된 귀속**이 그대로 저장된다. */
+    const seeded = draft({
+      fanartImageKey: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.png",
+      fanartCredit: "먼저 그린 사람",
+    });
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      uploadRun: async () => ({ key: KEY }),
+      initialDraft: seeded,
+    });
+
+    actor.send({ type: "FANART_UPLOAD", file });
+    expect(actor.getSnapshot().value).toBe("uploading");
+    await waitFor(actor, (s) => s.matches("ready"));
+
+    const { draft: d, fanartError, announcement } = actor.getSnapshot().context;
+    expect(d.fanartImageKey).toBe(KEY);
+    expect(d.fanartCredit).toBe("");
+    expect(fanartError).toBe("");
+    // 업로드만으로는 어느 주에도 안 걸린다 — 남은 한 걸음을 글자로 말한다.
+    expect(announcement).toContain("저장해야");
+  });
+
+  it("업로드 결과는 키 하나다 — 치수는 draft 를 거치지 않는다", async () => {
+    /* 치수는 업로드가 R2 객체 메타에 묶고 저장 경로가 거기서 읽는다(ADR-0030) — 화면을 거치면
+       그 값이 다시 클라이언트 주장이 되어 불변식 2 가 이 필드에서만 빠진다(적대적 리뷰 9라운드).
+       그래서 draft·저장 페이로드 어디에도 치수가 없다. */
+    let seen: SaveWeekValues | undefined;
+    const actor = start({
+      run: async (values) => {
+        seen = values;
+        return { draft: draft({ fanartImageKey: KEY }), revision: 1 };
+      },
+      uploadRun: async () => ({ key: KEY }),
+      initialDraft: draft({
+        entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
+      }),
+    });
+    actor.send({ type: "FANART_UPLOAD", file });
+    await waitFor(actor, (s) => s.matches("ready"));
+    actor.send({ type: "SAVE" });
+    await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 1);
+    expect(seen).toMatchObject({ fanartImageKey: KEY });
+    expect(seen).not.toHaveProperty("fanartImageWidth");
+    expect(seen).not.toHaveProperty("fanartImageHeight");
+  });
+
+  it("실패는 fanartError 만 세운다 — 저장·발행 문구를 건드리지 않는다", async () => {
+    /* 에러를 하나로 공유하면 화면의 다른 자리(저장 바·발행 확인창)가 업로드 실패를 자기 실패로
+       보여준다. 셋으로 나눈 이유가 그것이라 여기서 못박는다. */
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      uploadRun: async () => {
+        throw new Error("413");
+      },
+      mapUploadError: () => "파일이 너무 큽니다",
+    });
+    actor.send({ type: "FANART_UPLOAD", file });
+    await waitFor(actor, (s) => s.matches("ready") && s.context.fanartError !== "");
+    const c = actor.getSnapshot().context;
+    expect(c.fanartError).toBe("파일이 너무 큽니다");
+    expect(c.error).toBe("");
+    expect(c.publishError).toBe("");
+    // 실패했으니 draft 는 그대로다 — 키가 없는 채로 남는다.
+    expect(c.draft.fanartImageKey).toBeNull();
+  });
+
+  it("업로드 중에는 SAVE 를 무시한다 — 키 없는 draft 가 저장되면 '올렸는데 안 걸렸다'가 된다", () => {
+    const { promise } = deferred<FanartUploadResult>();
+    let saves = 0;
+    const actor = start({
+      run: async () => {
+        saves += 1;
+        return { draft: draft(), revision: 1 };
+      },
+      uploadRun: () => promise,
+      // 저장 가능한 상태로 둔다(dirty·제목 있음) — 무시되는 이유가 "가드가 따로 막아서"가 아님을
+      // 분명히 한다.
+      initialDraft: draft({
+        entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
+      }),
+      initialRevision: 3,
+    });
+    actor.send({ type: "FANART_UPLOAD", file });
+    expect(actor.getSnapshot().value).toBe("uploading");
+    actor.send({ type: "SAVE" });
+    expect(saves).toBe(0);
+    expect(actor.getSnapshot().value).toBe("uploading");
+  });
+
+  it("업로드 중에는 PUBLISH·UNPUBLISH 도 무시한다 — 확인창이 성공처럼 닫히면 안 된다", () => {
+    /* 화면이 이 상태를 안 잠그면 확인창을 거쳐 이벤트가 드롭되고, `publishing` 이 false 이고
+       오류도 없어 관리자는 발행된 줄 안다(plain 리뷰 10라운드). dirty 는 업로드가 성공할 때까지
+       false 라 canPublish 가드도 안 걸린다 — 그래서 잠금이 유일한 표시다. */
+    const { promise } = deferred<FanartUploadResult>();
+    let publishCalls = 0;
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async () => {
+        publishCalls += 1;
+        return { published: true, revision: 99 };
+      },
+      uploadRun: () => promise,
+      initialDraft: draft({
+        entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
+      }),
+      initialRevision: 3,
+    });
+    actor.send({ type: "FANART_UPLOAD", file });
+    expect(actor.getSnapshot().value).toBe("uploading");
+
+    actor.send({ type: "PUBLISH" });
+    actor.send({ type: "UNPUBLISH" });
+    expect(publishCalls).toBe(0);
+    expect(actor.getSnapshot().value).toBe("uploading");
+  });
+
+  it("표기 입력은 업로드 중에도 받지만 그림 조작은 안 받는다", () => {
+    /* 표기는 다른 편집 이벤트와 같은 자리(루트)라 잠기지 않고, 업로드·내리기는 자식과 같은 값을
+       만져 `ready` 안에 있다 — 그 비대칭이 의도라는 것을 못박는다. */
+    const { promise } = deferred<FanartUploadResult>();
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      uploadRun: () => promise,
+      initialDraft: draft({ fanartImageKey: KEY, fanartCredit: "그린 사람" }),
+    });
+    actor.send({ type: "FANART_UPLOAD", file });
+    actor.send({ type: "FANART_CREDIT_CHANGED", credit: "다른 사람" });
+    expect(actor.getSnapshot().context.draft.fanartCredit).toBe("다른 사람");
+    // 업로드가 도는 중 내리기는 무시된다(성공하면 새 키가 서므로 결과가 순서에 달린다).
+    actor.send({ type: "FANART_REMOVED" });
+    expect(actor.getSnapshot().context.draft.fanartImageKey).toBe(KEY);
+  });
+
+  it("저장 중에도 그림 조작을 안 받는다 — 화면이 그때 컨트롤을 잠가야 하는 근거다", () => {
+    /* 팬아트 이벤트가 `ready` 전용이라는 사실의 **다른 얼굴**이다: 저장 중 내리기를 누르면
+       이벤트가 드롭되는데, 화면이 그 상태를 안 잠그면 아무 문구도 없이 눌리는 것처럼만 보인다
+       (파일 선택은 더 나쁘다 — input value 를 이미 비워, 같은 파일을 다시 골라도 change 가
+       안 난다). 그래서 편집기는 `uploading || saving` 으로 잠근다. */
+    const { promise } = deferred<SaveWeekResult>();
+    const seeded = draft({
+      entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
+      fanartImageKey: KEY,
+    });
+    const actor = start({ run: () => promise, initialDraft: seeded, initialRevision: 3 });
+    actor.send({ type: "SAVE" });
+    expect(actor.getSnapshot().value).toBe("saving");
+
+    actor.send({ type: "FANART_REMOVED" });
+    expect(actor.getSnapshot().context.draft.fanartImageKey).toBe(KEY);
+    actor.send({ type: "FANART_UPLOAD", file });
+    expect(actor.getSnapshot().value).toBe("saving"); // uploading 으로 안 간다
+  });
+
+  it("FANART_REMOVED 는 넷을 함께 지운다 — 표기만 남으면 저장이 거절된다", () => {
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      initialDraft: draft({ fanartImageKey: KEY, fanartCredit: "그린 사람" }),
+    });
+    actor.send({ type: "FANART_REMOVED" });
+    const d = actor.getSnapshot().context.draft;
+    expect(d).toMatchObject({ fanartImageKey: null, fanartCredit: "" });
+  });
+
+  it("저장 페이로드에 팬아트 넷이 실린다", async () => {
+    let seen: SaveWeekValues | undefined;
+    const actor = start({
+      run: async (values) => {
+        seen = values;
+        return { draft: draft(), revision: 1 };
+      },
+      initialDraft: draft({
+        entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
+        fanartImageKey: KEY,
+        fanartCredit: "  그린 사람  ",
+      }),
+    });
+    actor.send({ type: "SAVE" });
+    await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 1);
+    expect(seen).toMatchObject({
+      fanartImageKey: KEY,
+      // 표기는 여기서 trim 해 보낸다 — dirty 비교와 페이로드가 같은 정규형을 봐야 저장 직후
+      // draft 가 깨끗해진다(saveValues 주석).
+      fanartCredit: "그린 사람",
+    });
   });
 });
 

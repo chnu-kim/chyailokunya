@@ -200,3 +200,51 @@ export function resolveErrorMessage(e: unknown): string {
     return "제안 상태를 바꾸지 못했습니다. 잠시 후 다시 시도해 주십시오.";
   return "제안 상태가 바뀌었는지 확인하지 못했습니다. 새로고침해서 확인해 주십시오.";
 }
+
+/* 팬아트 업로드 실패(ADR-0028). **이 파일의 다른 매퍼들과 입력이 다르다** — 나머지는 tRPC 오류
+   코드(`data.code`)를 읽지만 업로드는 Route Handler 라 HTTP 상태 코드로 실패한다. 그래서 어휘를
+   공유하지 않고, 대신 이 파일의 원칙("우리가 확인한 것만 말한다")을 그대로 잇는다.
+
+   여기 있는 이유: 이 분기표를 **어느 검증 층도 못 보던 자리**였다(ADR-0029). 편집기 컴포넌트의
+   모듈 private 함수로 두면 단위 테스트가 닿지 않고, e2e 는 실패 문구를 다 재지 않는다. */
+export class FanartUploadFailed extends Error {
+  constructor(
+    readonly status: number,
+    /** 서버가 `{ error }` 로 준 문구. 못 읽었으면 빈 문자열이고, 그때는 일반 문구로 떨어진다. */
+    readonly serverMessage: string,
+  ) {
+    super(`fanart upload failed: ${status}`);
+    this.name = "FanartUploadFailed";
+  }
+}
+
+/* 업로드 라우트가 실패를 `{ error }` JSON 으로 말한다 — 그 봉투에서 문구를 뽑아 위 클래스에
+   싣는다. 문구가 없으면 빈 문자열이고, 그때 아래 매퍼가 일반 문구로 떨어진다(우리가 확인하지
+   못한 것을 단정하지 않는다).
+
+   **`Response` 를 받지 않는다 — 이미 파싱된 값을 받는다.** 한때 `res.json()` 을 여기서 했는데,
+   그러면 `src/core` 가 HTTP 응답과 전송 본문 의미를 알게 되어 레이어 계약("core 는 HTTP·DB·React
+   무관")이 깨진다(GitHub codex 리뷰 P1). `Response` 는 전역 타입이라 **import 가 없어
+   dependency-cruiser 가 그 위반을 못 잡는다** — 기계가 안 잡는 자리라 규칙으로 지켜야 한다.
+   응답을 읽는 것은 app 쪽 업로드 어댑터의 일이고, 여기는 "봉투에서 문구를 꺼낸다"는 순수 규칙만
+   맡는다(그래서 단위 테스트가 그 분기를 그대로 본다). */
+export function fanartUploadErrorText(body: unknown): string {
+  const error = (body as { error?: unknown } | null | undefined)?.error;
+  return typeof error === "string" ? error : "";
+}
+
+export function fanartUploadErrorMessage(e: unknown): string {
+  if (isAborted(e))
+    return "그림을 올리는 데 너무 오래 걸려 기다리기를 멈췄습니다. 다시 시도해 주십시오.";
+  if (e instanceof FanartUploadFailed) {
+    /* 인가 실패만 우리가 다시 쓴다 — 서버 문구("로그인이 필요합니다")는 **무엇을 해야 하는지**를
+       안 말한다. 세션이 만료된 경우가 대부분이라 다시 로그인하라고 짚어 준다. */
+    if (e.status === 401 || e.status === 403)
+      return "로그인이 만료됐거나 권한이 없습니다. 다시 로그인해 주십시오.";
+    /* 413·415·400 은 **서버가 이유를 정확히 알고 문구까지 정해 준다**(허용 형식과 상한의 정본이
+       거기다) — 여기서 다시 쓰면 두 곳이 갈려, 상한을 바꿨을 때 화면만 옛 숫자를 말한다. */
+    if (e.serverMessage) return e.serverMessage;
+  }
+  // 모를 때의 기본값 — 원인을 말하지 않는다(이 파일 상단의 원칙).
+  return "그림을 올리지 못했습니다. 잠시 후 다시 시도해 주십시오.";
+}

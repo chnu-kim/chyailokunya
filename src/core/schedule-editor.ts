@@ -45,6 +45,15 @@ export type WeekDraft = {
   published: boolean;
   entries: DraftEntry[];
   days: Record<string, DraftDay>;
+  /* 그 주 팬아트(ADR-0028). **키는 `null` 이고 표기는 `""` 다** — 타입이 갈리는 이유는 값의
+     출처가 다르기 때문이다: 표기는 사람이 타이핑하는 입력 칸이라 note·startTime 처럼 빈
+     문자열이 곧 "안 적음"이고(서버 Zod 가 접는다), 키는 입력 칸이 아니라 **업로드가 돌려준
+     결과**라 "없음"을 빈 문자열로 흉내 낼 이유가 없다. 치수도 같은 결이다(파일에서 읽은 값). */
+  fanartImageKey: string | null;
+  fanartCredit: string;
+  /* **치수는 여기 없다.** 업로드가 R2 객체 메타에 묶고 저장 경로가 거기서 읽으므로(ADR-0030)
+     화면은 그 값을 만들지도, 보내지도 않는다 — 편집기가 쓰는 미리보기는 CSS 고정 슬롯이라
+     치수를 필요로 하지 않는다. 읽기 화면만 `WeekView` 에서 받아 자리를 예약한다. */
 };
 
 /* 그 날짜의 속성. 키가 없으면 기본값 — "행이 없는 것 = 기본값"을 클라이언트에서도 그대로 쓴다. */
@@ -189,6 +198,11 @@ export function isWeekDirty(a: WeekDraft, b: WeekDraft): boolean {
   /* **하루 속성도 저장되는 값이다**(이슈 #117) — 빼먹으면 시각을 바꾸거나 휴방을 켜도 저장
      버튼이 계속 비활성이고, 같은 판정을 읽는 다운로드 카드의 미저장 힌트도 조용해진다. */
   if (canonicalDays(a) !== canonicalDays(b)) return true;
+  /* 팬아트도 같은 규칙이다 — **저장에 실리는 값은 전부 여기 든다**(위 하루 속성과 같은 자리).
+     빼먹으면 그림을 올려도 저장 버튼이 안 열려 업로드한 객체가 어느 주에도 안 걸린다.
+     치수는 draft 에 없다 — 저장에 안 실리므로(ADR-0030) 이 판정의 대상이 아니다. */
+  if (a.fanartImageKey !== b.fanartImageKey) return true;
+  if (a.fanartCredit.trim() !== b.fanartCredit.trim()) return true;
   return canonicalEntries(a) !== canonicalEntries(b);
 }
 
