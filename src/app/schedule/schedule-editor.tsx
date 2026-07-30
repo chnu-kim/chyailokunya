@@ -399,6 +399,17 @@ export function ScheduleEditor({
               그림은 미리 줄여 올려야 한다. 값 칸이라 문장이 아니라 표기다(AGENTS). */}
           <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
 
+          {/* 치수를 못 읽었을 때만 뜬다(ADR-0030 의 fail-open) — **업로드는 성공으로 끝나므로
+              이 문단이 없으면 관리자에게 아무 신호가 없다.** 개발 중 CRC 깨진 PNG 로 정확히 그
+              상태를 만들었고, 화면·게이트 어디에도 흔적이 없어 D1 을 직접 들여다봐야 했다.
+              오류가 아니라 안내라 `.sched-err`(danger)를 쓰지 않는다 — 그림은 정상 표시된다.
+              안내문은 말을 거는 자리라 문장이고, 합쇼체다(AGENTS). */}
+          {draft.fanartImageKey && draft.fanartImageWidth === null && (
+            <p className="sched-fanart__hint" data-od-id="schedule-fanart-nosize">
+              그림 크기를 읽지 못했습니다. 표시는 되지만 자리를 미리 비우지 못합니다.
+            </p>
+          )}
+
           {uploading && (
             <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">
               올리는 중…

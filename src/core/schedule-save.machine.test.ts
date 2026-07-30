@@ -372,17 +372,23 @@ describe("scheduleSaveMachine — 팬아트 업로드 계약(ADR-0028)", () => {
     expect(announcement).toContain("저장해야");
   });
 
-  it("치수를 못 읽어도 키는 살린다 — 그림을 못 거는 것보다 예약 없이 그리는 게 낫다", async () => {
+  it("치수를 못 읽어도 키는 살리고, 그 사실을 라이브 영역이 말한다", async () => {
+    /* fail-open 이라 업로드는 성공으로 끝난다(ADR-0030) — 그래서 **알리지 않으면 관리자에게
+       아무 신호가 없다.** 개발 중 CRC 깨진 픽스처가 정확히 그 상태를 만들었고 화면·게이트
+       어디에도 흔적이 없었다(적대적 리뷰도 같은 자리를 지적했다). */
     const actor = start({
       run: async () => ({ draft: draft(), revision: 1 }),
       uploadRun: async () => ({ key: KEY, width: null, height: null }),
     });
     actor.send({ type: "FANART_UPLOAD", file });
     await waitFor(actor, (s) => s.matches("ready"));
-    const { draft: d } = actor.getSnapshot().context;
+    const { draft: d, announcement } = actor.getSnapshot().context;
     expect(d.fanartImageKey).toBe(KEY);
     expect(d.fanartImageWidth).toBeNull();
     expect(d.fanartImageHeight).toBeNull();
+    expect(announcement).toContain("크기를 읽지 못했습니다");
+    // 그래도 "올렸다"와 "저장해야 반영된다"는 여전히 말한다 — 실패가 아니라 부분 저하다.
+    expect(announcement).toContain("저장해야");
   });
 
   it("실패는 fanartError 만 세운다 — 저장·발행 문구를 건드리지 않는다", async () => {

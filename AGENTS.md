@@ -500,7 +500,7 @@ build`·`npm run preview`(로컬 workerd) 전부 실제 프로덕션 CPU 시간�
 - **`file(1)` 을 통과하는 PNG 가 브라우저에선 디코드 거부될 수 있다.** 널리 복사되는 1×1 base64
   중 IDAT **CRC 가 깨진** 판이 있는데, `file` 은 IHDR 만 보고 "PNG image data, 1 x 1" 이라고
   답한다. 브라우저는 `createImageBitmap` 에서 `InvalidStateError: The source image could not be
-  decoded` 로 거절하고, 그 결과가 **화면에 아무 신호 없이** 치수 null 로 저장됐다(업로드·저장은
+decoded` 로 거절하고, 그 결과가 **화면에 아무 신호 없이** 치수 null 로 저장됐다(업로드·저장은
   성공한다 — 치수만 fail-open 으로 빠진다). 이미지 바이트를 쓰는 픽스처는 손으로 인코딩하고
   **쓴 파일을 되읽어 청크 CRC 를 검증한다.** 그리고 **폭≠높이로 만든다** — 정사각형이면 두 값이
   뒤바뀌어도 모든 단언이 통과한다(치수는 두 컬럼·두 Zod 필드·두 img 속성을 거친다).
