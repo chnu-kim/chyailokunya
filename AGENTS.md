@@ -192,6 +192,11 @@ Phase 1 스캐폴딩에서 실제로 터진 것들. 같은 실수를 반복하�
   선행하지 않고도 서게 한다)가 도로 무너진다. 2026-07-26 에 같은 실수를 두 번 했다 — CI 게이트의
   `git diff --exit-code -- next-env.d.ts` 가 이제 그걸 잡는다. 로컬에선 e2e 뒤 커밋 전에
   `git checkout origin/main -- next-env.d.ts` 로 되돌린다.
+  **2026-07-30 에 세 번째로 밟았고, 그때의 순서가 새 정보다:** `npm run build` 가 이 파일을
+  비-dev 경로로 **되돌려 놓기 때문에** 빌드 직후의 `git status` 는 깨끗하다. 그걸 확인하고
+  안심한 뒤 시각 확인용 e2e 를 두 번 더 돌렸고, 그 dev 서버가 다시 dev 경로로 바꿔 `git add -A`
+  가 그대로 삼켰다(codex 리뷰가 잡았다). **확인 시점이 아니라 `git add` 직전에 되돌린다** —
+  중간에 dev 서버를 띄우는 일이 하나라도 끼면 앞선 확인은 무효다.
 - **`next-env.d.ts`·`cloudflare-env.d.ts` 는 생성물이지만 커밋한다.** 그래야 CI 의 typecheck
   단계가 `next build`/`cf-typegen` 을 선행하지 않고도 성립한다. 대신 lint·prettier 대상에선
   제외한다.
