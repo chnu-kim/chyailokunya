@@ -25,6 +25,9 @@ vi.mock("html-to-image", () => ({ toPng: vi.fn() }));
 
 const WEEK_START = "2036-06-02";
 const GAMES = [{ id: 7, categoryValue: "엘든 링", posterImageUrl: null }];
+/* 오늘 칸 표시는 이 스펙의 관심사가 아니라 **그 주 밖의 날**을 준다 — 그 주 안의 날을 주면
+   "오늘" 칩과 `sched-day--today` 가 끼어 여기서 재는 것과 무관한 이유로 마크업이 흔들린다. */
+const OTHER_WEEK = "2036-05-25";
 
 function weekWith(title: string): WeekView {
   return {
@@ -58,6 +61,7 @@ function renderWith(title: string) {
       initialWeek={weekWith(title)}
       games={GAMES}
       currentWeek={WEEK_START}
+      today={OTHER_WEEK}
     />,
   );
   return {

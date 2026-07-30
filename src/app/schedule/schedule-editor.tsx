@@ -109,11 +109,15 @@ export function ScheduleEditor({
   initialWeek,
   games,
   currentWeek,
+  today,
 }: {
   weekStartDate: string;
   initialWeek: WeekView;
   games: GameOption[];
   currentWeek: string;
+  /* 오늘(KST, 'YYYY-MM-DD'). **서버가 준다** — page.tsx 주석 참고. 읽기 화면은 진작 오늘 칸을
+     표시했는데 편집기만 없어서, 정작 주를 짜는 사람이 "지금 어느 칸인가"를 못 봤다. */
+  today: string;
 }) {
   /* schedule-save 머신이 draft·baseline·revision·error·announcement·저장 중 여부를 전부 쥔다
      (core/schedule-save.machine.ts). run·mapError·initialDraft·initialRevision 은 마운트
@@ -316,21 +320,33 @@ export function ScheduleEditor({
           <WeekNav weekStart={weekStartDate} currentWeek={currentWeek} />
         </header>
 
-        <label className="sched-note" htmlFor="sched-note-input">
-          <span className="sched-note__label">이번 주 공지 (선택)</span>
-          <input
-            id="sched-note-input"
-            className="sched-field"
-            type="text"
-            maxLength={500}
-            placeholder="예: 이번 주는 젤다 위주로 달립니다"
-            value={draft.note}
-            data-od-id="schedule-note-input"
-            onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
-          />
-        </label>
+        {/* ── 2열 골격(2026-07-31) ────────────────────────────────────────────────
+            영역이 셋이다: 주 메타(공지·팬아트) · 미리보기 · 요일 목록.
 
-        {/* 팬아트(ADR-0028) — 주에 딸린 부가 정보라 공지 바로 아래다. **입력 컨트롤이 있으므로
+            **1300px 미만에선 grid 가 아예 안 걸린다** — 평범한 블록 흐름이라 DOM 순서 그대로
+            `메타 → 미리보기 → 요일` 이 되고, 그게 읽기 화면과 같은 순서다. 그 이상에서만
+            `grid-template-areas` 로 메타·요일을 왼쪽 열에 세우고 미리보기를 오른쪽으로 보낸다.
+
+            영역을 셋으로 나눈 이유가 여기 있다: 폼을 한 덩어리로 묶으면 1열에서 미리보기가 그
+            덩어리 **뒤**로 밀려 "한참 내려야 보인다"가 그 폭에서 되살아난다. `order` 로 뒤집는
+            방법도 있지만 그러면 탭 순서와 시각 순서가 갈린다. */}
+        <div className="sched__grid">
+          <div className="sched__meta">
+            <label className="sched-note" htmlFor="sched-note-input">
+              <span className="sched-note__label">이번 주 공지 (선택)</span>
+              <input
+                id="sched-note-input"
+                className="sched-field"
+                type="text"
+                maxLength={500}
+                placeholder="예: 이번 주는 젤다 위주로 달립니다"
+                value={draft.note}
+                data-od-id="schedule-note-input"
+                onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
+              />
+            </label>
+
+            {/* 팬아트(ADR-0028) — 주에 딸린 부가 정보라 공지 바로 아래다. **입력 컨트롤이 있으므로
             사진지 섬(.polaroid)을 쓰지 않는다**: 그 섬은 다크에서 라이트 토큰을 국소 재선언한
             크림 종이라 폼 컨트롤의 테두리·포커스 대비가 거기서 씻긴다(kunya-design §4). 읽기
             화면은 조작이 없어 그쪽이 폴라로이드다 — 같은 값을 두 화면이 다른 부품으로 그리는
@@ -338,142 +354,165 @@ export function ScheduleEditor({
 
             미리보기는 **실제 서빙 경로**(/api/fanart/…)로 그린다. objectURL 이 아니라 그걸 쓰면
             "저장하면 팬이 볼 그림" 그대로를 보고, 서빙 라우트까지 이 화면에서 함께 검증된다. */}
-        <div
-          className="sched-fanart"
-          role="group"
-          aria-labelledby="sched-fanart-label"
-          data-od-id="schedule-fanart"
-        >
-          <span className="sched-note__label" id="sched-fanart-label">
-            팬아트 (선택)
-          </span>
+            <div
+              className="sched-fanart"
+              role="group"
+              aria-labelledby="sched-fanart-label"
+              data-od-id="schedule-fanart"
+            >
+              <span className="sched-note__label" id="sched-fanart-label">
+                팬아트 (선택)
+              </span>
 
-          <div className="sched-fanart__row">
-            {draft.fanartImageKey && (
-              /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
+              <div className="sched-fanart__row">
+                {draft.fanartImageKey && (
+                  /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
                  비율이 아니라, 그림마다 높이가 변해 아래 요일 목록이 밀리는 것보다 안정된
                  자리가 낫다(읽기 화면은 반대로 실제 치수로 예약한다). */
-              <img
-                className="sched-fanart__thumb"
-                src={`/api/fanart/${draft.fanartImageKey}`}
-                alt="올린 팬아트"
-                width={96}
-                height={96}
-                data-od-id="schedule-fanart-thumb"
-              />
-            )}
-            <div className="sched-fanart__acts">
-              {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
+                  <img
+                    className="sched-fanart__thumb"
+                    src={`/api/fanart/${draft.fanartImageKey}`}
+                    alt="올린 팬아트"
+                    width={96}
+                    height={96}
+                    data-od-id="schedule-fanart-thumb"
+                  />
+                )}
+                <div className="sched-fanart__acts">
+                  {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
                   input 이 받고(sr-only 는 clip 이라 포커스가 살아 있다), 링은 아래 CSS 의
                   :focus-within 이 label 에 그린다. */}
-              <label className="btn btn--secondary sched-fanart__pick">
-                {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
-                <input
-                  type="file"
-                  className="sr-only"
-                  accept={FANART_ACCEPT}
-                  disabled={fanartLocked}
-                  data-od-id="schedule-fanart-file"
-                  onChange={onPickFanart}
-                />
-              </label>
+                  <label className="btn btn--secondary sched-fanart__pick">
+                    {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
+                    <input
+                      type="file"
+                      className="sr-only"
+                      accept={FANART_ACCEPT}
+                      disabled={fanartLocked}
+                      data-od-id="schedule-fanart-file"
+                      onChange={onPickFanart}
+                    />
+                  </label>
+                  {draft.fanartImageKey && (
+                    <button
+                      type="button"
+                      className="btn btn--secondary sched-fanart__del"
+                      disabled={fanartLocked}
+                      data-od-id="schedule-fanart-remove"
+                      onClick={() => send({ type: "FANART_REMOVED" })}
+                    >
+                      내리기
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
+              그림은 미리 줄여 올려야 한다. 값 칸이라 문장이 아니라 표기다(AGENTS). */}
+              <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
+
+              {uploading && (
+                <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">
+                  올리는 중…
+                </p>
+              )}
+              {fanartError && (
+                <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
+                  {fanartError}
+                </p>
+              )}
+
+              {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
+              CHECK 가 둘 다 거절하므로, 화면이 애초에 못 만들게 하는 게 가장 조용한 방어다.
+              업로드 중에는 잠근다: 성공하면 표기가 비워지므로(새 그림에 옛 이름을 안 붙인다)
+              그 사이 타이핑한 값이 사라져 보인다. */}
               {draft.fanartImageKey && (
-                <button
-                  type="button"
-                  className="btn btn--secondary sched-fanart__del"
-                  disabled={fanartLocked}
-                  data-od-id="schedule-fanart-remove"
-                  onClick={() => send({ type: "FANART_REMOVED" })}
-                >
-                  내리기
-                </button>
+                <label className="sched-note sched-fanart__credit">
+                  <span className="sched-note__label">작가 표기 (선택)</span>
+                  <input
+                    className="sched-field"
+                    type="text"
+                    maxLength={100}
+                    placeholder="그린 사람"
+                    value={draft.fanartCredit}
+                    disabled={uploading}
+                    data-od-id="schedule-fanart-credit"
+                    onChange={(e) =>
+                      send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })
+                    }
+                  />
+                </label>
               )}
             </div>
           </div>
 
-          {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
-              그림은 미리 줄여 올려야 한다. 값 칸이라 문장이 아니라 표기다(AGENTS). */}
-          <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
+          {/* 넓은 폭에선 오른쪽 열에 sticky 로 붙고, 1300 미만에선 이 자리(메타와 요일 목록
+              사이) 그대로 흐른다 — 아래에 두면 7일치 폼을 다 지나야 보여 "받아질 그림"을
+              확인하려면 매번 페이지 끝까지 내려야 했다(사용자 지적). 읽기 화면이 이미
+              공지 → 카드 → 목록 순서라(schedule-read.tsx) 두 화면의 순서가 여기서 같아진다. */}
+          <div className="sched__preview">
+            <WeekCardDownload card={card} weekStartDate={weekStartDate} stale={dirty} />
+          </div>
 
-          {uploading && (
-            <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">
-              올리는 중…
-            </p>
-          )}
-          {fanartError && (
-            <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
-              {fanartError}
-            </p>
-          )}
-
-          {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
-              CHECK 가 둘 다 거절하므로, 화면이 애초에 못 만들게 하는 게 가장 조용한 방어다.
-              업로드 중에는 잠근다: 성공하면 표기가 비워지므로(새 그림에 옛 이름을 안 붙인다)
-              그 사이 타이핑한 값이 사라져 보인다. */}
-          {draft.fanartImageKey && (
-            <label className="sched-note sched-fanart__credit">
-              <span className="sched-note__label">작가 표기 (선택)</span>
-              <input
-                className="sched-field"
-                type="text"
-                maxLength={100}
-                placeholder="그린 사람"
-                value={draft.fanartCredit}
-                disabled={uploading}
-                data-od-id="schedule-fanart-credit"
-                onChange={(e) => send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })}
-              />
-            </label>
-          )}
-        </div>
-
-        {/* 미리보기는 요일 목록 **위**다(2026-07-31). 아래에 두면 7일치 폼을 다 지나야 보여
-            "받아질 그림"을 확인하려면 매번 페이지 끝까지 내려야 했다(사용자 지적). 읽기 화면이
-            이미 공지 → 카드 → 목록 순서라(schedule-read.tsx) 두 화면의 순서가 여기서 같아진다. */}
-        <WeekCardDownload card={card} weekStartDate={weekStartDate} stale={dirty} />
-
-        <ol className="sched__days" data-od-id="schedule-days">
-          {days.map((date, i) => {
-            const dayEntries = entriesForDate(draft, date);
-            const day = dayOf(draft, date);
-            return (
-              <li key={date} className="sched-day" data-od-id={`schedule-day-${date}`}>
-                <div className="sched-day__label">
-                  <span className="sched-day__dow">{WEEKDAY_LABELS[i]!}</span>
-                  <span className="sched-day__md">{formatMD(date)}</span>
-                </div>
-                <div className="sched-day__entries">
-                  {/* 하루의 속성(이슈 #117) — 시각과 휴방. 항목 행이 아니라 여기 한 번만 선다.
+          <ol className="sched__days" data-od-id="schedule-days">
+            {days.map((date, i) => {
+              const dayEntries = entriesForDate(draft, date);
+              const day = dayOf(draft, date);
+              const isToday = date === today;
+              return (
+                <li
+                  key={date}
+                  className={isToday ? "sched-day sched-day--today" : "sched-day"}
+                  data-od-id={`schedule-day-${date}`}
+                  /* 읽기 화면과 같은 규약 — 보조 기술에도 오늘이 어느 칸인지 말한다. 오늘이 아닌
+                   날엔 속성 자체를 안 단다(`aria-current="false"` 는 "이 집합에 현재 항목이
+                   있다"는 잘못된 신호다, schedule-read.tsx 의 같은 자리 주석). */
+                  {...(isToday ? { "aria-current": "date" as const } : {})}
+                >
+                  {/* 하루의 머리 줄 — 요일·날짜(왼쪽)와 그 하루의 속성(오른쪽)이 한 줄에 선다.
+                    전엔 요일이 왼쪽 세로 열이고 나머지가 오른쪽에 흐르는 2열이었는데, 2열
+                    레이아웃의 왼쪽 칼럼(460px)에선 그 고정폭이 항목 폭을 너무 먹는다. 560px
+                    이하에서 이미 이 모양으로 접히고 있었으므로 넓은 폭과 좁은 폭이 같은 골격을
+                    쓰게 되어 규칙이 하나 준다(schedule.css 의 `.sched--edit` 블록). */}
+                  <div className="sched-day__head">
+                    <div className="sched-day__label">
+                      <span className="sched-day__dow">{WEEKDAY_LABELS[i]!}</span>
+                      <span className="sched-day__md">{formatMD(date)}</span>
+                      {isToday && <span className="chip chip--ink sched-day__today">오늘</span>}
+                    </div>
+                    {/* 하루의 속성(이슈 #117) — 시각과 휴방. 항목 행이 아니라 여기 한 번만 선다.
                       휴방이면 시각 입력을 잠근다: 쉬는 날에 시작 시각을 붙이는 건 뜻이 안 맞고,
                       잠가 두면 그 조합을 만들 길 자체가 없어진다(표시에서 휴방이 이긴다는
                       결정 5 를 입력 단계에서 미리 지킨다). */}
-                  <div className="sched-day__meta">
-                    <label className="sr-only" htmlFor={`${date}-time`}>
-                      {formatMD(date)} 방송 시작 시각
-                    </label>
-                    <input
-                      id={`${date}-time`}
-                      className="sched-field sched-day__time"
-                      type="time"
-                      value={day.startTime}
-                      disabled={day.rest}
-                      data-od-id={`schedule-day-time-${date}`}
-                      onChange={(ev) =>
-                        send({ type: "DAY_PATCHED", date, patch: { startTime: ev.target.value } })
-                      }
-                    />
-                    <label className="sched-day__rest-toggle">
+                    <div className="sched-day__meta">
+                      <label className="sr-only" htmlFor={`${date}-time`}>
+                        {formatMD(date)} 방송 시작 시각
+                      </label>
                       <input
-                        type="checkbox"
-                        checked={day.rest}
-                        data-od-id={`schedule-day-rest-${date}`}
+                        id={`${date}-time`}
+                        className="sched-field sched-day__time"
+                        type="time"
+                        value={day.startTime}
+                        disabled={day.rest}
+                        data-od-id={`schedule-day-time-${date}`}
                         onChange={(ev) =>
-                          send({ type: "DAY_PATCHED", date, patch: { rest: ev.target.checked } })
+                          send({ type: "DAY_PATCHED", date, patch: { startTime: ev.target.value } })
                         }
                       />
-                      휴방
-                    </label>
+                      <label className="sched-day__rest-toggle">
+                        <input
+                          type="checkbox"
+                          checked={day.rest}
+                          data-od-id={`schedule-day-rest-${date}`}
+                          onChange={(ev) =>
+                            send({ type: "DAY_PATCHED", date, patch: { rest: ev.target.checked } })
+                          }
+                        />
+                        휴방
+                      </label>
+                    </div>
                   </div>
+
                   {/* 휴방이면 이 덩어리가 통째로 잠긴다(2026-07-31). **항목은 안 지운다** —
                       서버는 휴방인 날의 항목도 거절 없이 저장하는데(saveWeek) 읽기 화면과 PNG
                       카드만 `rest ? [] : entries` 로 버려서(결정 5), 잠그기 전엔 "저장은 되고
@@ -675,14 +714,18 @@ export function ScheduleEditor({
                       휴방인 날은 항목이 나가지 않습니다. 휴방을 끄면 다시 편집할 수 있습니다.
                     </p>
                   )}
-                </div>
-              </li>
-            );
-          })}
-        </ol>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
 
-        {/* 저장·발행 바 — 뷰포트 하단 sticky(결정 23). 발행은 저장과 분리된 별도 확인 흐름이다
-            (결정 14 개정) — 체크박스가 아니라 지금 상태를 말하는 칩 + 반대 상태로 여는 버튼. */}
+        {/* 저장·발행 바는 **grid 밖**이다 — 폼과 미리보기 어느 쪽에도 딸리지 않은 화면 전체의
+            조작이라, 안에 두고 `grid-column: 1 / -1` 로 늘리는 것보다 밖에 두는 편이 그 사실을
+            구조로 말한다(2열에서도 전폭 sticky 로 그대로 선다).
+
+            뷰포트 하단 sticky(결정 23). 발행은 저장과 분리된 별도 확인 흐름이다(결정 14 개정)
+            — 체크박스가 아니라 지금 상태를 말하는 칩 + 반대 상태로 여는 버튼. */}
         <div className="sched-bar" data-od-id="schedule-save-bar">
           <div className="sched-status" data-od-id="schedule-publish-status">
             <span
