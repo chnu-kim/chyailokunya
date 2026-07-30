@@ -583,7 +583,12 @@ export function ScheduleEditor({
               type="button"
               className="btn btn--secondary sched-status__btn"
               data-od-id="schedule-publish-toggle"
-              disabled={baseline.published ? !canUnpublish : !canPublish}
+              /* **업로드 중에도 잠근다.** 머신은 `PUBLISH`·`UNPUBLISH` 를 `ready` 에서만 받으므로
+                 (uploading 상태에 핸들러가 없다) 이 자리를 안 잠그면 확인창을 거쳐 이벤트가
+                 드롭되고, `publishing` 이 false 이고 오류도 없어 **확인창이 성공처럼 닫힌다**
+                 (plain 리뷰 10라운드). 저장 버튼에 uploading 을 더한 것과 같은 부류인데 그때
+                 이 버튼을 빠뜨렸다 — dirty 는 업로드가 성공할 때까지 false 라 가드도 안 걸린다. */
+              disabled={uploading || (baseline.published ? !canUnpublish : !canPublish)}
               onClick={() => setConfirmMode(baseline.published ? "unpublish" : "publish")}
             >
               {baseline.published ? "비공개로 전환" : "발행하기"}

@@ -431,6 +431,33 @@ describe("scheduleSaveMachine — 팬아트 업로드 계약(ADR-0028)", () => {
     expect(actor.getSnapshot().value).toBe("uploading");
   });
 
+  it("업로드 중에는 PUBLISH·UNPUBLISH 도 무시한다 — 확인창이 성공처럼 닫히면 안 된다", () => {
+    /* 화면이 이 상태를 안 잠그면 확인창을 거쳐 이벤트가 드롭되고, `publishing` 이 false 이고
+       오류도 없어 관리자는 발행된 줄 안다(plain 리뷰 10라운드). dirty 는 업로드가 성공할 때까지
+       false 라 canPublish 가드도 안 걸린다 — 그래서 잠금이 유일한 표시다. */
+    const { promise } = deferred<FanartUploadResult>();
+    let publishCalls = 0;
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: 1 }),
+      publishRun: async () => {
+        publishCalls += 1;
+        return { published: true, revision: 99 };
+      },
+      uploadRun: () => promise,
+      initialDraft: draft({
+        entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
+      }),
+      initialRevision: 3,
+    });
+    actor.send({ type: "FANART_UPLOAD", file });
+    expect(actor.getSnapshot().value).toBe("uploading");
+
+    actor.send({ type: "PUBLISH" });
+    actor.send({ type: "UNPUBLISH" });
+    expect(publishCalls).toBe(0);
+    expect(actor.getSnapshot().value).toBe("uploading");
+  });
+
   it("표기 입력은 업로드 중에도 받지만 그림 조작은 안 받는다", () => {
     /* 표기는 다른 편집 이벤트와 같은 자리(루트)라 잠기지 않고, 업로드·내리기는 자식과 같은 값을
        만져 `ready` 안에 있다 — 그 비대칭이 의도라는 것을 못박는다. */
