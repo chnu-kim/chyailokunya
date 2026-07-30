@@ -110,7 +110,7 @@ describe("buildWeekCard", () => {
       const card = buildWeekCard(
         week({ fanartImageKey: "abc.png", fanartCredit: "그림 · @someone" }),
       );
-      expect(card.fanart).toEqual({ imageKey: "abc.png", credit: "그림 · @someone" });
+      expect(card.fanart).toEqual({ imageKey: "abc.png", credit: "그림 · @someone", size: null });
     });
 
     it("키가 없으면 fanart 자체가 null — 표기만 남아 있어도 그렇다", () => {
@@ -128,10 +128,11 @@ describe("buildWeekCard", () => {
       expect(buildWeekCard(week({ fanartImageKey: "abc.png", fanartCredit: "" })).fanart).toEqual({
         imageKey: "abc.png",
         credit: null,
+        size: null,
       });
       expect(
         buildWeekCard(week({ fanartImageKey: "abc.png", fanartCredit: "   " })).fanart,
-      ).toEqual({ imageKey: "abc.png", credit: null });
+      ).toEqual({ imageKey: "abc.png", credit: null, size: null });
     });
 
     it("표기의 앞뒤 공백은 떼고 싣는다", () => {
@@ -141,11 +142,22 @@ describe("buildWeekCard", () => {
       ).toBe("@someone");
     });
 
-    it("치수 컬럼은 카드로 안 넘어온다 — 자리는 CSS 가 고정한다(이슈 #122)", () => {
-      const card = buildWeekCard(
-        week({ fanartImageKey: "abc.png", fanartImageWidth: 1200, fanartImageHeight: 20000 }),
-      );
-      expect(card.fanart).toEqual({ imageKey: "abc.png", credit: null });
+    it("치수는 쌍으로만 실린다 — 반쪽이면 통째로 null 이다", () => {
+      /* 반쪽(폭만)을 주면 브라우저가 비율을 잘못 잡아 그림이 늘어난다. 저장 경계가 이미 쌍을
+         강제하지만(ADR-0030 의 세 층), 카드는 그 불변식에 기대지 않고 여기서 한 번 더 접는다. */
+      expect(
+        buildWeekCard(
+          week({ fanartImageKey: "abc.png", fanartImageWidth: 1200, fanartImageHeight: 1600 }),
+        ).fanart?.size,
+      ).toEqual({ width: 1200, height: 1600 });
+
+      for (const half of [
+        { fanartImageWidth: 1200, fanartImageHeight: null },
+        { fanartImageWidth: null, fanartImageHeight: 1600 },
+        { fanartImageWidth: null, fanartImageHeight: null },
+      ]) {
+        expect(buildWeekCard(week({ fanartImageKey: "abc.png", ...half })).fanart?.size).toBeNull();
+      }
     });
   });
 

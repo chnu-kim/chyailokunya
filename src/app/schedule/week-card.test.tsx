@@ -52,7 +52,7 @@ const CARD: WeekCardData = {
 
 const FANART_CARD: WeekCardData = {
   ...CARD,
-  fanart: { imageKey: "b7f3.png", credit: "그림 · @someone" },
+  fanart: { imageKey: "b7f3.png", credit: "그림 · @someone", size: { width: 600, height: 800 } },
 };
 
 describe("WeekCard", () => {
@@ -145,16 +145,30 @@ describe("WeekCard", () => {
 
     it("표기가 없으면 표기 줄 자체가 없다", () => {
       const { container } = render(
-        <WeekCard card={{ ...FANART_CARD, fanart: { imageKey: "b7f3.png", credit: null } }} />,
+        <WeekCard
+          card={{ ...FANART_CARD, fanart: { imageKey: "b7f3.png", credit: null, size: null } }}
+        />,
       );
       expect(container.querySelector(".week-card__art-img")).not.toBeNull();
       expect(container.querySelector(".week-card__art-credit")).toBeNull();
     });
 
-    it("치수 속성을 안 단다 — 자리는 CSS 가 고정한다", () => {
-      /* 있으면 극단 비율(1200×20000)이 상자를 밀어내고, 반쪽만 있으면 브라우저가 비율을 잘못
-         잡아 그림이 늘어난다. 카드 안 그림은 캡처가 동기라 예약(CLS)이 필요 없다. */
+    it("치수가 있으면 width·height 로 비율을 미리 준다", () => {
+      /* 사진지가 그림을 감싸는 모양이라(schedule.css) 로드 전엔 비율을 몰라 사진지가 표기
+         높이로 쪼그라들었다가 늘어난다 — 속성이 그 움직임을 없앤다. 극단 비율은 CSS 상한
+         (max-width/max-height)이 계속 막으므로 속성이 상자를 못 밀어낸다. */
       render(<WeekCard card={FANART_CARD} />);
+      const img = screen.getByRole("img", { name: "팬아트" });
+      expect(img).toHaveAttribute("width", "600");
+      expect(img).toHaveAttribute("height", "800");
+    });
+
+    it("치수가 없으면(0013 이전 그림) 속성을 아예 안 단다", () => {
+      /* 반쪽만 달면 브라우저가 비율을 잘못 잡아 그림이 늘어난다 — 쌍이거나 없거나 둘 뿐이고,
+         그 조합은 타입(`size: {…} | null`)이 이미 막는다. */
+      render(
+        <WeekCard card={{ ...FANART_CARD, fanart: { ...FANART_CARD.fanart!, size: null } }} />,
+      );
       const img = screen.getByRole("img", { name: "팬아트" });
       expect(img).not.toHaveAttribute("width");
       expect(img).not.toHaveAttribute("height");

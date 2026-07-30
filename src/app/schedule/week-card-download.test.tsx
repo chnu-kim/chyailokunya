@@ -36,7 +36,7 @@ const CARD: WeekCardData = {
 
 const FANART_CARD: WeekCardData = {
   ...CARD,
-  fanart: { imageKey: "b7f3.png", credit: "그림 · @someone" },
+  fanart: { imageKey: "b7f3.png", credit: "그림 · @someone", size: null },
 };
 
 const NEXT_WEEK_CARD: WeekCardData = {
@@ -277,7 +277,10 @@ describe("WeekCardDownload", () => {
        위 "내용이 바뀌면" 스펙과 같은 함정이지만, 그 스펙은 note 만 바꿔 보므로 팬아트가 키에
        실리는지는 안 본다(팬아트를 빼도 초록이다). */
     vi.mocked(toPng).mockImplementation(() => new Promise(() => {})); // 첫 그림 캡처 — 안 끝남
-    const FIRST: WeekCardData = { ...CARD, fanart: { imageKey: "first.png", credit: null } };
+    const FIRST: WeekCardData = {
+      ...CARD,
+      fanart: { imageKey: "first.png", credit: null, size: null },
+    };
     const { rerender } = render(<WeekCardDownload card={FIRST} weekStartDate="2026-07-20" />);
 
     await act(async () => {
@@ -287,7 +290,10 @@ describe("WeekCardDownload", () => {
     // 캡처 전 그림 인라인(fetch→blob→FileReader)이 마이크로태스크 여럿을 지나므로 기다린다.
     await waitFor(() => expect(toPng).toHaveBeenCalledTimes(1));
 
-    const SWAPPED: WeekCardData = { ...CARD, fanart: { imageKey: "second.png", credit: null } };
+    const SWAPPED: WeekCardData = {
+      ...CARD,
+      fanart: { imageKey: "second.png", credit: null, size: null },
+    };
     vi.mocked(toPng).mockResolvedValue("data:image/png;base64,swapped");
     rerender(<WeekCardDownload card={SWAPPED} weekStartDate="2026-07-20" />);
 

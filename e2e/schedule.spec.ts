@@ -341,7 +341,10 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
 
   await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(SOLID_FANART);
   await expect(page.locator('[data-od-id="schedule-fanart-thumb"]')).toBeVisible();
-  await page.locator('[data-od-id="schedule-fanart-credit"]').fill("e2e 그린 사람");
+  /* 표기를 **저장 상한(100자)까지** 채운다 — 짧은 표기로만 재면 사진지가 카드를 밀어내는
+     경로를 통째로 못 본다(GitHub codex 리뷰 P2, 실측: 15자에서 이미 본문을 넘었다). 아래
+     containment 단언이 그 자리를 잡는다. */
+  await page.locator('[data-od-id="schedule-fanart-credit"]').fill("그림 · @" + "가".repeat(93));
 
   await page.locator('[data-od-id="schedule-save"]').click();
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
@@ -350,8 +353,30 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
   // 카드가 팬아트 모양으로 서고 표기까지 실린다(그림이 실제로 로드된 뒤에 찍는다).
   const card = page.locator('[data-od-id="week-card"]');
   await expect(card).toHaveClass(/week-card--art/);
-  await expect(card).toContainText("e2e 그린 사람");
+  await expect(card).toContainText("그림 · @가");
   await expect(card.locator(".week-card__art-img")).toBeVisible();
+
+  /* **긴 표기가 사진지를 카드 밖으로 밀지 않는다.** 표기는 두 줄로 잠기고(CSS) 그림 상한이 그
+     두 줄을 미리 빼 둔 값이라, 사진지 높이가 본문을 절대 안 넘는다 — 넘으면 카드가
+     `overflow: hidden` 으로 잘려 **깨진 그림이 그대로 다운로드된다.** 회전 때문에 rect 가
+     아니라 레이아웃 높이로 잰다. */
+  const fit = await page.evaluate(() => {
+    const root = document.querySelector('[data-od-id="week-card"]') as HTMLElement;
+    const fig = root.querySelector(".week-card__art") as HTMLElement;
+    const body = root.querySelector(".week-card__body") as HTMLElement;
+    const cap = root.querySelector(".week-card__art-credit") as HTMLElement;
+    return {
+      figH: fig.offsetHeight,
+      bodyH: body.offsetHeight,
+      capLines: Math.round(cap.offsetHeight / 26),
+      capOverflowsX: cap.scrollWidth > cap.clientWidth + 1,
+      figClipsContent: fig.scrollHeight > fig.clientHeight + 1,
+    };
+  });
+  expect(fit.figH).toBeLessThanOrEqual(fit.bodyH);
+  expect(fit.capLines).toBeLessThanOrEqual(2);
+  expect(fit.capOverflowsX).toBe(false);
+  expect(fit.figClipsContent).toBe(false);
 
   // 찍을 두 점(카드 좌표계) — 그림 중앙과 목록 첫 행 중앙.
   const points = await page.evaluate(() => {

@@ -1008,22 +1008,34 @@ dialog.sched-confirm::backdrop {
   border: 1px solid var(--thumb-edge);
   box-shadow: 2px 3px 0 rgba(24, 24, 24, 0.06);
   transform: rotate(1.1deg);
+  /* 안전망 — 어떤 조합이 와도 사진지가 본문 밖으로 못 나간다(퍼센트는 본문 높이가 확정이라
+     풀린다). 아래 두 규칙이 이미 높이를 계산해 맞추지만, 계산이 틀리면 카드가 깨지는 자리라
+     한 겹 더 잠근다: 여기서 걸리면 사진지 안에서 잘릴 뿐 카드는 온전하다. */
+  max-height: 100%;
+  overflow: hidden;
 }
-/* 치수 속성을 안 달았으므로(week-card.tsx) 상자는 이 두 상한과 그림의 고유 비율로만 정해진다 —
-   어떤 비율이 와도 카드를 못 밀어낸다. 356 은 본문 높이(411)에서 종이 패딩 16 과 표기 한 줄
-   (26 + gap 6)을 뺀 값이다. 표기가 없는 주는 그만큼 더 커질 수 있지만 상한을 하나로 둔다 —
-   그림 크기가 표기 유무로 달라지면 같은 그림을 두 주에 걸었을 때 크기가 갈린다. */
+/* 상자는 이 두 상한과 그림의 고유 비율로 정해진다 — 어떤 비율이 와도 카드를 못 밀어낸다.
+   330 은 본문 높이(406, 실측)에서 종이 패딩 16 · gap 6 · **표기 두 줄**(53)을 뺀 값이다.
+   표기가 한 줄이거나 없는 주도 같은 상한을 쓴다 — 그림 크기가 표기 길이에 따라 달라지면 같은
+   그림을 두 주에 걸었을 때 크기가 갈린다. */
 .week-card__art-img {
   display: block;
   width: auto;
   height: auto;
   max-width: 100%;
-  max-height: 356px;
+  max-height: 330px;
   margin-inline: auto;
 }
 /* 표기는 손글씨지만 색은 `--brand-taupe` 가 아니라 `--fg-muted` 다 — taupe 는 25px 이상에서만
    대비를 넘는데(.polaroid figcaption 주석) 이 자리는 사진지 폭이 300px 이라 긴 표기가 24px 로
-   내려앉을 수 있다. muted 는 흰 종이 위 5.6:1 로 크기와 무관하게 통과한다. */
+   내려앉을 수 있다. muted 는 흰 종이 위 5.6:1 로 크기와 무관하게 통과한다.
+
+   **두 줄로 잠근다(GitHub codex 리뷰 P2).** 저장 상한이 100자라 그냥 두면 표기가 최대 일곱
+   줄까지 늘어나 사진지가 본문을 넘고(실측: 15자에서 이미 430 > 406, 100자면 카드 밖으로
+   나간다) 카드가 깨진 그림으로 나간다. 자르는 대신 안 자를 수도 있었지만, 표기는 **귀속**이라
+   한 줄로 줄이면 이름이 통째로 사라지는 쪽이 더 나쁘다 — 두 줄까지 보이고 넘치면 말줄임한다.
+   `overflow-wrap: anywhere` 는 공백 없는 핸들(`@aaaa…`) 때문이다: 그런 문자열은 줄바꿈 지점이
+   없어 상자를 **가로로** 넘어(실측 865px) 카드 오른쪽으로 샌다. */
 .week-card__art-credit {
   margin: 0;
   text-align: center;
@@ -1031,6 +1043,11 @@ dialog.sched-confirm::backdrop {
   font-size: 24px;
   line-height: 1.1;
   color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 /* ── PNG 다운로드(이슈 #109 작업순서 3) ───────────────────────────────────────

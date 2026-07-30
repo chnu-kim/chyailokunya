@@ -224,6 +224,14 @@ export function ScheduleEditor({
                는 buildWeekCard 가 정규화한다. */
             fanartImageKey: baseline.fanartImageKey,
             fanartCredit: baseline.fanartCredit,
+            /* **편집기 미리보기엔 치수가 없다.** baseline 은 `WeekDraft` 이고 그 타입은 치수를
+               일부러 안 갖는다 — 저장 페이로드와 같은 모양이라 담는 순간 화면이 서버 소유
+               값(R2 객체 메타에서 읽은 치수)을 되돌려 보내게 되고, 그건 ADR-0030 이 막은 바로
+               그것이다. 대가는 관리자 화면에서 그림이 뜨는 순간 사진지가 한 번 늘어나는
+               것뿐이고, **받아지는 PNG 는 영향이 없다**(캡처 전에 디코드를 끝낸다). 팬이 보는
+               읽기 화면은 `WeekView` 를 그대로 넘겨 치수가 실린다. */
+            fanartImageWidth: null,
+            fanartImageHeight: null,
           })
         : null,
     [weekStartDate, baseline],

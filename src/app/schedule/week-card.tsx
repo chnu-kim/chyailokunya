@@ -128,14 +128,20 @@ export function WeekCard({ card, ref }: { card: WeekCardData; ref?: React.Ref<HT
             fetch 하므로 무관하지만(그래서 좁은 폭에서도 PNG 는 제대로 나온다), 미리보기가 보이는
             폭에서 빈 자리로 남는 것을 막는다.
 
-            치수 속성(width/height)은 안 단다 — 자리는 CSS 가 고정하고 그림은 `object-fit: contain`
-            으로 그 안에 앉는다(이슈 #122). 그래서 극단 비율도 카드를 못 밀어낸다. */}
+            **치수는 있으면 단다**(읽기 화면과 같은 규칙). 사진지가 그림을 감싸는 모양이라
+            (schedule.css) 로드 전엔 비율을 몰라 사진지가 표기 높이로 쪼그라들었다가 그림이 오면
+            늘어난다 — 속성이 그 비율을 미리 준다. 받아지는 PNG 는 캡처 전에 그림을 디코드해
+            찍으므로 영향이 없고, 이건 화면의 미리보기를 위한 것이다. 처음엔 안 달았는데(자리를
+            CSS 가 고정했으니 줄 이유가 없었다) 가로로 긴 그림을 고치며 사진지가 그림을 감싸게
+            되면서 전제가 바뀌었다(GitHub codex 리뷰 P2). 치수는 항상 쌍이거나 없다 — 반쪽을 주면
+            브라우저가 비율을 잘못 잡는데, 그 조합은 타입이 이미 막는다. */}
         {fanart && (
           <figure className="week-card__art">
             <img
               className="week-card__art-img"
               src={`/api/fanart/${fanart.imageKey}`}
               alt="팬아트"
+              {...(fanart.size ?? {})}
             />
             {fanart.credit ? (
               <figcaption className="week-card__art-credit">{fanart.credit}</figcaption>

@@ -22,12 +22,19 @@ export type WeekCardSource = {
      "행이 없는 것 = 시각 미정 · 휴방 아님"(db/schema.ts). 여기서도 부분집합 구조 타입이라
      WeekView.days(ScheduleDay[])도 WeekDraft 쪽 조립본도 그대로 만족한다. */
   days: { scheduledDate: string; startTime: string | null; rest: boolean }[];
-  /* 그 주에 걸어 둔 팬아트(ADR-0028). **치수 컬럼은 안 받는다** — 카드 안 그림은 CSS 로 크기가
-     고정된 자리에 `object-fit: contain` 으로 앉으므로(schedule.css) 비율을 속성으로 줄 이유가
-     없고, 캡처는 동기라 CLS 도 없다. 덤으로 반쪽 조합(한쪽만 있는 치수) 분기가 안 늘어난다.
-     표기는 두 호출자가 기준이 다르다 — WeekView 는 `null`, WeekDraft 는 `""` 다. */
+  /* 그 주에 걸어 둔 팬아트(ADR-0028). 표기는 두 호출자가 기준이 다르다 — WeekView 는 `null`,
+     WeekDraft 는 `""` 다(아래 buildWeekCard 가 합친다).
+
+     **치수도 받는다.** 처음엔 안 받았다: 카드 안 자리를 CSS 로 고정하면 비율을 속성으로 줄
+     이유가 없었기 때문이다. 그런데 가로로 긴 그림이 세로 사진지 안에서 얇은 띠로 뜨는 것을
+     고치며 **사진지가 그림을 감싸도록** 바꿨고(schedule.css), 그 순간 레이아웃이 그림의 고유
+     비율에 의존하게 됐다 — 로드 전에는 비율을 몰라 사진지가 표기 높이로 쪼그라들었다가 그림이
+     오면 늘어난다(GitHub codex 리뷰 P2). 캡처는 그림을 미리 디코드하고 찍으므로 받아지는 PNG 엔
+     영향이 없지만, 화면의 미리보기는 그 움직임을 그대로 보여 준다. */
   fanartImageKey: string | null;
   fanartCredit: string | null;
+  fanartImageWidth: number | null;
+  fanartImageHeight: number | null;
 };
 
 /* 한 칸에 다 못 그리는 날의 상한. 실사용은 하루 1~2건(결정 8 의 예 — "오후 저챗 + 밤 게임")
@@ -73,6 +80,10 @@ export type WeekCardFanart = {
   /* R2 객체 키 한 조각. 화면이 `/api/fanart/${key}` 로 조립한다(ADR-0028 — 컬럼엔 URL 이 없다). */
   imageKey: string;
   credit: string | null;
+  /* 폭·높이는 **쌍으로만** 존재한다(ADR-0030). 반쪽을 주면 브라우저가 비율을 잘못 잡아 그림이
+     늘어나므로, 한 오브젝트로 묶어 그 조합을 타입에서 없앤다 — 0013 이전에 걸린 그림은 통째로
+     null 이고 그 주는 예약 없이 그려진다. */
+  size: { width: number; height: number } | null;
 };
 
 export type WeekCardData = {
@@ -102,7 +113,14 @@ export function buildWeekCard(source: WeekCardSource): WeekCardData {
        주므로 그대로 넘기면 편집기 미리보기에만 빈 figcaption 이 생겨 사진지 아래가 벌어진다.
        두 화면이 같은 값을 다른 기준으로 얻는 자리라, 기준을 카드 조립부 한 곳에 둔다. */
     fanart: source.fanartImageKey
-      ? { imageKey: source.fanartImageKey, credit: source.fanartCredit?.trim() || null }
+      ? {
+          imageKey: source.fanartImageKey,
+          credit: source.fanartCredit?.trim() || null,
+          size:
+            source.fanartImageWidth !== null && source.fanartImageHeight !== null
+              ? { width: source.fanartImageWidth, height: source.fanartImageHeight }
+              : null,
+        }
       : null,
     days: days.map((date, i) => {
       const day = dayByDate.get(date);
