@@ -43,10 +43,17 @@ const lastPlayedExpr = sql<
    게임(lastPlayed null)은 시간축 위에 자리가 없으므로 뒤로 몰고, 그 안에서만 추가 순
    (created_at 내림차순)으로 정렬한다.
 
-   정렬 키가 셋인 이유: 첫 키 (lastPlayed IS NULL) 은 **날짜 있음/없음 두 덩이를 가르는 것만**
+   정렬 키가 넷인 이유: 첫 키 (lastPlayed IS NULL) 은 **날짜 있음/없음 두 덩이를 가르는 것만**
    한다(0/1 ASC 라 날짜 있는 쪽이 먼저). 그래야 셋째 키의 의미가 성립한다 — null 덩이 안에서는
    둘째 키가 전부 NULL 이라 무의미해지고 created_at DESC 만 남는다. 구조는 played_at 컬럼 시절과
    같다(결정 17, 시각 회귀 위험 0) — 정렬 인덱스는 검색 이슈로 미룸(ADR-0014).
+
+   **마지막 `id DESC` 는 tie breaker 다 — 없으면 순서가 비결정적이다.** created_at 은 `Date.now()`
+   ms 라 같은 틱에 들어간 행들이 같은 값을 갖는다(실측: 연속 insert 6건에 고유 값 3개). 그러면
+   SQLite 가 임의 순서를 주고, **같은 데이터로 새로고침할 때마다 보드 순서가 바뀔 수 있다.**
+   시드 배치처럼 한 번에 넣는 경로에서 특히 잘 걸린다. 실제로 이걸 처음 드러낸 건 사람이 아니라
+   `games.list` 단위 테스트의 간헐 실패였다(1/7). id 는 autoincrement 라 created_at 과 같은
+   방향이고 유일해서, 덧붙여도 의도한 순서를 안 흔든다.
 
    schedule_weeks 를 LEFT JOIN 하는 이유가 발행 경계다(lastPlayedExpr 주석·ADR-0022): 항목의
    주(월요일)에 메타 행을 이어 붙여, 그 주가 발행됐는지로 항목을 보드에 셀지 가른다. LEFT 라
@@ -59,7 +66,12 @@ export function listGames(db: Db): Promise<GameCard[]> {
     .leftJoin(scheduleWeeks, eq(scheduleWeeks.weekStartDate, entryWeekStart))
     .leftJoin(scheduleDays, eq(scheduleDays.scheduledDate, scheduleEntries.scheduledDate))
     .groupBy(games.id)
-    .orderBy(sql`${lastPlayedExpr} IS NULL`, desc(lastPlayedExpr), desc(games.createdAt));
+    .orderBy(
+      sql`${lastPlayedExpr} IS NULL`,
+      desc(lastPlayedExpr),
+      desc(games.createdAt),
+      desc(games.id),
+    );
 }
 
 /* 일정 편집기가 항목에 게임을 이어 붙일 때 고를 후보(이슈 #56 결정 11). 보드에 이미 있는

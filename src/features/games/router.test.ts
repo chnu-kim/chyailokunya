@@ -172,6 +172,29 @@ describe("games 라우터", () => {
     expect(list[3]!.id).toBe(noDate1.id);
   });
 
+  /* **이 테스트가 이 파일에서 유일하게 간헐 실패했다**(1/7). created_at 은 `Date.now()` ms 라
+     같은 틱에 들어간 행들이 같은 값을 갖고(실측: 연속 insert 6건에 고유 값 3개), tie breaker 가
+     없으면 SQLite 가 임의 순서를 준다. 위 테스트는 add 사이에 D1 왕복이 있어 대개 ms 가 갈리지만
+     **갈리지 않을 때가 있다** — 그게 flake 의 정체였다.
+
+     여기서는 created_at 을 손으로 같은 값으로 박아 그 상황을 **결정적으로** 재현한다. 이건
+     테스트만의 문제가 아니다: 시드 배치처럼 한 번에 넣는 경로에선 흔하고, 그러면 같은 데이터로
+     새로고침할 때마다 보드 순서가 바뀐다. */
+  it("created_at 이 같아도 순서가 결정적이다 — id DESC 가 tie 를 끊는다", async () => {
+    const db = makeDb(env.DB);
+    const sameTick = 1_700_000_000_000;
+    await db.insert(games).values([
+      { categoryId: "tie-a", categoryType: "GAME", categoryValue: "동시 A", createdAt: sameTick },
+      { categoryId: "tie-b", categoryType: "GAME", categoryValue: "동시 B", createdAt: sameTick },
+      { categoryId: "tie-c", categoryType: "GAME", categoryValue: "동시 C", createdAt: sameTick },
+    ]);
+
+    const ids = (await createCaller(makeCtx()).games.list()).map((g) => g.id);
+
+    // 나중에 들어간 쪽(큰 id)이 위 — created_at DESC 와 같은 방향이라 의도한 순서를 안 흔든다.
+    expect(ids).toEqual([...ids].sort((a, b) => b - a));
+  });
+
   it("보드 날짜는 발행 경계를 통과한 항목만 유도한다 — 초안 주는 숨고, 발행하면 뜬다(ADR-0022)", async () => {
     const authed = createCaller(makeCtx({ authorities: admin }));
     const db = makeDb(env.DB);
