@@ -54,6 +54,126 @@ export function normalizeFanartSize(
   return ok(width) && ok(height) ? { width, height } : { width: null, height: null };
 }
 
+/* 픽셀 예산 — **바이트 상한과 다른 축이다.** 5MB 안에도 수억 픽셀이 들어간다: 단색 20000×20000
+   PNG 는 압축 상태로 수 KB 인데 브라우저가 디코드하면 픽셀당 4바이트로 펼쳐져 1.6GB 가 된다.
+   그 파일이 발행된 주에 걸리면 **그 주를 여는 모든 방문자의 탭이 죽는다** — 업로드하는 관리자
+   탭도 함께 죽는다(치수를 읽는 `createImageBitmap` 자체가 그 비트맵을 할당한다).
+
+   `FANART_MAX_DIMENSION` 과 **함께** 봐야 한다: 한 변 상한만으로는 19000×19000(361MP)이 통과한다.
+   40MP 는 실사용 일러스트의 위쪽이다(6000×6000 = 36MP · 트위터 업로드 상한도 이 근처다). */
+export const FANART_MAX_PIXELS = 40_000_000;
+
+/* 예산 판정. 곱셈 하나지만 함수로 두는 이유는 라우트와 테스트가 같은 규칙을 보게 하는 것이다 —
+   상한을 바꿀 때 두 곳이 갈리지 않는다(isOverFanartLimit 과 같은 자리). */
+export function isOverPixelBudget(width: number, height: number): boolean {
+  return width * height > FANART_MAX_PIXELS;
+}
+
+/* 빅엔디안·리틀엔디안 u16/u24/u32. 형식마다 바이트 순서가 다르다 — PNG/JPEG 는 BE, WebP 는
+   RIFF 계열이라 LE 다. 범위를 넘으면 null(호출자가 "못 읽었다"로 다룬다). */
+function beU32(b: Uint8Array, at: number): number | null {
+  if (b.length < at + 4) return null;
+  return ((b[at]! << 24) | (b[at + 1]! << 16) | (b[at + 2]! << 8) | b[at + 3]!) >>> 0;
+}
+function beU16(b: Uint8Array, at: number): number | null {
+  if (b.length < at + 2) return null;
+  return (b[at]! << 8) | b[at + 1]!;
+}
+function leU16(b: Uint8Array, at: number): number | null {
+  if (b.length < at + 2) return null;
+  return b[at]! | (b[at + 1]! << 8);
+}
+function leU24(b: Uint8Array, at: number): number | null {
+  if (b.length < at + 3) return null;
+  return b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16);
+}
+
+/* PNG: 시그니처 8 + 청크 길이 4 + "IHDR" 4 뒤에 폭·높이가 BE u32 로 온다(규격이 IHDR 을 **첫
+   청크로 못박았다**). 고정 오프셋이라 스캔이 없다. */
+function pngSize(b: Uint8Array) {
+  const width = beU32(b, 16);
+  const height = beU32(b, 20);
+  return width !== null && height !== null ? { width, height } : null;
+}
+
+/* JPEG: 세그먼트를 훑어 SOF(Start Of Frame) 를 찾는다. 마커는 `FF xx` 이고 대부분 뒤에 길이
+   u16(자기 포함)이 붙는데, SOI·EOI·RST·TEM 은 **길이가 없어** 건너뛰는 방식이 다르다.
+   SOF 페이로드: 길이(2) + 정밀도(1) + 높이(2) + 폭(2) — 높이가 먼저다.
+
+   **점프 횟수에 상한을 둔다.** 길이 0·1 같은 값을 넣으면 오프셋이 안 늘어 무한 루프가 되고,
+   악성 파일이 그걸 만들 수 있다(요청 경로에서 도는 코드라 그 자체가 CPU 공격이 된다).
+   정상 JPEG 의 SOF 는 앞쪽 몇 개 세그먼트 안에 오므로 넉넉히 잡아도 64 로 충분하다. */
+const JPEG_MAX_SEGMENTS = 64;
+const SOF_MARKERS = new Set([
+  0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
+]);
+function jpegSize(b: Uint8Array) {
+  let at = 2; // FF D8(SOI) 다음
+  for (let hops = 0; hops < JPEG_MAX_SEGMENTS; hops++) {
+    // 마커는 FF 로 시작한다. 패딩 FF 가 여러 개 올 수 있어 건너뛴다.
+    while (at < b.length && b[at] === 0xff) at++;
+    if (at >= b.length) return null;
+    const marker = b[at]!;
+    at++;
+    // 길이 없는 마커: RST0~7(D0-D7) · SOI(D8) · EOI(D9) · TEM(01).
+    if ((marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) continue;
+    const len = beU16(b, at);
+    if (len === null || len < 2) return null; // 길이가 자기(2)보다 작으면 깨진 파일이다
+    if (SOF_MARKERS.has(marker)) {
+      const height = beU16(b, at + 3);
+      const width = beU16(b, at + 5);
+      return width !== null && height !== null ? { width, height } : null;
+    }
+    at += len;
+  }
+  return null;
+}
+
+/* WebP: RIFF 컨테이너라 LE 다. 청크 fourcc(offset 12)에 따라 치수 자리가 셋으로 갈린다 —
+   **하나만 파싱하면 정상 파일의 2/3 를 거절한다.**
+     VP8  (lossy)    — 청크 데이터 + 6 부터 14비트 폭·높이(상위 2비트는 스케일)
+     VP8L (lossless) — 청크 데이터 + 1 부터 28비트에 (폭-1, 높이-1) 각 14비트
+     VP8X (extended) — 청크 데이터 + 4 부터 24비트 (캔버스 폭-1, 높이-1) */
+function webpSize(b: Uint8Array) {
+  const fourcc = String.fromCharCode(...b.slice(12, 16));
+  if (fourcc === "VP8 ") {
+    const w = leU16(b, 26);
+    const h = leU16(b, 28);
+    // 상위 2비트는 스케일 힌트라 치수에서 뺀다(14비트 폭·높이).
+    return w !== null && h !== null ? { width: w & 0x3fff, height: h & 0x3fff } : null;
+  }
+  if (fourcc === "VP8L") {
+    if (b.length < 25) return null;
+    const bits = (b[21]! | (b[22]! << 8) | (b[23]! << 16) | (b[24]! << 24)) >>> 0;
+    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+  }
+  if (fourcc === "VP8X") {
+    const w = leU24(b, 24);
+    const h = leU24(b, 27);
+    return w !== null && h !== null ? { width: w + 1, height: h + 1 } : null;
+  }
+  return null;
+}
+
+/* 형식 헤더에서 픽셀 치수를 읽는다 — **디코드가 아니다.** 규격이 파일 앞머리에 못박은 정수를
+   몇 개 읽는 것이라 CPU 가 매직 바이트 판정과 같은 급이고, ADR-0028 의 "요청 경로에서 이미지를
+   만지지 않는다"와 충돌하지 않는다(그 결정이 막은 것은 디코드·재인코딩이다).
+
+   **못 읽으면 null 이고, 라우트는 그걸 거절로 다룬다**(fail-closed). 이 판정은 치수 힌트
+   (ADR-0030 의 fail-open)와 **다른 결정이다** — 여기서 통과시키면 폭탄 방어에 우회로가 생기고,
+   반대로 못 읽는 파일은 브라우저도 디코드 못 할 가능성이 높아 통과시켜도 그림이 안 뜬다.
+   매직 바이트를 이미 지난 파일이므로 "그 형식이라고 주장하는데 헤더가 규격과 다르다"는 뜻이다. */
+export function readImageDimensions(
+  bytes: Uint8Array,
+  type: FanartImageType,
+): { width: number; height: number } | null {
+  const size =
+    type === "png" ? pngSize(bytes) : type === "jpeg" ? jpegSize(bytes) : webpSize(bytes);
+  // 0 이나 음수는 치수가 아니다 — 그런 헤더는 깨진 파일이고, 곱셈이 예산 판정을 우회한다.
+  if (!size || size.width <= 0 || size.height <= 0) return null;
+  return size;
+}
+
 const CONTENT_TYPES: Record<FanartImageType, string> = {
   png: "image/png",
   jpeg: "image/jpeg",

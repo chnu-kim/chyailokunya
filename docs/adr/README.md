@@ -47,4 +47,4 @@ ADR 이 그 맥락을 붙박는다. 규칙(불변식·경계·플레이북)의 �
 | [0026](./0026-xstate-unifies-client-state.md)                | 클라이언트 상태 = XState 단일 표현 (Zustand·Jotai·Query 기각)        | Accepted                                                   |
 | [0027](./0027-time-and-rest-belong-to-the-day.md)            | 방송 시각·휴방 = 하루의 속성 (#56 결정 8 을 뒤집는다)                | Accepted                                                   |
 | [0028](./0028-fanart-bytes-in-r2.md)                         | 팬아트 = R2 바이트 + Worker 프록시 (외부 URL 기각)                   | Accepted                                                   |
-| [0030](./0030-fanart-dimensions-as-layout-hint.md)           | 팬아트 치수 = 클라이언트가 읽는 레이아웃 힌트 (fail-open·쌍)         | Accepted (0028 확장)                                       |
+| [0030](./0030-fanart-dimensions-as-layout-hint.md)           | 팬아트 치수 = 힌트는 클라이언트·픽셀 예산은 서버 (0028 확장)         | Accepted (0028 확장)                                       |

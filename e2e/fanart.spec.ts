@@ -11,10 +11,17 @@ import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
 const UPLOAD = "/api/fanart";
 
-// 각 형식의 실제 앞머리 + 뒤에 아무 바이트. 판정은 앞머리만 보므로 이걸로 충분하다.
-const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-]);
+/* PNG 시그니처 + **IHDR 까지** 채운 앞머리(8×8). 매직 바이트만으론 이제 부족하다 — 라우트가
+   IHDR 에서 치수를 읽어 픽셀 예산을 보고, 못 읽으면 415 로 거절한다(fail-closed). 픽셀 데이터는
+   여전히 필요 없다: 라우트는 어느 경로에서도 디코드하지 않는다. */
+const PNG_BYTES = (() => {
+  const b = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+  Buffer.from([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(b, 8);
+  b.writeUInt32BE(8, 16);
+  b.writeUInt32BE(8, 20);
+  return b;
+})();
 
 /* Origin 을 손으로 싣는다 — 상태를 바꾸는 요청은 Origin 이 AUTH_URL 과 정확히 일치할 때만
    통과한다(rejectForeignOrigin, fail-closed). 브라우저는 이걸 자동으로 붙이지만 API 요청
@@ -108,6 +115,36 @@ test("확장자·Content-Type 이 아니라 바이트로 판정한다", async ({
 
   // 빈 본문도 형식이 아니다.
   expect((await upload(context.request, baseURL!, Buffer.alloc(0))).status()).toBe(400);
+
+  await context.close();
+});
+
+test("픽셀 폭탄은 R2 에 들어가기 전에 거절된다 — 바이트 상한이 못 막는 축이다", async ({
+  browser,
+  baseURL,
+}) => {
+  /* IHDR 이 20000×20000(4억 화소)을 주장하는 **24바이트** PNG. 이 테스트가 싼 이유가 이 방어가
+     싼 이유와 같다: 라우트는 헤더의 정수 몇 개만 읽으므로 거대한 본문이 필요 없다. **실제 폭탄도
+     같은 헤더를 갖는다** — 단색 이미지는 그 픽셀 수가 5MB 안에 압축되고, 방문자 브라우저가
+     디코드하면 1.6GB 로 펼쳐진다(적대적 리뷰 2라운드).
+
+     바이트 상한(413)을 e2e 로 못 재는 이유(아래 주석)와 대조적이다 — 같은 상태 코드인데 이쪽은
+     본문이 24바이트라 dev 서버를 묶지 않는다. */
+  const bomb = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bomb, 0);
+  Buffer.from([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(bomb, 8);
+  bomb.writeUInt32BE(20000, 16);
+  bomb.writeUInt32BE(20000, 20);
+
+  const context = await contextAs(browser, baseURL!);
+  const res = await upload(context.request, baseURL!, bomb);
+  expect(res.status()).toBe(413);
+  // 서버가 이유를 말하고 화면은 그 문구를 그대로 쓴다(fanartUploadErrorMessage).
+  expect(((await res.json()) as { error: string }).error).toContain("화소");
+
+  // 헤더를 못 읽는 파일은 415 다 — fail-closed(통과시키면 이 방어에 우회로가 생긴다).
+  const truncated = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+  expect((await upload(context.request, baseURL!, truncated)).status()).toBe(415);
 
   await context.close();
 });

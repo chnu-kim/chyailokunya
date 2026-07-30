@@ -90,9 +90,13 @@ async function serverErrorText(res: Response): Promise<string> {
    **못 읽어도 업로드는 성공으로 둔다**: 치수는 레이아웃 힌트라, 없으면 예약 없이 그리는
    저하로 끝나지만 여기서 던지면 그림 자체를 못 건다.
 
-   서버가 안 읽는 이유는 CPU 다(요청 경로에서 이미지를 만지지 않는다, ADR-0028) — 관리자
-   기기에서 디코드하면 그 예산을 안 쓴다. `createImageBitmap` 이 없는 환경(구형·테스트 런타임)
-   에서도 ReferenceError 가 여기서 잡혀 같은 저하로 떨어진다. */
+   서버가 디코드하지 않는 이유는 CPU 다(ADR-0028) — 관리자 기기에서 하면 그 예산을 안 쓴다.
+   `createImageBitmap` 이 없는 환경(구형·테스트 런타임)에서도 ReferenceError 가 여기서 잡혀 같은
+   저하로 떨어진다.
+
+   **여기 오는 파일은 이미 서버의 픽셀 예산을 통과했다**(업로드 라우트가 헤더에서 치수를 읽어
+   40MP 초과를 거절한다, ADR-0030). 그래서 이 `createImageBitmap` 이 거대한 비트맵을 할당해
+   관리자 탭을 죽이는 경로도 함께 닫혔다 — 순서가 중요하다: 업로드가 **먼저** 거절한다. */
 async function readImageSize(file: Blob) {
   try {
     const bitmap = await createImageBitmap(file);

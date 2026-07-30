@@ -13,10 +13,13 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import {
   FANART_MAX_BYTES,
+  FANART_MAX_PIXELS,
   fanartContentType,
   fanartKey,
   fanartObjectKey,
   isOverFanartLimit,
+  isOverPixelBudget,
+  readImageDimensions,
   sniffImageType,
 } from "@/core/fanart";
 import { makeDb } from "@/db";
@@ -101,6 +104,32 @@ export async function POST(req: Request) {
     return Response.json(
       { error: "PNG · JPEG · WebP 이미지만 올릴 수 있습니다." },
       { status: 415 },
+    );
+  }
+
+  /* **픽셀 예산을 R2 에 넣기 전에 본다**(적대적 리뷰 2라운드, ADR-0030). 바이트 상한과 다른
+     축이다: 단색 20000×20000 PNG 는 5MB 안에 들어가는데 디코드하면 1.6GB 라, 그 주를 여는
+     방문자 탭이 통째로 죽는다. 헤더의 정수 몇 개를 읽는 것이라 디코드가 아니고(core/fanart 의
+     readImageDimensions 주석) CPU 가 매직 바이트 판정과 같은 급이다.
+
+     **못 읽으면 거절한다**(fail-closed) — 통과시키면 방어에 우회로가 생긴다. 치수 힌트의
+     fail-open(ADR-0030)과 반대 방향인 것은 의도다: 저쪽은 "그림을 걸 수 있는가"를 결정하고
+     이쪽은 "우리 origin 에서 서빙해도 되는가"를 결정한다.
+
+     상태 코드는 크기 거절과 같은 413 이다 — 사용자가 할 일도 같다(더 작은 그림으로 다시). */
+  const size = readImageDimensions(bytes, type);
+  if (!size) {
+    return Response.json(
+      { error: "그림 정보를 읽지 못했습니다. 다른 파일로 다시 시도해 주십시오." },
+      { status: 415 },
+    );
+  }
+  if (isOverPixelBudget(size.width, size.height)) {
+    return Response.json(
+      {
+        error: `그림의 화소가 너무 많습니다(${size.width}×${size.height}). ${FANART_MAX_PIXELS / 1_000_000}백만 화소 이하로 줄여 올려 주십시오.`,
+      },
+      { status: 413 },
     );
   }
 
