@@ -31,6 +31,7 @@ const CARD: WeekCardData = {
     { dow: "토", date: "7.25", time: null, rest: false, entries: [], overflow: 0 },
     { dow: "일", date: "7.26", time: null, rest: false, entries: [], overflow: 0 },
   ],
+  fanart: null,
 };
 
 const NEXT_WEEK_CARD: WeekCardData = {
@@ -250,6 +251,67 @@ describe("WeekCardDownload", () => {
     expect(toPng).toHaveBeenCalledTimes(2); // 내용이 바뀐 카드라 재사용하지 않고 새로 캡처했다.
     expect(capturedAnchor!.href).toBe("data:image/png;base64,revised");
     expect(capturedAnchor!.download).toBe("챠이로쿠냐_주간일정_2026-07-20.png");
+  });
+
+  it("같은 주에서 팬아트만 갈아 끼워도 새로 캡처한다(이슈 #122)", async () => {
+    /* 팬아트가 `WeekCardData` **안**에 있어야 하는 이유를 못박는다 — 캡처 캐시 키가
+       `${weekStartDate}:${JSON.stringify(card)}` 라, 팬아트를 카드 밖 별도 prop 으로 넘기면
+       그림을 바꿔 저장한 뒤 다시 받아도 키가 그대로여서 **옛 그림이 담긴 캡처**가 나온다.
+       위 "내용이 바뀌면" 스펙과 같은 함정이지만, 그 스펙은 note 만 바꿔 보므로 팬아트가 키에
+       실리는지는 안 본다(팬아트를 빼도 초록이다). */
+    vi.mocked(toPng).mockImplementation(() => new Promise(() => {})); // 첫 그림 캡처 — 안 끝남
+    const FIRST: WeekCardData = { ...CARD, fanart: { imageKey: "first.png", credit: null } };
+    const { rerender } = render(<WeekCardDownload card={FIRST} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+    await waitFor(() => expect(screen.getByTestId("week-card-download-btn")).toBeEnabled());
+    expect(toPng).toHaveBeenCalledTimes(1);
+
+    const SWAPPED: WeekCardData = { ...CARD, fanart: { imageKey: "second.png", credit: null } };
+    vi.mocked(toPng).mockResolvedValue("data:image/png;base64,swapped");
+    rerender(<WeekCardDownload card={SWAPPED} weekStartDate="2026-07-20" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    expect(toPng).toHaveBeenCalledTimes(2);
+    expect(capturedAnchor!.href).toBe("data:image/png;base64,swapped");
+  });
+
+  it("화면 밖으로 치우는 스타일은 감싸는 상자가 받는다 — 캡처 대상 노드엔 안 건다", async () => {
+    /* 이걸 복제본 자신에 걸면 **받아지는 PNG 가 통째로 빈다**(2026-07-30 실측, 이슈 #122):
+       html-to-image 가 computed style 을 SVG foreignObject 안으로 그대로 베끼는데,
+       `position: fixed` 는 그 안에서 SVG 뷰포트 기준이라 카드가 -10000px 에 놓인다. 게이트
+       전부 초록인 채로 살아 있던 결함이라(빈 PNG 도 유효한 PNG 이고 치수도 맞다) 여기서
+       구조를 못박고, "그림이 실제로 담기는가"는 e2e 가 픽셀로 본다. */
+    const seen: { pos: string; parentPos: string; parentTop: string; inDoc: boolean }[] = [];
+    vi.mocked(toPng).mockImplementation(async (node) => {
+      const el = node as HTMLElement;
+      const parent = el.parentElement!;
+      seen.push({
+        pos: el.style.position,
+        parentPos: parent.style.position,
+        parentTop: parent.style.top,
+        inDoc: document.body.contains(el),
+      });
+      return "data:image/png;base64,ok";
+    });
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.pos).toBe(""); // 복제본은 원본 스타일 그대로
+    expect(seen[0]!.parentPos).toBe("fixed");
+    expect(seen[0]!.parentTop).toBe("-10000px");
+    // 문서에 붙어 있어야 레이아웃(폭·오프셋)이 나온다 — 떨어진 조각은 치수가 0 이다.
+    expect(seen[0]!.inDoc).toBe(true);
+    // 캡처가 끝나면 감싼 상자째로 치운다(빈 상자가 body 에 쌓이지 않는다).
+    await waitFor(() => expect(document.querySelectorAll(".week-card")).toHaveLength(1));
   });
 
   it("클릭 직후(폰트 대기 중) 리마운트 없이 주가 바뀌어도 클릭 시점 내용을 그대로 캡처한다", async () => {

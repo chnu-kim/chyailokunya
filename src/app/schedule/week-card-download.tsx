@@ -70,15 +70,30 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
    화면 밖으로 치워도 body 에는 붙여 둔다 — computed style·레이아웃(오프셋·폭)은 실제로 문서
    트리에 앉아 있어야 나오고, 떨어져 나간 조각은 레이아웃이 없어 html-to-image 가 치수를 못
    읽는다. 디자인 토큰(globals.css 의 :root 변수)은 문서 어디에 붙든 그대로 상속되므로(이
-   컴포넌트가 var() 로만 색을 읽는 week-card.tsx 와 같은 전제) 시각 결과는 원본과 같다. */
-function snapshotCard(node: HTMLDivElement): HTMLDivElement {
+   컴포넌트가 var() 로만 색을 읽는 week-card.tsx 와 같은 전제) 시각 결과는 원본과 같다.
+
+   ── 화면 밖으로 치우는 스타일은 **감싸는 상자**에 건다(2026-07-30, 이슈 #122) ──────────
+   복제본 자신에 `position: fixed; top/left: -10000px` 을 걸면 **받아지는 PNG 가 통째로 빈다.**
+   html-to-image 는 노드를 SVG `<foreignObject>` 안에 넣어 래스터화하는데, 그때 computed style 을
+   인라인으로 베낀다 — `position: fixed` 는 그 안에서 SVG 뷰포트 기준이 되어 카드가 -10000px 에
+   놓이고, 1200×630 화폭엔 아무것도 안 그려진다(실측: 생성된 SVG 의 루트 style 에
+   `inset: -10000px 10080px 10090px -10000px`, 래스터 결과는 전 픽셀 알파 0).
+   감싸는 상자는 캡처 대상이 아니라 그 스타일이 SVG 로 안 새고, 복제본은 원본대로
+   `position: relative` 를 유지한다.
+
+   **이 결함은 게이트 전부 초록인 채로 살아 있었다** — e2e 가 PNG 매직 바이트와 2400×1260 만
+   봤기 때문이다. 빈 그림도 유효한 PNG 이고 치수도 맞다. 그래서 같은 PR 이 "받은 PNG 의 팬아트
+   자리 픽셀"을 재는 스펙을 함께 넣는다(schedule.spec.ts). */
+function snapshotCard(node: HTMLDivElement): { clone: HTMLDivElement; dispose: () => void } {
   const clone = node.cloneNode(true) as HTMLDivElement;
-  clone.style.position = "fixed";
-  clone.style.top = "-10000px";
-  clone.style.left = "-10000px";
-  clone.setAttribute("aria-hidden", "true");
-  document.body.appendChild(clone);
-  return clone;
+  const holder = document.createElement("div");
+  holder.style.position = "fixed";
+  holder.style.top = "-10000px";
+  holder.style.left = "-10000px";
+  holder.setAttribute("aria-hidden", "true");
+  holder.appendChild(clone);
+  document.body.appendChild(holder);
+  return { clone, dispose: () => holder.remove() };
 }
 
 type InFlightMap = Map<string, Promise<string>>;
@@ -135,9 +150,9 @@ function startCapture(
   const promise = (async () => {
     try {
       const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
-      return await toPng(snapshot, { pixelRatio: PIXEL_RATIO });
+      return await toPng(snapshot.clone, { pixelRatio: PIXEL_RATIO });
     } finally {
-      snapshot.remove();
+      snapshot.dispose();
     }
   })();
   map.set(key, promise);

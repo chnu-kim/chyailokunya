@@ -219,6 +219,11 @@ export function ScheduleEditor({
             note: baseline.note,
             entries: baseline.entries,
             days: draftDayInputs(baseline),
+            /* baseline 이라 **방금 올린 그림도 저장 뒤에 나타난다** — 업로드만 하고 저장을 안 한
+               상태에서 카드에 실리면 결정 2("미완성본이 박제되면 안 된다")가 뚫린다. 표기의 `""`
+               는 buildWeekCard 가 정규화한다. */
+            fanartImageKey: baseline.fanartImageKey,
+            fanartCredit: baseline.fanartCredit,
           })
         : null,
     [weekStartDate, baseline],

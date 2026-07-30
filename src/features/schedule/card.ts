@@ -22,6 +22,12 @@ export type WeekCardSource = {
      "행이 없는 것 = 시각 미정 · 휴방 아님"(db/schema.ts). 여기서도 부분집합 구조 타입이라
      WeekView.days(ScheduleDay[])도 WeekDraft 쪽 조립본도 그대로 만족한다. */
   days: { scheduledDate: string; startTime: string | null; rest: boolean }[];
+  /* 그 주에 걸어 둔 팬아트(ADR-0028). **치수 컬럼은 안 받는다** — 카드 안 그림은 CSS 로 크기가
+     고정된 자리에 `object-fit: contain` 으로 앉으므로(schedule.css) 비율을 속성으로 줄 이유가
+     없고, 캡처는 동기라 CLS 도 없다. 덤으로 반쪽 조합(한쪽만 있는 치수) 분기가 안 늘어난다.
+     표기는 두 호출자가 기준이 다르다 — WeekView 는 `null`, WeekDraft 는 `""` 다. */
+  fanartImageKey: string | null;
+  fanartCredit: string | null;
 };
 
 /* 한 칸에 다 못 그리는 날의 상한. 실사용은 하루 1~2건(결정 8 의 예 — "오후 저챗 + 밤 게임")
@@ -50,10 +56,23 @@ export type WeekCardDay = {
   overflow: number;
 };
 
+/* 카드가 그릴 팬아트. 키가 없으면 이 값 자체가 null 이고, 카드는 팬아트 없는 모양(7열 격자)으로
+   그린다 — 빈 사진지 자리를 남기지 않는다(이슈 #122 결정).
+
+   **`WeekCardData` 안에 있어야 한다.** 캡처 캐시가 `${weekStartDate}:${JSON.stringify(card)}` 를
+   키로 쓰므로(week-card-download.tsx 의 captureKey), 팬아트를 카드 밖 별도 prop 으로 넘기면
+   **그림만 바꾼 뒤 다시 받을 때 옛 캡처가 그대로 나온다.** 카드 안에 담으면 무효화가 공짜다. */
+export type WeekCardFanart = {
+  /* R2 객체 키 한 조각. 화면이 `/api/fanart/${key}` 로 조립한다(ADR-0028 — 컬럼엔 URL 이 없다). */
+  imageKey: string;
+  credit: string | null;
+};
+
 export type WeekCardData = {
   rangeLabel: string;
   note: string | null;
   days: WeekCardDay[];
+  fanart: WeekCardFanart | null;
 };
 
 /* source.entries 는 이미 정렬된 채로 온다고 가정한다 — 서버 호출자(WeekView)는 getWeekForEdit 의
@@ -72,6 +91,12 @@ export function buildWeekCard(source: WeekCardSource): WeekCardData {
   return {
     rangeLabel: `${formatMD(days[0]!)} – ${formatMD(days[6]!)}`,
     note: source.note,
+    /* 표기는 **여기서 정규화한다** — 읽기 화면(WeekView)은 `null` 을, 편집기(WeekDraft)는 `""` 를
+       주므로 그대로 넘기면 편집기 미리보기에만 빈 figcaption 이 생겨 사진지 아래가 벌어진다.
+       두 화면이 같은 값을 다른 기준으로 얻는 자리라, 기준을 카드 조립부 한 곳에 둔다. */
+    fanart: source.fanartImageKey
+      ? { imageKey: source.fanartImageKey, credit: source.fanartCredit?.trim() || null }
+      : null,
     days: days.map((date, i) => {
       const day = dayByDate.get(date);
       /* 휴방인 날은 항목을 **안 그린다**(이슈 #117 결정 5 — 표시에서 휴방이 이긴다). 두 테이블

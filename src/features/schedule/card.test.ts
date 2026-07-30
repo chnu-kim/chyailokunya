@@ -105,6 +105,50 @@ describe("buildWeekCard", () => {
     expect(card.days[3]!.overflow).toBe(0);
   });
 
+  describe("팬아트(이슈 #122)", () => {
+    it("키가 있으면 카드 안에 담고 표기를 함께 싣는다", () => {
+      const card = buildWeekCard(
+        week({ fanartImageKey: "abc.png", fanartCredit: "그림 · @someone" }),
+      );
+      expect(card.fanart).toEqual({ imageKey: "abc.png", credit: "그림 · @someone" });
+    });
+
+    it("키가 없으면 fanart 자체가 null — 표기만 남아 있어도 그렇다", () => {
+      /* 저장 경계가 "표기만 있는 행"을 막지만(schema.ts), 카드는 그 불변식에 기대지 않고
+         키 하나로만 판정한다 — 사진지 없이 표기만 뜨는 화면은 어떤 경로로도 못 만들어야 한다. */
+      expect(buildWeekCard(week({ fanartImageKey: null })).fanart).toBeNull();
+      expect(
+        buildWeekCard(week({ fanartImageKey: null, fanartCredit: "그림 · @someone" })).fanart,
+      ).toBeNull();
+    });
+
+    it('표기의 빈 값은 null 로 정규화한다 — 편집기(`""`)와 읽기(null)의 기준을 여기서 합친다', () => {
+      /* WeekDraft.fanartCredit 은 `string`(빈 값이 `""`)이고 WeekView 는 `string | null` 이다.
+         그대로 넘기면 편집기 미리보기에만 빈 표기 줄이 생겨 사진지 아래가 벌어진다. */
+      expect(buildWeekCard(week({ fanartImageKey: "abc.png", fanartCredit: "" })).fanart).toEqual({
+        imageKey: "abc.png",
+        credit: null,
+      });
+      expect(
+        buildWeekCard(week({ fanartImageKey: "abc.png", fanartCredit: "   " })).fanart,
+      ).toEqual({ imageKey: "abc.png", credit: null });
+    });
+
+    it("표기의 앞뒤 공백은 떼고 싣는다", () => {
+      expect(
+        buildWeekCard(week({ fanartImageKey: "abc.png", fanartCredit: "  @someone  " })).fanart
+          ?.credit,
+      ).toBe("@someone");
+    });
+
+    it("치수 컬럼은 카드로 안 넘어온다 — 자리는 CSS 가 고정한다(이슈 #122)", () => {
+      const card = buildWeekCard(
+        week({ fanartImageKey: "abc.png", fanartImageWidth: 1200, fanartImageHeight: 20000 }),
+      );
+      expect(card.fanart).toEqual({ imageKey: "abc.png", credit: null });
+    });
+  });
+
   it("weekStartDate 가 월요일이 아니어도 그 주의 월요일부터 접힌다(weekDates 의 정규화)", () => {
     // getWeekForEdit 은 이 필드를 호출자 인자 그대로 echo 한다 — 월요일이 아닌 값이 들어올 수
     // 있다. entries 도 같은 정규화(weekBounds)를 거쳐 쿼리됐으므로 목요일을 넣어도 월~일이

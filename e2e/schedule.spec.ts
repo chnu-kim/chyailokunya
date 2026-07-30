@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import { expectSignedIn, signIn } from "./session";
 
@@ -278,6 +279,127 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
   expect(buf.subarray(12, 16).toString("ascii")).toBe("IHDR");
   expect(buf.readUInt32BE(16)).toBe(2400); // 폭
   expect(buf.readUInt32BE(20)).toBe(1260); // 높이
+
+  /* **시그니처와 치수만으로는 빈 그림을 못 가른다**(이슈 #122) — 전 픽스셀 알파 0 인 PNG 도
+     여기까지 그대로 통과한다. 실제로 그런 상태로 살아 있었다(캡처 복제본에 걸린
+     `position: fixed`가 SVG 안에서 카드를 화면 밖으로 밀었다, week-card-download.tsx).
+     그래서 종이 색이 실제로 칠해졌는지 한 점을 찍는다: 카드 왼쪽 위 여백은 --thumb-paper 다. */
+  const paper = await samplePng(page, buf, { x: 24 * 2, y: 24 * 2 });
+  expect(paper[3]).toBe(255); // 불투명 — 빈 캡처면 여기서 0 이다
+  for (const [i, want] of [244, 238, 233].entries()) {
+    expect(Math.abs(paper[i]! - want)).toBeLessThanOrEqual(6);
+  }
+});
+
+/* 받은 PNG 의 한 점을 읽는다. 압축된 PNG 를 Node 에서 직접 풀려면 필터 해제까지 손으로 해야
+   하고 이미지 라이브러리는 이 저장소의 직접 의존이 아니라, 이미 열려 있는 브라우저에 맡긴다. */
+async function samplePng(page: Page, buf: Buffer, at: { x: number; y: number }): Promise<number[]> {
+  return page.evaluate(
+    async ({ base64, at }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${base64}`;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      return [...ctx.getImageData(at.x, at.y, 1, 1).data];
+    },
+    { base64: buf.toString("base64"), at },
+  );
+}
+
+/* 이슈 #122. **이 스펙이 없으면 "팬아트가 카드에 실렸다"를 어느 층도 못 본다** — 위 스펙의 매직
+   바이트·2400×1260 은 그림이 하나도 인라인되지 않은 카드도 그대로 통과한다(html-to-image 는
+   fetch 실패를 빈 src 로 삼킨다 — 그 성질이 이 이슈가 열린 이유였다, ADR-0028). 이 저장소가 같은
+   자리에서 두 번 데었다: 옛 Satori 카드의 "…" 두부와 CRC 깨진 팬아트 픽스처(ADR-0030) 둘 다
+   게이트 전부 초록이었다.
+
+   그래서 **받은 파일의 픽셀을 직접 찍는다.** 단색 픽스처를 올려 그 색이 팬아트 자리에 있는지
+   보고, 같은 프레임에서 목록 자리는 그 색이 **아닌지**도 본다(그림이 카드를 덮어 버린 경우를
+   가른다 — 색 하나만 보면 통째로 초록인 PNG 도 통과한다).
+
+   좌표는 하드코딩하지 않고 화면에서 잰다: 미리보기는 CSS transform 으로 축소돼 있으므로
+   `getBoundingClientRect` 가 아니라 **레이아웃 오프셋**(offsetLeft/offsetTop)을 카드까지 더해
+   올린 뒤 PIXEL_RATIO(2)를 곱한다. 사진지가 1.1° 기울어 있지만 회전 중심 근처를 찍으므로
+   변위가 1px 미만이다(사진지 중심에서 그림 중심까지 약 13px — 실측 0.25px). */
+const SOLID_FANART = fileURLToPath(new URL("./fixtures/fanart-solid-600x800.png", import.meta.url));
+// 픽스처의 단색. 손으로 인코딩한 600×800 truecolor PNG(CRC 검증·브라우저 디코드 확인).
+const SOLID_RGB = [0, 176, 132];
+const PIXEL_RATIO = 2; // week-card-download.tsx 가 못박은 값
+
+test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 그림이 있다", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 읽는 먼 미래 주(D1 픽스처를 공유하므로 — AGENTS).
+  await page.goto("/schedule?week=2033-01-10");
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("팬아트 카드 항목");
+
+  await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(SOLID_FANART);
+  await expect(page.locator('[data-od-id="schedule-fanart-thumb"]')).toBeVisible();
+  await page.locator('[data-od-id="schedule-fanart-credit"]').fill("e2e 그린 사람");
+
+  await page.locator('[data-od-id="schedule-save"]').click();
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+  await publishNow(page);
+
+  // 카드가 팬아트 모양으로 서고 표기까지 실린다(그림이 실제로 로드된 뒤에 찍는다).
+  const card = page.locator('[data-od-id="week-card"]');
+  await expect(card).toHaveClass(/week-card--art/);
+  await expect(card).toContainText("e2e 그린 사람");
+  await expect(card.locator(".week-card__art-img")).toBeVisible();
+
+  // 찍을 두 점(카드 좌표계) — 그림 중앙과 목록 첫 행 중앙.
+  const points = await page.evaluate(() => {
+    const cardEl = document.querySelector('[data-od-id="week-card"]') as HTMLElement;
+    const offsetIn = (el: HTMLElement) => {
+      let x = 0;
+      let y = 0;
+      for (let n: HTMLElement | null = el; n && n !== cardEl; n = n.offsetParent as HTMLElement) {
+        x += n.offsetLeft;
+        y += n.offsetTop;
+      }
+      return { x, y };
+    };
+    const center = (el: HTMLElement) => {
+      const o = offsetIn(el);
+      return { x: Math.round(o.x + el.offsetWidth / 2), y: Math.round(o.y + el.offsetHeight / 2) };
+    };
+    return {
+      art: center(cardEl.querySelector(".week-card__art-img") as HTMLElement),
+      row: center(cardEl.querySelector(".week-card__day") as HTMLElement),
+    };
+  });
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator('[data-od-id="week-card-download-btn"]').click(),
+  ]);
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const buf = readFileSync(path!);
+  expect(buf.readUInt32BE(16)).toBe(1200 * PIXEL_RATIO);
+
+  const art = await samplePng(page, buf, {
+    x: points.art.x * PIXEL_RATIO,
+    y: points.art.y * PIXEL_RATIO,
+  });
+  const row = await samplePng(page, buf, {
+    x: points.row.x * PIXEL_RATIO,
+    y: points.row.y * PIXEL_RATIO,
+  });
+
+  /* 색 관리가 채널을 한두 단위 흔들 수 있어 허용 오차를 둔다 — 그림이 없을 때 그 자리는 종이
+     흰색(255,255,255)이라 이 오차로는 절대 안 맞는다(채널당 최소 79 차이). */
+  for (const [i, want] of SOLID_RGB.entries()) {
+    expect(Math.abs(art[i]! - want)).toBeLessThanOrEqual(6);
+  }
+  // 목록 자리는 그 색이 아니다 — 그림이 카드를 덮은 경우를 가른다.
+  expect(Math.abs(row[0]! - SOLID_RGB[0]!) > 6 || Math.abs(row[1]! - SOLID_RGB[1]!) > 6).toBe(true);
 });
 
 /* 발행/저장 분리(이슈 #56 결정 14 개정, 2026-07-28). 비공개 전환은 저장과 달리 dirty 여도
