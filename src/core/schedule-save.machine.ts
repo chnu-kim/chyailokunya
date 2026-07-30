@@ -72,7 +72,8 @@ function blankTitleMessage(entry: DraftEntry): string {
    `ready` 상태로 돌아오므로 시점만으론 못 가른다).
 
    ── 팬아트 업로드는 세 번째 submit 자식이다(ADR-0028, 이슈 #120 PR 2) ────────────────
-   파일 바이트가 `POST /api/fanart` 로 나가 `{ key }` 를 받는 비동기 왕복이고, 진행·실패·성공이
+   파일 바이트가 `POST /api/fanart` 로 나가 `{ key, width, height }` 를 받는 비동기 왕복이고,
+   진행·실패·성공이
    갈리며 성공값이 **draft 에 반영돼야** 한다 — 위 두 자식과 정확히 같은 모양이라 새 머신을
    만들지 않고 자식을 하나 더 얹는다(AGENTS 의 8종 머신 표에서 "수명·공유 범위가 비슷한 자리를
    찾아 따라간다"). 루트에 두는 이유도 같다: 관리자가 한 화면에서 그림을 여러 번 바꿀 수 있다.
@@ -118,9 +119,11 @@ export type SaveWeekValues = {
 
 /* 업로드 자식이 실어 보낼 값과 받아 올 결과. `Blob` 은 workerd·브라우저 공통 전역이라
    core/fanart.ts 의 `Uint8Array` 와 같은 급의 런타임 중립 타입이다 — 이 파일은 여전히 HTTP 를
-   모르고, 실제 POST 와 치수 판독은 호출자가 준 `uploadRun` 안에 있다.
+   모르고, 실제 POST 는 호출자가 준 `uploadRun` 안에 있다.
 
-   치수가 nullable 인 이유: 브라우저가 그 파일을 못 디코드하면 못 읽는다. 그때도 **키는 살린다**
+   **치수는 업로드 응답이 준다**(ADR-0030) — 라우트가 픽셀 가드로 헤더를 읽을 때 이미 손에 있는
+   값이라 공짜이고, 그러면 화면이 파일을 다시 디코드하지 않는다. nullable 로 남겨 둔 이유는 그
+   응답 shape 이 바뀌거나(옛 배포) 다른 호출자가 붙을 때 **키만이라도 살리는** 쪽이 맞기 때문이다
    — 그림을 못 거는 것보다 자리 예약 없이 그리는 편이 낫다(db/schema.ts). */
 export type FanartUploadValues = { file: Blob };
 export type FanartUploadResult = {

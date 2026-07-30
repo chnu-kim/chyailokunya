@@ -51,8 +51,8 @@ export type WeekDraft = {
      결과**라 "없음"을 빈 문자열로 흉내 낼 이유가 없다. 치수도 같은 결이다(파일에서 읽은 값). */
   fanartImageKey: string | null;
   fanartCredit: string;
-  /* 키와 **함께만** 움직인다 — 업로드가 새 키와 함께 세우고 내리기가 함께 지운다. 브라우저가
-     파일을 못 디코드하면 키만 있고 이 둘은 null 이다(읽기 화면이 자리 예약 없이 그린다). */
+  /* 키와 **함께만** 움직인다 — 업로드 응답이 새 키와 함께 주고 내리기가 함께 지운다. 0013
+     이전에 걸린 그림은 키만 있고 이 둘은 null 이다(읽기 화면이 자리 예약 없이 그린다). */
   fanartImageWidth: number | null;
   fanartImageHeight: number | null;
 };

@@ -6,19 +6,21 @@
    없고, `request.formData()` 는 경계 문자열을 훑는 만큼 CPU 를 더 쓴다. 클라이언트는
    `fetch(…, { method: "POST", body: file })` 한 줄이면 된다.
 
-   성공하면 `{ key }` 만 돌려준다 — 이 라우트는 **바이트만 맡는다.** 그 키가 어느 주에 걸리는지는
-   저장 뮤테이션(saveWeek)의 일이다. 그래서 업로드했지만 저장 안 한 객체가 남을 수 있다(고아) —
+   성공하면 `{ key, width, height }` 를 돌려준다 — 이 라우트는 **바이트만 맡는다.** 그 키가 어느
+   주에 걸리는지는 저장 뮤테이션(saveWeek)의 일이다. 치수를 함께 싣는 이유는 아래 응답 주석에
+   있다(픽셀 가드가 이미 헤더에서 읽어 뒀으므로 공짜다). 그래서 업로드했지만 저장 안 한 객체가 남을 수 있다(고아) —
    ADR-0028 이 고른 실패 방향이다. 반대(행이 가리키는 키가 없는 상태)는 그림이 깨진다. */
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import {
   FANART_MAX_BYTES,
+  FANART_MAX_DIMENSION,
   FANART_MAX_PIXELS,
   fanartContentType,
   fanartKey,
   fanartObjectKey,
+  isFanartSizeAcceptable,
   isOverFanartLimit,
-  isOverPixelBudget,
   readImageDimensions,
   sniffImageType,
 } from "@/core/fanart";
@@ -124,10 +126,10 @@ export async function POST(req: Request) {
       { status: 415 },
     );
   }
-  if (isOverPixelBudget(size.width, size.height)) {
+  if (!isFanartSizeAcceptable(size.width, size.height)) {
     return Response.json(
       {
-        error: `그림의 화소가 너무 많습니다(${size.width}×${size.height}). ${FANART_MAX_PIXELS / 1_000_000}백만 화소 이하로 줄여 올려 주십시오.`,
+        error: `그림이 너무 큽니다(${size.width}×${size.height}). ${FANART_MAX_PIXELS / 1_000_000}백만 화소 이하, 한 변 ${FANART_MAX_DIMENSION}px 이하로 줄여 올려 주십시오.`,
       },
       { status: 413 },
     );
@@ -138,5 +140,12 @@ export async function POST(req: Request) {
     httpMetadata: { contentType: fanartContentType(type) },
   });
 
-  return Response.json({ key }, { status: 201 });
+  /* **치수를 함께 돌려준다.** 위 가드가 이미 헤더에서 읽어 뒀으므로 공짜인데, 안 실으면 화면이
+     `createImageBitmap` 으로 **전체를 다시 디코드**한다 — 예산 안(40MP)이어도 160MB 비트맵이라
+     관리자 탭에 이 가드가 막으려던 것과 같은 급의 할당이 생긴다(적대적 리뷰 5라운드).
+
+     그래서 팬아트 치수는 **서버가 헤더에서 읽은 값**이 정본이 된다(ADR-0030). 위 판정이 저장
+     경계와 같은 두 상한을 보므로 "업로드가 통과시킨 치수는 저장도 통과한다" — 화면은 이 값을
+     그대로 저장 페이로드에 싣기만 한다. */
+  return Response.json({ key, width: size.width, height: size.height }, { status: 201 });
 }

@@ -181,6 +181,18 @@ describe("POST /api/fanart — 본문 판정", () => {
     expect((await env.FANART.list({ prefix: "fanart/" })).objects.length).toBe(before);
   });
 
+  it("한 변 상한을 넘으면 413 — 픽셀 예산은 통과하는 조합이다", async () => {
+    /* 20001×1 은 2만 화소라 예산 안이지만 저장 Zod 가 거절한다. 업로드에서 같이 안 보면 "업로드는
+       성공하고 그림은 어디에도 못 걸리는" 상태가 되어 화면이 그 이유를 설명할 수 없다. */
+    const wide = new Uint8Array(24);
+    wide.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    wide.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
+    const v = new DataView(wide.buffer);
+    v.setUint32(16, 20001);
+    v.setUint32(20, 1);
+    expect((await upload(wide)).status).toBe(413);
+  });
+
   it("헤더를 못 읽으면 415 — 치수 힌트와 반대로 fail-closed 다", async () => {
     /* 통과시키면 위 폭탄 방어에 우회로가 생긴다. 매직 바이트를 이미 지난 파일이므로 "그 형식이라고
        주장하는데 헤더가 규격과 다르다"는 뜻이고, 그런 파일은 브라우저도 못 그린다. */
@@ -192,7 +204,15 @@ describe("POST /api/fanart — 본문 판정", () => {
     const res = await upload(PNG);
 
     expect(res.status).toBe(201);
-    const { key } = (await res.json()) as { key: string };
+    const { key, width, height } = (await res.json()) as {
+      key: string;
+      width: number;
+      height: number;
+    };
+    /* **치수도 응답에 실린다**(ADR-0030) — 픽셀 가드가 헤더에서 이미 읽었으므로 공짜인데, 안
+       실으면 화면이 `createImageBitmap` 으로 전체를 다시 디코드해 관리자 탭에 그 가드가 막으려던
+       것과 같은 급의 할당이 생긴다(적대적 리뷰 5라운드). 픽스처는 8×8 이다. */
+    expect({ width, height }).toEqual({ width: 8, height: 8 });
     expect(isFanartKey(key)).toBe(true);
     // DB 엔 URL 이 아니라 키만 담긴다(ADR-0028) — 키가 호스트를 표현할 문법이 없어야 한다.
     expect(key).not.toContain("/");

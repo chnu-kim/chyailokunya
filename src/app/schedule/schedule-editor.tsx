@@ -9,7 +9,7 @@ import {
   fanartUploadErrorText,
   isAborted,
 } from "@/core/error-message";
-import { FANART_IMAGE_TYPES, readFanartImageSize } from "@/core/fanart";
+import { FANART_IMAGE_TYPES } from "@/core/fanart";
 import {
   dayOf,
   draftDayInputs,
@@ -19,7 +19,7 @@ import {
   type DraftEntry,
   type WeekDraft,
 } from "@/core/schedule-editor";
-import { scheduleSaveMachine } from "@/core/schedule-save.machine";
+import { scheduleSaveMachine, type FanartUploadResult } from "@/core/schedule-save.machine";
 import type { GameOption } from "@/features/games/service";
 import { buildWeekCard } from "@/features/schedule/card";
 import type { WeekView } from "@/features/schedule/service";
@@ -141,11 +141,12 @@ export function ScheduleEditor({
       uploadRun: async ({ file }, signal) => {
         const res = await fetch("/api/fanart", { method: "POST", body: file, signal });
         if (!res.ok) throw new FanartUploadFailed(res.status, await fanartUploadErrorText(res));
-        const { key } = (await res.json()) as { key: string };
-        /* 치수는 **업로드가 성공한 뒤** 읽는다 — 형식 판정을 서버가 이미 했으므로, 여기서
-           실패하면 "우리가 안 받는 형식"이 아니라 "브라우저가 못 그리는 파일"이고 그때도
-           키는 살린다(core/fanart 의 readFanartImageSize 주석). */
-        return { key, ...(await readFanartImageSize(file)) };
+        /* **치수도 서버가 준다** — 픽셀 가드가 헤더에서 이미 읽었으므로 공짜다(라우트 주석).
+           한때 여기서 `createImageBitmap` 으로 다시 읽었는데, 그건 예산 안(40MP)인 그림도
+           160MB 비트맵으로 **관리자 탭에서 디코드**하는 일이라 그 가드가 막으려던 것과 같은
+           급의 할당이었다(적대적 리뷰 5라운드). 서버 값을 쓰면 그 비용이 0 이고, 못 읽는
+           브라우저에서 치수가 사라지던 저하 경로도 함께 없어진다. */
+        return (await res.json()) as FanartUploadResult;
       },
       mapError: saveErrorMessage,
       mapUploadError: fanartUploadErrorMessage,

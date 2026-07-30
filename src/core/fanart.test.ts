@@ -9,9 +9,7 @@ import {
   fanartObjectKey,
   isFanartKey,
   isOverFanartLimit,
-  isOverPixelBudget,
-  normalizeFanartSize,
-  readFanartImageSize,
+  isFanartSizeAcceptable,
   readImageDimensions,
   sniffImageType,
 } from "./fanart";
@@ -158,44 +156,9 @@ describe("isOverFanartLimit", () => {
   });
 });
 
-describe("normalizeFanartSize", () => {
-  /* 치수는 **레이아웃 힌트라 fail-open** 이다(ADR-0028·db/schema.ts). 그래서 이 함수의 일은
-     "믿을 수 없는 값을 거절하는 것"이 아니라 **저장할 수 있는 쌍만 통과시키고 나머지는 쌍째로
-     버리는 것**이다 — 반쪽을 보내면 저장 경계가 그림까지 거절해, 힌트 하나 때문에 업로드가
-     통째로 무의미해진다. 화면이 못 읽는 경우(디코드 실패)와 상한 초과가 같은 결과로 접힌다. */
-  it("온전한 쌍만 통과한다", () => {
-    expect(normalizeFanartSize(1200, 1600)).toEqual({ width: 1200, height: 1600 });
-    expect(normalizeFanartSize(1, 1)).toEqual({ width: 1, height: 1 });
-    expect(normalizeFanartSize(FANART_MAX_DIMENSION, FANART_MAX_DIMENSION)).toEqual({
-      width: FANART_MAX_DIMENSION,
-      height: FANART_MAX_DIMENSION,
-    });
-  });
-
-  it("한쪽이라도 못 쓰는 값이면 쌍째로 버린다", () => {
-    // 상한을 **넘으면 그림을 못 거는 게 아니라 예약을 포기한다** — 저장 Zod 와 같은 값을 본다.
-    expect(normalizeFanartSize(FANART_MAX_DIMENSION + 1, 600)).toEqual({
-      width: null,
-      height: null,
-    });
-    expect(normalizeFanartSize(800, 0)).toEqual({ width: null, height: null });
-    expect(normalizeFanartSize(-1, 600)).toEqual({ width: null, height: null });
-    // 디코드 실패(둘 다 null)와 반쪽만 읽힌 경우가 같은 결과로 접힌다.
-    expect(normalizeFanartSize(null, null)).toEqual({ width: null, height: null });
-    expect(normalizeFanartSize(800, null)).toEqual({ width: null, height: null });
-    expect(normalizeFanartSize(undefined, undefined)).toEqual({ width: null, height: null });
-    // 소수·NaN 은 정수가 아니다(브라우저는 정수를 주지만 계약을 코드에 적어 둔다).
-    expect(normalizeFanartSize(800.5, 600)).toEqual({ width: null, height: null });
-    expect(normalizeFanartSize(NaN, 600)).toEqual({ width: null, height: null });
-  });
-});
-
-/* 형식별 헤더에서 치수를 읽는 순수 함수(적대적 리뷰 2라운드). **이 판정이 폭탄 방어의 전부라**
-   경계를 여기서 못박는다 — 라우트는 이 결과로 거절만 한다.
-
-   픽스처를 손으로 조립하는 이유: 규격이 앞머리에 못박은 정수를 읽는 것이므로 **헤더만 정확하면
-   충분하다.** 실제 폭탄 파일도 이 헤더를 갖는다(그래서 수 KB 로 수억 픽셀을 주장할 수 있는
-   것이다) — 거대한 픽셀 데이터를 만들 필요가 없고, 그게 이 방어가 싼 이유이기도 하다. */
+/* 형식별 헤더 픽스처를 손으로 조립한다 — 규격이 앞머리에 못박은 정수를 읽는 것이므로 **헤더만
+   정확하면 충분하다.** 실제 폭탄 파일도 이 헤더를 갖는다(그래서 수 KB 로 수억 픽셀을 주장할 수
+   있다) — 거대한 픽셀 데이터를 만들 필요가 없고, 그게 이 방어가 싼 이유이기도 하다. */
 function pngWith(width: number, height: number): Uint8Array {
   const b = new Uint8Array(24);
   b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
@@ -295,36 +258,37 @@ describe("readImageDimensions", () => {
   });
 });
 
-describe("isOverPixelBudget", () => {
-  /* **바이트 상한이 못 막는 축이다.** 단색 20000×20000 PNG 는 5MB 안에 들어가는데 디코드하면
-     1.6GB 다 — 그 주를 여는 방문자 탭이 죽는다(적대적 리뷰 2라운드가 잡은 자리). */
-  it("한 변 상한만으로는 못 막는 조합을 잡는다", () => {
+describe("isFanartSizeAcceptable", () => {
+  /* 업로드 라우트가 이 하나로 판정한다 — **두 상한이 다른 것을 막는다:** 픽셀 예산은 방문자
+     브라우저의 디코드 메모리, 한 변 상한은 저장 경계(Zod)가 거는 값이다. 함께 안 보면 계약이
+     갈려 "업로드는 성공하고 저장이 죽는" 조합이 생긴다. */
+  it("한 변 상한만으로는 못 막는 조합을 픽셀 예산이 잡는다", () => {
     // 19000×19000 = 361MP — 두 변 모두 FANART_MAX_DIMENSION 아래인데 예산을 40배 넘는다.
     expect(19000).toBeLessThan(FANART_MAX_DIMENSION);
-    expect(isOverPixelBudget(19000, 19000)).toBe(true);
+    expect(isFanartSizeAcceptable(19000, 19000)).toBe(false);
+  });
+
+  it("픽셀 예산만으로는 못 막는 조합을 한 변 상한이 잡는다", () => {
+    /* 20001×1 은 2만 화소라 예산을 통과하는데 저장 Zod 가 거절한다 — 여기서 같이 안 보면
+       업로드가 통과시킨 그림이 어디에도 못 걸린다(그 상태를 화면은 설명할 수 없다). */
+    expect(20001 * 1).toBeLessThan(FANART_MAX_PIXELS);
+    expect(isFanartSizeAcceptable(FANART_MAX_DIMENSION + 1, 1)).toBe(false);
+    expect(isFanartSizeAcceptable(1, FANART_MAX_DIMENSION + 1)).toBe(false);
   });
 
   it("실사용 크기는 통과하고 경계는 정확하다", () => {
-    expect(isOverPixelBudget(6000, 6000)).toBe(false); // 36MP — 큰 일러스트 원본
-    expect(isOverPixelBudget(1200, 1600)).toBe(false);
-    expect(isOverPixelBudget(FANART_MAX_PIXELS, 1)).toBe(false); // 정확히 상한은 허용
-    expect(isOverPixelBudget(FANART_MAX_PIXELS + 1, 1)).toBe(true);
-  });
-});
-
-describe("readFanartImageSize", () => {
-  /* **못 읽어도 던지지 않는다** — 치수는 레이아웃 힌트라, 없으면 예약 없이 그리는 저하로 끝나지만
-     던지면 그림 자체를 못 건다(ADR-0030). workerd 엔 `createImageBitmap` 이 없어서 이 테스트가
-     그 저하 갈래를 **실제로 탄다** — 구형 브라우저에서 나는 것과 같은 경로다. */
-  it("createImageBitmap 이 없거나 실패하면 쌍째로 null 을 준다", async () => {
-    const blob = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" });
-    await expect(readFanartImageSize(blob)).resolves.toEqual({ width: null, height: null });
+    expect(isFanartSizeAcceptable(6000, 6000)).toBe(true); // 36MP — 큰 일러스트 원본
+    expect(isFanartSizeAcceptable(1200, 1600)).toBe(true);
+    expect(isFanartSizeAcceptable(FANART_MAX_DIMENSION, 2000)).toBe(true); // 한 변 정확히 상한
+    expect(isFanartSizeAcceptable(FANART_MAX_PIXELS, 1)).toBe(false); // 한 변이 상한을 넘는다
+    expect(isFanartSizeAcceptable(8000, 5000)).toBe(true); // 40MP 정확히
+    expect(isFanartSizeAcceptable(8000, 5001)).toBe(false);
   });
 
-  it("빈 Blob 도 같은 저하로 떨어진다 — 업로드를 실패로 만들지 않는다", async () => {
-    await expect(readFanartImageSize(new Blob([]))).resolves.toEqual({
-      width: null,
-      height: null,
-    });
+  it("0·음수·소수는 치수가 아니다 — 곱셈이 예산 판정을 우회한다", () => {
+    expect(isFanartSizeAcceptable(0, 1000)).toBe(false);
+    expect(isFanartSizeAcceptable(-1, 1000)).toBe(false);
+    expect(isFanartSizeAcceptable(800.5, 600)).toBe(false);
+    expect(isFanartSizeAcceptable(NaN, 600)).toBe(false);
   });
 });
