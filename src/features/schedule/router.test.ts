@@ -824,13 +824,17 @@ describe("팬아트", () => {
      어댑터가 필요 없다(service 의 FanartObjectStore). 기본은 **아무거나 있다고 답한다** —
      대부분의 테스트가 재려는 건 존재 확인이 아니라 조합·정리라, 매번 업로드를 흉내 내게 하면
      의도가 흐려진다. 존재 확인을 재는 테스트만 `present` 를 좁혀 준다. */
-  function fanartSpy(present?: Set<string>) {
+  function fanartSpy(present?: Set<string>, meta?: Record<string, string>) {
     const deleted: string[] = [];
+    /* `head` 가 **customMetadata 를 함께 준다** — 업로드가 헤더에서 읽은 치수를 거기 묶고 저장
+       경로가 그 값을 정본으로 읽는다(ADR-0030). 기본은 메타 없음이라 "이 가드 이전에 올라간
+       객체"와 같은 상태다(치수 없이 저장된다). */
+    const object = meta === undefined ? {} : { customMetadata: meta };
     return {
       deleted,
       store: {
         delete: async (key: string) => void deleted.push(key),
-        head: async (key: string) => (present ? (present.has(key) ? {} : null) : {}),
+        head: async (key: string) => (present ? (present.has(key) ? object : null) : object),
       },
     };
   }
@@ -1128,50 +1132,60 @@ describe("팬아트", () => {
   /* 치수(읽기 화면의 자리 예약). 표기와 같은 규약을 따르지만 **한 쌍**이라는 조건이 더 붙는다 —
      반쪽 조합은 DB CHECK 가 batch 를 죽인다(그 시점엔 revision 이 이미 올라 편집기가 이유 없는
      CONFLICT 를 본다). 아래가 그 조합들을 하나씩 못박는다. */
-  it("치수를 함께 저장하고 되읽는다", async () => {
-    const caller = createCaller(makeCtx({ authorities: admin }));
+  it("치수는 R2 객체 메타에서 읽어 저장한다 — 클라이언트가 못 정한다", async () => {
+    /* 업로드가 헤더에서 읽어 객체에 묶어 둔 값이 정본이다(ADR-0030, 적대적 리뷰 9라운드).
+       클라이언트가 치수를 보내도 Zod 가 그 키를 떼어 내므로(스키마에 없다) 저장에 영향이 없다 —
+       그게 불변식 2 를 이 필드에서 지키는 방식이다. */
+    const spy = fanartSpy(undefined, { w: "1200", h: "1600" });
+    const caller = createCaller(makeCtx({ authorities: admin, fanart: spy.store }));
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       days: [],
       entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
       fanartImageKey: KEY_A,
-      fanartImageWidth: 1200,
-      fanartImageHeight: 1600,
+      // 위조 시도: 스키마에 없는 키라 경계에서 떨어진다.
+      ...({ fanartImageWidth: 10, fanartImageHeight: 10 } as Record<string, number>),
     });
     const week = await caller.schedule.getWeek({ weekStartDate: MON });
     expect(week.fanartImageWidth).toBe(1200);
     expect(week.fanartImageHeight).toBe(1600);
   });
 
-  it("치수 없이 그림만 저장하는 것은 정상이다 — 브라우저가 못 읽은 파일이 그 경로다", async () => {
-    /* 치수를 필수로 걸면 그때 저장이 통째로 막혀 "그림은 올라갔는데 어느 주에도 걸 수 없다"가
-       된다. 예약 없이 그리는 저하가 맞다(db/schema.ts 의 nullable 근거) — 그 저하 경로가 실제로
-       열려 있는지 여기서 못박는다. */
-    const caller = createCaller(makeCtx({ authorities: admin }));
-    await saveWeekAsEditor(caller, {
-      weekStartDate: MON,
-      days: [],
-      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
-      fanartImageKey: KEY_A,
-      fanartImageWidth: null,
-      fanartImageHeight: null,
-    });
-    const week = await caller.schedule.getWeek({ weekStartDate: MON });
-    expect(week.fanartImageKey).toBe(KEY_A);
-    expect(week.fanartImageWidth).toBeNull();
-    expect(week.fanartImageHeight).toBeNull();
+  it("메타가 없거나 못 쓸 값이면 치수 없이 저장한다 — 그림은 걸린다", async () => {
+    /* 이 가드 이전에 올라간 객체가 그 경로다(프로덕션엔 0건이지만 계약으로 열어 둔다). 치수는
+       레이아웃 힌트라 없으면 예약 없이 그리고, 그림을 못 거는 것보다 그게 낫다(ADR-0030). */
+    for (const meta of [undefined, { w: "0", h: "600" }, { w: "abc", h: "600" }]) {
+      const spy = fanartSpy(undefined, meta);
+      const caller = createCaller(makeCtx({ authorities: admin, fanart: spy.store }));
+      await saveWeekAsEditor(caller, {
+        weekStartDate: MON,
+        days: [],
+        entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+        fanartImageKey: KEY_A,
+      });
+      const week = await caller.schedule.getWeek({ weekStartDate: MON });
+      expect(week.fanartImageKey).toBe(KEY_A);
+      expect(week.fanartImageWidth).toBeNull();
+      expect(week.fanartImageHeight).toBeNull();
+      // 다음 회차를 위해 그림을 내린다(같은 주를 재사용한다).
+      await saveWeekAsEditor(caller, {
+        weekStartDate: MON,
+        days: [],
+        entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+        fanartImageKey: null,
+      });
+    }
   });
 
   it("안 보낸 저장은 기존 치수를 유지하고, 그림을 내리면 치수도 사라진다", async () => {
-    const caller = createCaller(makeCtx({ authorities: admin }));
+    const spy = fanartSpy(undefined, { w: "800", h: "600" });
+    const caller = createCaller(makeCtx({ authorities: admin, fanart: spy.store }));
     const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
     await saveWeekAsEditor(caller, {
       weekStartDate: MON,
       days: [],
       entries,
       fanartImageKey: KEY_A,
-      fanartImageWidth: 800,
-      fanartImageHeight: 600,
     });
     // 팬아트 칸을 아예 안 싣는다(이 필드를 모르는 옛 클라이언트가 보내는 모양).
     await saveWeekAsEditor(caller, { weekStartDate: MON, days: [], entries });
@@ -1191,89 +1205,30 @@ describe("팬아트", () => {
     expect(week.fanartImageHeight).toBeNull();
   });
 
-  it("그림을 바꾸면 옛 치수를 안 물려준다 — 예약한 자리와 비율이 어긋난다", async () => {
-    const caller = createCaller(makeCtx({ authorities: admin }));
+  it("그림을 바꾸면 새 객체의 치수를 쓴다 — 옛 치수를 안 물려준다", async () => {
+    /* 예약한 자리와 실제 비율이 달라 레이아웃이 튀는 것을 막는다(표기의 "잘못된 귀속"과 같은 결).
+       키가 바뀔 때만 head 를 부르므로 그 응답의 메타가 곧 새 치수다. */
+    const spyA = fanartSpy(undefined, { w: "800", h: "600" });
+    const callerA = createCaller(makeCtx({ authorities: admin, fanart: spyA.store }));
     const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
-    await saveWeekAsEditor(caller, {
+    await saveWeekAsEditor(callerA, {
       weekStartDate: MON,
       days: [],
       entries,
       fanartImageKey: KEY_A,
-      fanartImageWidth: 800,
-      fanartImageHeight: 600,
     });
-    // 새 그림만 싣는다(치수 생략) — 세로 긴 그림에 가로 비율이 붙으면 화면이 튄다.
-    await saveWeekAsEditor(caller, {
+
+    // 다른 그림으로 교체 — 그 객체의 메타는 세로형이다.
+    const spyB = fanartSpy(undefined, { w: "1200", h: "1600" });
+    const callerB = createCaller(makeCtx({ authorities: admin, fanart: spyB.store }));
+    await saveWeekAsEditor(callerB, {
       weekStartDate: MON,
       days: [],
       entries,
       fanartImageKey: KEY_B,
     });
-    let week = await caller.schedule.getWeek({ weekStartDate: MON });
-    expect(week.fanartImageWidth).toBeNull();
-    expect(week.fanartImageHeight).toBeNull();
-
-    // 새 치수를 함께 보내면 그 값이 쓰인다(화면이 하는 일이다).
-    await saveWeekAsEditor(caller, {
-      weekStartDate: MON,
-      days: [],
-      entries,
-      fanartImageKey: KEY_A,
-      fanartImageWidth: 1200,
-      fanartImageHeight: 1600,
-    });
-    week = await caller.schedule.getWeek({ weekStartDate: MON });
+    const week = await callerB.schedule.getWeek({ weekStartDate: MON });
     expect(week.fanartImageWidth).toBe(1200);
     expect(week.fanartImageHeight).toBe(1600);
-  });
-
-  it("반쪽 치수·그림 없는 치수·상한 초과는 경계에서 거절한다", async () => {
-    const caller = createCaller(makeCtx({ authorities: admin }));
-    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
-    const bad: Parameters<typeof saveWeekAsEditor>[1][] = [
-      // 폭만 — 예약 계산이 성립하지 않는다.
-      { weekStartDate: MON, days: [], entries, fanartImageKey: KEY_A, fanartImageWidth: 800 },
-      // 높이만.
-      { weekStartDate: MON, days: [], entries, fanartImageKey: KEY_A, fanartImageHeight: 600 },
-      // 한쪽만 null — "함께 있거나 함께 없다"를 깬다.
-      {
-        weekStartDate: MON,
-        days: [],
-        entries,
-        fanartImageKey: KEY_A,
-        fanartImageWidth: 800,
-        fanartImageHeight: null,
-      },
-      // 그림을 지우면서 치수를 싣는다 — 가리킬 그림이 없다.
-      {
-        weekStartDate: MON,
-        days: [],
-        entries,
-        fanartImageKey: null,
-        fanartImageWidth: 800,
-        fanartImageHeight: 600,
-      },
-      // 상한 초과 — 거대한 정수가 img 속성에 실리면 그림 한 장이 화면을 밀어낸다.
-      {
-        weekStartDate: MON,
-        days: [],
-        entries,
-        fanartImageKey: KEY_A,
-        fanartImageWidth: 20001,
-        fanartImageHeight: 600,
-      },
-      // 0 이하 — 비율 계산이 깨진다(DB CHECK 와 같은 규칙).
-      {
-        weekStartDate: MON,
-        days: [],
-        entries,
-        fanartImageKey: KEY_A,
-        fanartImageWidth: 0,
-        fanartImageHeight: 600,
-      },
-    ];
-    for (const input of bad) {
-      await expect(saveWeekAsEditor(caller, input)).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    }
   });
 });

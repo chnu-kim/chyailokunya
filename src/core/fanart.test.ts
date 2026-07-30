@@ -392,7 +392,19 @@ describe("isAnimatedImage", () => {
     expect(isAnimatedImage(apng(), "png")).toBe(true);
   });
 
-  it("acTL 앞에 청크가 아무리 많아도 잡는다 — 순회 상한을 두면 그 자리가 통과한다", () => {
+  it("스캔 예산을 소진하면 거절 쪽으로 떨어진다 — 방어에 우회로를 남기지 않는다", () => {
+    /* 길이 0 청크를 예산(4096)보다 많이 앞세운 파일. 통과시키면 청크를 잔뜩 넣은 APNG 가 방어를
+       우회하고, 파일 끝까지 훑으면 회당 할당이 10ms CPU 한도를 먹는다(GitHub codex 리뷰 P1 —
+       이 저장소는 그 한도로 프로덕션 인시던트를 냈다). 두 실패 사이의 답이 fail-closed 다. */
+    const head = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    const ihdr = [0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, ...Array(13).fill(0), 0, 0, 0, 0];
+    const filler = Array.from({ length: 5000 }, () => [
+      0, 0, 0, 0, 0x74, 0x45, 0x58, 0x74, 0, 0, 0, 0,
+    ]).flat();
+    expect(isAnimatedImage(new Uint8Array([...head, ...ihdr, ...filler]), "png")).toBe(true);
+  });
+
+  it("acTL 앞에 청크가 많아도 예산 안이면 잡는다 — 유효한 APNG 를 놓치지 않는다", () => {
     /* 처음엔 32 청크로 잘랐는데, **유효한 APNG 가 그보다 많은 ancillary 청크를 acTL 앞에 둘 수
        있다** — 상한에 걸려 "정적"으로 통과했다(GitHub codex 리뷰 P2). 60개를 앞세워 그 회귀를
        못박는다(되돌리면 빨개진다). */

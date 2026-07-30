@@ -51,10 +51,9 @@ export type WeekDraft = {
      결과**라 "없음"을 빈 문자열로 흉내 낼 이유가 없다. 치수도 같은 결이다(파일에서 읽은 값). */
   fanartImageKey: string | null;
   fanartCredit: string;
-  /* 키와 **함께만** 움직인다 — 업로드 응답이 새 키와 함께 주고 내리기가 함께 지운다. 0013
-     이전에 걸린 그림은 키만 있고 이 둘은 null 이다(읽기 화면이 자리 예약 없이 그린다). */
-  fanartImageWidth: number | null;
-  fanartImageHeight: number | null;
+  /* **치수는 여기 없다.** 업로드가 R2 객체 메타에 묶고 저장 경로가 거기서 읽으므로(ADR-0030)
+     화면은 그 값을 만들지도, 보내지도 않는다 — 편집기가 쓰는 미리보기는 CSS 고정 슬롯이라
+     치수를 필요로 하지 않는다. 읽기 화면만 `WeekView` 에서 받아 자리를 예약한다. */
 };
 
 /* 그 날짜의 속성. 키가 없으면 기본값 — "행이 없는 것 = 기본값"을 클라이언트에서도 그대로 쓴다. */
@@ -201,12 +200,9 @@ export function isWeekDirty(a: WeekDraft, b: WeekDraft): boolean {
   if (canonicalDays(a) !== canonicalDays(b)) return true;
   /* 팬아트도 같은 규칙이다 — **저장에 실리는 값은 전부 여기 든다**(위 하루 속성과 같은 자리).
      빼먹으면 그림을 올려도 저장 버튼이 안 열려 업로드한 객체가 어느 주에도 안 걸린다.
-     치수는 키와 함께만 바뀌어 키 비교가 이미 잡지만 그래도 적는다: "저장되는 값"이라는 규칙을
-     예외 없이 두는 편이, 나중에 치수만 바뀌는 경로가 생겼을 때 이 자리를 다시 안 놓친다. */
+     치수는 draft 에 없다 — 저장에 안 실리므로(ADR-0030) 이 판정의 대상이 아니다. */
   if (a.fanartImageKey !== b.fanartImageKey) return true;
   if (a.fanartCredit.trim() !== b.fanartCredit.trim()) return true;
-  if (a.fanartImageWidth !== b.fanartImageWidth) return true;
-  if (a.fanartImageHeight !== b.fanartImageHeight) return true;
   return canonicalEntries(a) !== canonicalEntries(b);
 }
 

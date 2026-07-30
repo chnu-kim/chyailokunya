@@ -30,8 +30,6 @@ function draft(over: Partial<WeekDraft> = {}): WeekDraft {
     days: {},
     fanartImageKey: null,
     fanartCredit: "",
-    fanartImageWidth: null,
-    fanartImageHeight: null,
     ...over,
   };
 }
@@ -249,20 +247,14 @@ describe("isWeekDirty — 저장하면 달라지는가", () => {
     ).toBe(true);
   });
 
-  it("팬아트 넷이 다 dirty 에 든다 — 하나라도 빼면 그림을 올려도 저장 버튼이 안 열린다", () => {
+  it("팬아트 둘이 다 dirty 에 든다 — 하나라도 빼면 그림을 올려도 저장 버튼이 안 열린다", () => {
     /* 업로드는 그 자체로 아무 주에도 안 걸린다(저장이 반영한다) — 그래서 이 판정이 안 잡으면
-       올린 객체가 어디에도 안 걸린 채 고아로 남는다. 하루 속성이 겪은 자리와 같다(이슈 #117). */
+       올린 객체가 어디에도 안 걸린 채 고아로 남는다. 하루 속성이 겪은 자리와 같다(이슈 #117).
+       **치수는 draft 에 없다**: 저장에 안 실리므로(ADR-0030) 이 판정의 대상이 아니다. */
     const KEY = "0189d1f0-3a4b-7c8d-9e0f-1a2b3c4d5e6f.png";
     const base = draft();
     expect(isWeekDirty(draft({ fanartImageKey: KEY }), base)).toBe(true);
     expect(isWeekDirty(draft({ fanartImageKey: KEY, fanartCredit: "그린 사람" }), base)).toBe(true);
-    // 치수만 다른 상태는 화면이 만들지 않지만(키와 함께 움직인다) 규칙에 예외를 두지 않는다.
-    expect(
-      isWeekDirty(draft({ fanartImageKey: KEY, fanartImageWidth: 800, fanartImageHeight: 600 }), {
-        ...base,
-        fanartImageKey: KEY,
-      }),
-    ).toBe(true);
 
     // 표기는 note 와 같은 trim 정규형이라 공백만 다른 값은 dirty 가 아니다.
     expect(

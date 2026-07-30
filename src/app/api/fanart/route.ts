@@ -6,9 +6,9 @@
    없고, `request.formData()` 는 경계 문자열을 훑는 만큼 CPU 를 더 쓴다. 클라이언트는
    `fetch(…, { method: "POST", body: file })` 한 줄이면 된다.
 
-   성공하면 `{ key, width, height }` 를 돌려준다 — 이 라우트는 **바이트만 맡는다.** 그 키가 어느
-   주에 걸리는지는 저장 뮤테이션(saveWeek)의 일이다. 치수를 함께 싣는 이유는 아래 응답 주석에
-   있다(픽셀 가드가 이미 헤더에서 읽어 뒀으므로 공짜다). 그래서 업로드했지만 저장 안 한 객체가 남을 수 있다(고아) —
+   성공하면 `{ key }` 를 돌려준다 — 이 라우트는 **바이트만 맡는다.** 그 키가 어느 주에 걸리는지는
+   저장 뮤테이션(saveWeek)의 일이다. 픽셀 가드가 읽은 치수는 응답이 아니라 **R2 객체 메타**에
+   묶어 두고 저장 경로가 거기서 읽는다(ADR-0030) — 화면을 거치면 다시 클라이언트 주장이 된다. 그래서 업로드했지만 저장 안 한 객체가 남을 수 있다(고아) —
    ADR-0028 이 고른 실패 방향이다. 반대(행이 가리키는 키가 없는 상태)는 그림이 깨진다. */
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
@@ -149,14 +149,15 @@ export async function POST(req: Request) {
   const key = fanartKey(type, crypto.randomUUID());
   await env.FANART.put(fanartObjectKey(key), bytes, {
     httpMetadata: { contentType: fanartContentType(type) },
+    /* **치수를 객체에 묶는다**(ADR-0030, 적대적 리뷰 9라운드). 저장 경로가 이 값을 정본으로
+       읽으므로, 화면이 치수를 에코하지 않아도 되고 위조·stale 값이 DB 에 들어올 자리가 없어진다
+       (불변식 2: 입력은 신뢰하지 않는다). 문자열만 담을 수 있어 숫자를 문자로 적는다 —
+       읽는 쪽(features/schedule 의 fanartSizeFromMetadata)이 파싱과 검증을 함께 한다. */
+    customMetadata: { w: String(size.width), h: String(size.height) },
   });
 
-  /* **치수를 함께 돌려준다.** 위 가드가 이미 헤더에서 읽어 뒀으므로 공짜인데, 안 실으면 화면이
-     `createImageBitmap` 으로 **전체를 다시 디코드**한다 — 예산 안(40MP)이어도 160MB 비트맵이라
-     관리자 탭에 이 가드가 막으려던 것과 같은 급의 할당이 생긴다(적대적 리뷰 5라운드).
-
-     그래서 팬아트 치수는 **서버가 헤더에서 읽은 값**이 정본이 된다(ADR-0030). 위 판정이 저장
-     경계와 같은 두 상한을 보므로 "업로드가 통과시킨 치수는 저장도 통과한다" — 화면은 이 값을
-     그대로 저장 페이로드에 싣기만 한다. */
-  return Response.json({ key, width: size.width, height: size.height }, { status: 201 });
+  /* 응답은 **키 하나뿐이다.** 치수는 위에서 객체 메타에 묶었고 저장 경로가 거기서 읽는다 —
+     화면을 거쳐 돌아오게 하면 그 값이 다시 클라이언트 주장이 된다(적대적 리뷰 5→9라운드가 같은
+     자리를 두 방향에서 짚었다: 화면이 직접 디코드하는 것도, 서버 값을 에코하는 것도 아니다). */
+  return Response.json({ key }, { status: 201 });
 }

@@ -79,8 +79,8 @@ export default defineConfig(async () => {
              옮길 때도 생긴다**: HTTP 응답 파싱을 core(덮임)에서 app(단위 층 밖)으로 내리자
              statements·branches·lines 가 함께 내려갔다 — 레이어 계약을 지키는 대가이고, 이때도
              기준은 같다(ADR-0029 의 바닥 위에서만 조정한다). */
-          functions: 79.3,
-          lines: 80.0,
+          functions: 79.4,
+          lines: 79.9,
 
           /* **집계 임계치만으로는 신뢰 경계를 못 지킨다**(적대적 리뷰 지적, 2026-07-30). 저장소
              전체 한 숫자면 인증 코드가 0% 로 들어와도 다른 곳이 늘어 통과한다 — 실제로 이 설정을

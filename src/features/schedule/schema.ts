@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import { isIsoDate, toIsoDate, weekStartOf } from "@/core/calendar";
-import { FANART_MAX_DIMENSION, isFanartKey } from "@/core/fanart";
+import { isFanartKey } from "@/core/fanart";
 
 // 'YYYY-MM-DD' 이면서 실재하는 날짜(core/calendar 가 정본 — Temporal 판정이라 확장 표기를 거절).
 const isoDate = z.string().refine(isIsoDate, "YYYY-MM-DD 형식의 실재하는 날짜여야 합니다");
@@ -37,16 +37,6 @@ const fanartImageKey = z.preprocess(
   (v) => (typeof v === "string" && v.trim() === "" ? null : v),
   z.string().trim().refine(isFanartKey, "팬아트 키 형식이 아닙니다").nullable(),
 );
-
-/* 그림의 픽셀 치수 — 읽기 화면이 `<img width height>` 로 자리를 예약하는 데만 쓴다
-   (db/schema.ts 가 왜 컬럼으로 두는지의 정본). 값의 출처는 **업로드 라우트가 형식 헤더에서 읽은
-   것**이지만(ADR-0030) 이 뮤테이션의 페이로드는 여전히 클라이언트가 채우므로, 신뢰가 아니라
-   **상한**을 건다 — 상한이 없으면 거대한 정수가 그대로 img 속성에 실려 그림 한 장이 화면을
-   통째로 밀어낸다.
-
-   상한 값은 core/fanart 가 정본이고 **업로드 가드가 같은 값을 본다** — 갈리면 업로드가 통과시킨
-   치수가 여기서 거절돼 그림 자체를 못 거는 상태가 된다(그 파일의 isFanartSizeAcceptable 주석). */
-const fanartImageSize = z.number().int().positive().max(FANART_MAX_DIMENSION).nullable();
 
 /* 항목 하나. title 은 자유 제목(항목 종류 컬럼을 안 둔다 — 결정 9). gameId 는 게임에 이어
    붙이는 선택 연결(null = 게임 없는 자유 편성). scheduledDate 가 주에 속하는지는 아래 객체
@@ -105,10 +95,10 @@ export const saveWeekInput = z
         z.string().trim().max(100).nullable(),
       )
       .optional(),
-    /* 치수도 같은 `.optional()` 규약이다(없음 = 유지). 키와 함께 움직이는 값이라 최종 조합은
-       nextFanart 가 계산한다 — 새 그림에 옛 치수가 붙으면 자리 예약이 어긋난다. */
-    fanartImageWidth: fanartImageSize.optional(),
-    fanartImageHeight: fanartImageSize.optional(),
+    /* **치수는 받지 않는다.** 업로드가 형식 헤더에서 읽어 R2 객체 메타에 묶어 두고, 저장 경로가
+       거기서 읽는다(ADR-0030) — 클라이언트가 에코하면 그 값이 다시 클라이언트 주장이 되어
+       불변식 2 가 이 필드에서만 빠진다(적대적 리뷰 9라운드). 안 쓰는 필드를 받아 두지도 않는다:
+       다음 사람이 그게 쓰인다고 믿는다. */
   })
   .superRefine((v, ctx) => {
     // weekStartDate 가 월요일인가 — weekStartOf 가 자기 자신이면 그 주의 시작이다.
@@ -165,37 +155,6 @@ export const saveWeekInput = z
         code: "custom",
         path: ["fanartCredit"],
         message: "그림 없이 작가 표기만 넣을 수 없습니다",
-      });
-    }
-    /* 치수는 **한 쌍이다** — 한쪽만 있으면 자리 예약 계산이 성립하지 않는다(DB CHECK 와 같은
-       규칙). 두 가지를 막는다: 하나만 **보낸** 요청, 그리고 둘 다 보냈는데 한쪽만 값인 요청.
-
-       앞쪽이 표기와 갈리는 자리다. 표기는 한쪽만 보내는 게 뜻이 있어(`undefined = 유지`) 조합
-       판정을 서버로 미루지만, **치수는 한쪽만 바꾸는 것 자체가 뜻이 없다** — 그런 요청은
-       클라이언트 버그이고 화면은 항상 둘을 함께 보낸다. 여기서 안 막으면 nextFanart 가 반쪽
-       입력을 **조용히 무시**해(쌍이 깨진 값을 DB 에 넣지 않으려면 그럴 수밖에 없다) 그 버그가
-       "저장은 됐는데 치수만 안 붙는" 증상으로 숨는다 — 테스트가 실제로 그 자리를 잡았다.
-       옛 클라이언트는 둘 다 안 보내므로 `undefined = 유지` 규약은 그대로다. */
-    const sentWidth = v.fanartImageWidth !== undefined;
-    const sentHeight = v.fanartImageHeight !== undefined;
-    if (
-      sentWidth !== sentHeight ||
-      (sentWidth && (v.fanartImageWidth === null) !== (v.fanartImageHeight === null))
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["fanartImageWidth"],
-        message: "폭과 높이는 함께 보내야 합니다",
-      });
-    }
-    /* 그림을 **지우면서** 치수를 싣는 요청은 모순이다 — 가리킬 그림이 없다. 화면이 만들 수 없는
-       조합이고, 통과시키면 DB CHECK 가 batch 를 죽이는데 그때는 이미 청구가 revision 을 올려
-       편집기가 이유 없는 CONFLICT 에 빠진다(표기와 같은 자리·같은 근거). */
-    if (v.fanartImageKey === null && (v.fanartImageWidth != null || v.fanartImageHeight != null)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["fanartImageWidth"],
-        message: "그림 없이 치수만 넣을 수 없습니다",
       });
     }
   });

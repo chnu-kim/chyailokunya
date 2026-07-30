@@ -226,13 +226,25 @@ function webpSize(b: Uint8Array) {
      APNG — `acTL` 청크. 규격이 **IDAT 앞**에 오도록 못박았으므로 IDAT 를 만나면 그만 본다.
      WebP — VP8X flags 바이트의 ANIMATION 비트(MSB 기준 6번째 = 0x02).
      JPEG — 애니메이션이 없다.
-   **청크 순회에 횟수 상한을 두지 않는다.** 처음엔 32 로 잘랐는데, `acTL` 앞에 ancillary 청크가
-   그보다 많은 **유효한 APNG** 가 그 상한에 걸려 "정적"으로 통과했다(GitHub codex 리뷰 P2) —
-   상한을 CPU 방어로 두면서 초과를 fail-open 으로 처리한 것이라, 같은 파일의 픽셀 가드(못 읽으면
-   거절)와 방향이 어긋났다. 상한이 없어도 **종료는 보장된다**: 오프셋이 매 청크마다 최소 12바이트
-   증가하므로 5MB 본문에서 순회는 최대 ~43만 회이고 회당 하는 일은 4바이트 읽기 + 4바이트 비교다.
-   (JPEG 은 길이 0 으로 오프셋이 안 늘어 상한이 필요했다 — 그 차이가 여기 상한을 뺄 수 있는
-   이유다.) */
+   ── 스캔 예산은 두고, 소진하면 **거절한다** ─────────────────────────────────────────
+   두 번 틀렸고 두 지적이 각각 반쪽이었다:
+     1판(상한 32 · 초과는 "정적") — `acTL` 앞에 청크가 그보다 많은 **유효한 APNG** 가 통과했다.
+       상한을 CPU 방어로 두면서 초과를 fail-open 으로 처리한 것이 문제였다.
+     2판(상한 없음 · 파일 끝까지) — 5MB 에 길이 0 청크를 채우면 ~43만 회를 돈다. 그때 내가 주석에
+       "회당 4바이트 읽기 + 비교"라고 적었는데 **사실이 아니었다**: 회당 `slice` + 문자열 생성으로
+       할당이 두 번 일어난다. 이 저장소는 요청당 CPU 10ms 로 프로덕션 인시던트를 낸 적이 있다
+       (Error 1102) — 방어 코드가 그 한도를 먹는 것은 방어가 아니다.
+   3판이 지금 코드다: **예산을 두고 소진하면 애니메이션으로 간주해 거절한다**(fail-closed, 픽셀
+   가드와 같은 방향). 그리고 **fourcc 를 문자열로 만들지 않고 바이트로 비교**해 회당 할당을 0 으로
+   둔다 — 예산 안에서도 그게 이 스캔의 실제 비용을 정한다. 정상 PNG 는 IHDR 다음 몇 청크 안에
+   acTL/IDAT 를 만나므로 예산에 닿지 않는다. */
+const PNG_SCAN_BUDGET = 4096;
+
+// fourcc 를 문자열로 만들지 않고 4바이트로 비교한다 — 스캔이 수천 회 돌 수 있는 자리라 회당
+// 할당(slice + String.fromCharCode)이 그대로 CPU 가 된다(GitHub codex 리뷰 P1).
+function isChunk(b: Uint8Array, at: number, a: number, c: number, d: number, e: number): boolean {
+  return b[at] === a && b[at + 1] === c && b[at + 2] === d && b[at + 3] === e;
+}
 export function isAnimatedImage(bytes: Uint8Array, type: FanartImageType): boolean {
   if (type === "jpeg") return false;
   if (type === "webp") {
@@ -241,13 +253,16 @@ export function isAnimatedImage(bytes: Uint8Array, type: FanartImageType): boole
     return bytes.length > 20 && (bytes[20]! & 0x02) !== 0;
   }
   let at = 8; // PNG 시그니처 다음
-  while (at + 8 <= bytes.length) {
+  for (let scanned = 0; at + 8 <= bytes.length; scanned++) {
+    // 예산 소진 = 판정 불가다. **거절 쪽으로 떨어진다**(위 주석의 3판) — 여기서 통과시키면
+    // 청크를 잔뜩 앞세운 APNG 가 방어를 우회한다.
+    if (scanned >= PNG_SCAN_BUDGET) return true;
     const len = beU32(bytes, at);
     if (len === null) return false;
-    const kind = String.fromCharCode(...bytes.slice(at + 4, at + 8));
-    if (kind === "acTL") return true;
+    if (isChunk(bytes, at + 4, 0x61, 0x63, 0x54, 0x4c)) return true; // "acTL"
     // 첫 IDAT 뒤엔 acTL 이 못 온다(규격) — 거기서 멈추면 큰 파일의 픽셀 데이터를 안 훑는다.
-    if (kind === "IDAT" || kind === "IEND") return false;
+    if (isChunk(bytes, at + 4, 0x49, 0x44, 0x41, 0x54)) return false; // "IDAT"
+    if (isChunk(bytes, at + 4, 0x49, 0x45, 0x4e, 0x44)) return false; // "IEND"
     at += 12 + len; // 길이(4) + 타입(4) + 데이터 + CRC(4)
   }
   /* IDAT 도 acTL 도 없이 끝났다 = 잘렸거나 깨진 파일이다. 애니메이션은 아니므로 false 이고, 그

@@ -72,8 +72,7 @@ function blankTitleMessage(entry: DraftEntry): string {
    `ready` 상태로 돌아오므로 시점만으론 못 가른다).
 
    ── 팬아트 업로드는 세 번째 submit 자식이다(ADR-0028, 이슈 #120 PR 2) ────────────────
-   파일 바이트가 `POST /api/fanart` 로 나가 `{ key, width, height }` 를 받는 비동기 왕복이고,
-   진행·실패·성공이
+   파일 바이트가 `POST /api/fanart` 로 나가 `{ key }` 를 받는 비동기 왕복이고, 진행·실패·성공이
    갈리며 성공값이 **draft 에 반영돼야** 한다 — 위 두 자식과 정확히 같은 모양이라 새 머신을
    만들지 않고 자식을 하나 더 얹는다(AGENTS 의 8종 머신 표에서 "수명·공유 범위가 비슷한 자리를
    찾아 따라간다"). 루트에 두는 이유도 같다: 관리자가 한 화면에서 그림을 여러 번 바꿀 수 있다.
@@ -108,29 +107,22 @@ export type SaveWeekValues = {
   /* 하루의 속성(이슈 #117). 기본값인 날은 draftDayInputs 가 이미 접어 낸다 — 서버도 같은
      필터를 다시 걸지만, 여기서 접어야 dirty 판정과 저장 페이로드가 같은 정규형을 본다. */
   days: DraftDayInput[];
-  /* 팬아트 넷(ADR-0028). **편집기는 항상 넷을 다 보낸다** — 서버의 `undefined = 유지` 규약은
-     이 필드를 모르는 옛 클라이언트(배포 중 열려 있던 탭)를 위한 것이고, 화면이 그 규약에
-     기대면 "지움"을 표현할 수 없다. 치수는 한 쌍으로만 보낸다(서버 Zod 가 반쪽을 거절한다). */
+  /* 팬아트 둘(ADR-0028). **편집기는 둘을 항상 보낸다** — 서버의 `undefined = 유지` 규약은 이
+     필드를 모르는 옛 클라이언트(배포 중 열려 있던 탭)를 위한 것이고, 화면이 그 규약에 기대면
+     "지움"을 표현할 수 없다. **치수는 안 보낸다**: 업로드가 R2 객체 메타에 묶고 저장 경로가
+     거기서 읽는다(ADR-0030) — 화면이 에코하면 그 값이 다시 클라이언트 주장이 된다. */
   fanartImageKey: string | null;
   fanartCredit: string | null;
-  fanartImageWidth: number | null;
-  fanartImageHeight: number | null;
 };
 
 /* 업로드 자식이 실어 보낼 값과 받아 올 결과. `Blob` 은 workerd·브라우저 공통 전역이라
    core/fanart.ts 의 `Uint8Array` 와 같은 급의 런타임 중립 타입이다 — 이 파일은 여전히 HTTP 를
    모르고, 실제 POST 는 호출자가 준 `uploadRun` 안에 있다.
 
-   **치수는 업로드 응답이 준다**(ADR-0030) — 라우트가 픽셀 가드로 헤더를 읽을 때 이미 손에 있는
-   값이라 공짜이고, 그러면 화면이 파일을 다시 디코드하지 않는다. nullable 로 남겨 둔 이유는 그
-   응답 shape 이 바뀌거나(옛 배포) 다른 호출자가 붙을 때 **키만이라도 살리는** 쪽이 맞기 때문이다
-   — 그림을 못 거는 것보다 자리 예약 없이 그리는 편이 낫다(db/schema.ts). */
+   **결과는 키 하나다.** 치수는 업로드가 R2 객체 메타에 묶고 저장 경로가 거기서 읽으므로
+   (ADR-0030) 화면을 거칠 필요가 없다 — 거치면 그 값이 다시 클라이언트 주장이 된다. */
 export type FanartUploadValues = { file: Blob };
-export type FanartUploadResult = {
-  key: string;
-  width: number | null;
-  height: number | null;
-};
+export type FanartUploadResult = { key: string };
 
 /* run 의 반환 shape. 실제 tRPC 응답(WeekView, features 타입)을 core 가 못 보므로, 호출자가
    `weekToDraft` 로 변환한 뒤 이 shape 로 넘긴다 — 머신은 WeekView 를 몰라도 된다. */
@@ -221,8 +213,6 @@ function saveValues(context: ScheduleSaveContext): SaveWeekValues {
     // '' → null 은 서버 Zod 도 하지만, dirty 비교가 같은 정규형을 봐야 저장 직후 깨끗해진다
     // (note·startTime 과 같은 규약).
     fanartCredit: context.draft.fanartCredit.trim() || null,
-    fanartImageWidth: context.draft.fanartImageWidth,
-    fanartImageHeight: context.draft.fanartImageHeight,
   };
 }
 
@@ -360,22 +350,16 @@ export const scheduleSaveMachine = setup({
                    (nextFanart 규칙 2)에 맡길 수 없다: 편집기는 표기를 **항상 함께 보내므로**
                    보낸 값이 이겨 그 규칙이 발동하지 않는다. 화면이 지워야 한다. */
                 fanartCredit: "",
-                fanartImageWidth: result.width,
-                fanartImageHeight: result.height,
               },
               fanartError: "",
               /* 업로드만으로는 **어느 주에도 안 걸린다** — 저장을 눌러야 반영된다. 미리보기가
                  떠서 눈으로는 달라 보이므로, 남은 한 걸음은 글자로 말해야 전해진다(팬 제안이
                  "보드를 안 바꾸는 쓰기는 화면이 직접 말해야 한다"로 겪은 자리와 같은 결).
 
-                 **치수를 못 읽은 것도 같이 말한다.** fail-open 이라 업로드는 성공으로 끝나는데
-                 (ADR-0030) 그러면 관리자에게 아무 신호가 없다 — 개발 중 e2e 픽스처가 정확히 그
-                 상태를 만들었고(CRC 깨진 PNG → 치수만 null) 화면·게이트 어디에도 흔적이 없어
-                 D1 을 직접 들여다봐야 했다. 사람이 쓰는 화면에 같은 침묵을 남기지 않는다. */
-              announcement:
-                result.width === null
-                  ? "팬아트를 올렸습니다. 그림 크기를 읽지 못했습니다. 저장해야 반영됩니다."
-                  : "팬아트를 올렸습니다. 저장해야 반영됩니다.",
+                 **치수 안내는 없다.** 한때 "크기를 못 읽었다"를 여기서 알렸는데, 그건 화면이
+                 파일을 디코드하던 시절의 fail-open 때문이었다 — 이제 서버가 헤더를 못 읽으면
+                 업로드 자체를 415 로 거절하므로(ADR-0030) 그 상태가 아예 생기지 않는다. */
+              announcement: "팬아트를 올렸습니다. 저장해야 반영됩니다.",
             };
           }),
         },

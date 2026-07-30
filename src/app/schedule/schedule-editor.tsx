@@ -72,11 +72,10 @@ function weekToDraft(week: WeekView): WeekDraft {
       week.days.map((d) => [d.scheduledDate, { startTime: d.startTime ?? "", rest: d.rest }]),
     ),
     /* 팬아트(ADR-0028). 키는 null 그대로 옮기고 표기만 '' 로 접는다 — WeekDraft 가 두 타입을
-       갈라 두는 이유는 그 파일 주석에 있다(표기는 입력 칸, 키·치수는 업로드가 준 값). */
+       갈라 두는 이유는 그 파일 주석에 있다. **치수는 draft 에 없다**: 저장에 안 실리고, 편집기
+       미리보기가 CSS 고정 슬롯이라 화면이 그 값을 쓸 일이 없다(ADR-0030). */
     fanartImageKey: week.fanartImageKey,
     fanartCredit: week.fanartCredit ?? "",
-    fanartImageWidth: week.fanartImageWidth,
-    fanartImageHeight: week.fanartImageHeight,
   };
 }
 
@@ -152,11 +151,9 @@ export function ScheduleEditor({
           }
           throw new FanartUploadFailed(res.status, fanartUploadErrorText(envelope));
         }
-        /* **치수도 서버가 준다** — 픽셀 가드가 헤더에서 이미 읽었으므로 공짜다(라우트 주석).
-           한때 여기서 `createImageBitmap` 으로 다시 읽었는데, 그건 예산 안(40MP)인 그림도
-           160MB 비트맵으로 **관리자 탭에서 디코드**하는 일이라 그 가드가 막으려던 것과 같은
-           급의 할당이었다(적대적 리뷰 5라운드). 서버 값을 쓰면 그 비용이 0 이고, 못 읽는
-           브라우저에서 치수가 사라지던 저하 경로도 함께 없어진다. */
+        /* **키만 받는다.** 치수는 업로드가 R2 객체 메타에 묶고 저장 경로가 거기서 읽으므로
+           (ADR-0030) 화면이 만질 값이 아니다 — 한때 여기서 `createImageBitmap` 으로 직접 읽었고
+           그다음엔 응답으로 받았는데, 둘 다 그 값을 클라이언트 주장으로 만드는 경로였다. */
         return (await res.json()) as FanartUploadResult;
       },
       mapError: saveErrorMessage,
@@ -384,17 +381,6 @@ export function ScheduleEditor({
           {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
               그림은 미리 줄여 올려야 한다. 값 칸이라 문장이 아니라 표기다(AGENTS). */}
           <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
-
-          {/* 치수를 못 읽었을 때만 뜬다(ADR-0030 의 fail-open) — **업로드는 성공으로 끝나므로
-              이 문단이 없으면 관리자에게 아무 신호가 없다.** 개발 중 CRC 깨진 PNG 로 정확히 그
-              상태를 만들었고, 화면·게이트 어디에도 흔적이 없어 D1 을 직접 들여다봐야 했다.
-              오류가 아니라 안내라 `.sched-err`(danger)를 쓰지 않는다 — 그림은 정상 표시된다.
-              안내문은 말을 거는 자리라 문장이고, 합쇼체다(AGENTS). */}
-          {draft.fanartImageKey && draft.fanartImageWidth === null && (
-            <p className="sched-fanart__hint" data-od-id="schedule-fanart-nosize">
-              그림 크기를 읽지 못했습니다. 표시는 되지만 자리를 미리 비우지 못합니다.
-            </p>
-          )}
 
           {uploading && (
             <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">

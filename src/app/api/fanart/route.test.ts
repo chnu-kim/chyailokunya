@@ -217,21 +217,17 @@ describe("POST /api/fanart — 본문 판정", () => {
     const res = await upload(PNG);
 
     expect(res.status).toBe(201);
-    const { key, width, height } = (await res.json()) as {
-      key: string;
-      width: number;
-      height: number;
-    };
-    /* **치수도 응답에 실린다**(ADR-0030) — 픽셀 가드가 헤더에서 이미 읽었으므로 공짜인데, 안
-       실으면 화면이 `createImageBitmap` 으로 전체를 다시 디코드해 관리자 탭에 그 가드가 막으려던
-       것과 같은 급의 할당이 생긴다(적대적 리뷰 5라운드). 픽스처는 8×8 이다. */
-    expect({ width, height }).toEqual({ width: 8, height: 8 });
+    const { key } = (await res.json()) as { key: string };
     expect(isFanartKey(key)).toBe(true);
     // DB 엔 URL 이 아니라 키만 담긴다(ADR-0028) — 키가 호스트를 표현할 문법이 없어야 한다.
     expect(key).not.toContain("/");
 
     const stored = await env.FANART.get(fanartObjectKey(key));
     expect(stored).not.toBeNull();
+    /* **치수가 객체 메타에 묶인다**(ADR-0030) — 응답이 아니라 여기가 정본이다. 저장 경로가 이
+       값을 읽으므로 클라이언트가 치수를 에코할 필요가 없고, 위조가 DB 에 닿을 자리도 없다
+       (적대적 리뷰 9라운드). 픽스처는 8×8 이다. */
+    expect(stored!.customMetadata).toEqual({ w: "8", h: "8" });
     // 서빙되는 Content-Type 은 클라이언트 주장이 아니라 매직 바이트 판정의 결과다.
     expect(stored!.httpMetadata?.contentType).toBe("image/png");
     await env.FANART.delete(fanartObjectKey(key));

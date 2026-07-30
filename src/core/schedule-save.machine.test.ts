@@ -23,8 +23,6 @@ function draft(over: Partial<WeekDraft> = {}): WeekDraft {
     days: {},
     fanartImageKey: null,
     fanartCredit: "",
-    fanartImageWidth: null,
-    fanartImageHeight: null,
     ...over,
   };
 }
@@ -191,13 +189,11 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
       entries: [{ scheduledDate: "2027-01-04", title: "젤다", gameId: null }],
       // 하루 속성도 같은 페이로드로 나간다(이슈 #117) — 기본값인 날은 draftDayInputs 가 접는다.
       days: [],
-      /* 팬아트 넷도 **항상** 실린다(ADR-0028) — 화면은 서버의 `undefined = 유지` 규약에 기대지
-         않는다(그러면 "지움"을 표현할 수 없다). 없을 때의 정규형은 전부 null 이다: 표기는 ''
-         를 접어 보내고(note 와 달리 여기서 접는 이유는 saveValues 주석), 키·치수는 원래 null 이다. */
+      /* 팬아트 둘이 **항상** 실린다(ADR-0028) — 화면은 서버의 `undefined = 유지` 규약에 기대지
+         않는다(그러면 "지움"을 표현할 수 없다). 치수는 여기 없다: 업로드가 R2 객체 메타에 묶고
+         저장 경로가 거기서 읽는다(ADR-0030). */
       fanartImageKey: null,
       fanartCredit: null,
-      fanartImageWidth: null,
-      fanartImageHeight: null,
     });
   });
 
@@ -349,12 +345,10 @@ describe("scheduleSaveMachine — 팬아트 업로드 계약(ADR-0028)", () => {
     const seeded = draft({
       fanartImageKey: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.png",
       fanartCredit: "먼저 그린 사람",
-      fanartImageWidth: 100,
-      fanartImageHeight: 100,
     });
     const actor = start({
       run: async () => ({ draft: draft(), revision: 1 }),
-      uploadRun: async () => ({ key: KEY, width: 1200, height: 1600 }),
+      uploadRun: async () => ({ key: KEY }),
       initialDraft: seeded,
     });
 
@@ -365,30 +359,33 @@ describe("scheduleSaveMachine — 팬아트 업로드 계약(ADR-0028)", () => {
     const { draft: d, fanartError, announcement } = actor.getSnapshot().context;
     expect(d.fanartImageKey).toBe(KEY);
     expect(d.fanartCredit).toBe("");
-    expect(d.fanartImageWidth).toBe(1200);
-    expect(d.fanartImageHeight).toBe(1600);
     expect(fanartError).toBe("");
     // 업로드만으로는 어느 주에도 안 걸린다 — 남은 한 걸음을 글자로 말한다.
     expect(announcement).toContain("저장해야");
   });
 
-  it("치수를 못 읽어도 키는 살리고, 그 사실을 라이브 영역이 말한다", async () => {
-    /* fail-open 이라 업로드는 성공으로 끝난다(ADR-0030) — 그래서 **알리지 않으면 관리자에게
-       아무 신호가 없다.** 개발 중 CRC 깨진 픽스처가 정확히 그 상태를 만들었고 화면·게이트
-       어디에도 흔적이 없었다(적대적 리뷰도 같은 자리를 지적했다). */
+  it("업로드 결과는 키 하나다 — 치수는 draft 를 거치지 않는다", async () => {
+    /* 치수는 업로드가 R2 객체 메타에 묶고 저장 경로가 거기서 읽는다(ADR-0030) — 화면을 거치면
+       그 값이 다시 클라이언트 주장이 되어 불변식 2 가 이 필드에서만 빠진다(적대적 리뷰 9라운드).
+       그래서 draft·저장 페이로드 어디에도 치수가 없다. */
+    let seen: SaveWeekValues | undefined;
     const actor = start({
-      run: async () => ({ draft: draft(), revision: 1 }),
-      uploadRun: async () => ({ key: KEY, width: null, height: null }),
+      run: async (values) => {
+        seen = values;
+        return { draft: draft({ fanartImageKey: KEY }), revision: 1 };
+      },
+      uploadRun: async () => ({ key: KEY }),
+      initialDraft: draft({
+        entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
+      }),
     });
     actor.send({ type: "FANART_UPLOAD", file });
     await waitFor(actor, (s) => s.matches("ready"));
-    const { draft: d, announcement } = actor.getSnapshot().context;
-    expect(d.fanartImageKey).toBe(KEY);
-    expect(d.fanartImageWidth).toBeNull();
-    expect(d.fanartImageHeight).toBeNull();
-    expect(announcement).toContain("크기를 읽지 못했습니다");
-    // 그래도 "올렸다"와 "저장해야 반영된다"는 여전히 말한다 — 실패가 아니라 부분 저하다.
-    expect(announcement).toContain("저장해야");
+    actor.send({ type: "SAVE" });
+    await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 1);
+    expect(seen).toMatchObject({ fanartImageKey: KEY });
+    expect(seen).not.toHaveProperty("fanartImageWidth");
+    expect(seen).not.toHaveProperty("fanartImageHeight");
   });
 
   it("실패는 fanartError 만 세운다 — 저장·발행 문구를 건드리지 않는다", async () => {
@@ -474,21 +471,11 @@ describe("scheduleSaveMachine — 팬아트 업로드 계약(ADR-0028)", () => {
   it("FANART_REMOVED 는 넷을 함께 지운다 — 표기만 남으면 저장이 거절된다", () => {
     const actor = start({
       run: async () => ({ draft: draft(), revision: 1 }),
-      initialDraft: draft({
-        fanartImageKey: KEY,
-        fanartCredit: "그린 사람",
-        fanartImageWidth: 800,
-        fanartImageHeight: 600,
-      }),
+      initialDraft: draft({ fanartImageKey: KEY, fanartCredit: "그린 사람" }),
     });
     actor.send({ type: "FANART_REMOVED" });
     const d = actor.getSnapshot().context.draft;
-    expect(d).toMatchObject({
-      fanartImageKey: null,
-      fanartCredit: "",
-      fanartImageWidth: null,
-      fanartImageHeight: null,
-    });
+    expect(d).toMatchObject({ fanartImageKey: null, fanartCredit: "" });
   });
 
   it("저장 페이로드에 팬아트 넷이 실린다", async () => {
@@ -502,8 +489,6 @@ describe("scheduleSaveMachine — 팬아트 업로드 계약(ADR-0028)", () => {
         entries: [{ ...makeDraftEntry("db-1", "2027-01-04"), title: "젤다" }],
         fanartImageKey: KEY,
         fanartCredit: "  그린 사람  ",
-        fanartImageWidth: 1200,
-        fanartImageHeight: 1600,
       }),
     });
     actor.send({ type: "SAVE" });
@@ -513,8 +498,6 @@ describe("scheduleSaveMachine — 팬아트 업로드 계약(ADR-0028)", () => {
       // 표기는 여기서 trim 해 보낸다 — dirty 비교와 페이로드가 같은 정규형을 봐야 저장 직후
       // draft 가 깨끗해진다(saveValues 주석).
       fanartCredit: "그린 사람",
-      fanartImageWidth: 1200,
-      fanartImageHeight: 1600,
     });
   });
 });
