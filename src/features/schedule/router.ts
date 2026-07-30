@@ -7,6 +7,8 @@ import { authorizedProcedure, router } from "../trpc/init";
 import { getWeekInput, publishWeekInput, saveWeekInput } from "./schema";
 import {
   EmptyWeekCannotPublish,
+  FanartCreditWithoutImage,
+  FanartImageMissing,
   getWeekForEdit,
   publishWeek,
   ReferencedGameMissing,
@@ -27,7 +29,11 @@ export const scheduleRouter = router({
     .input(saveWeekInput)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await saveWeek(ctx.db, input);
+        /* 팬아트를 교체·삭제하면 버려진 객체를 서비스가 치우고, 새로 거는 키가 실제로 있는지
+           확인한다(ADR-0028). **프로덕션에선 이 값이 절대 null 이 아니다** — tRPC 라우트가
+           `env.FANART` 를 그대로 싣는다. null 은 바인딩 없이 도는 단위 테스트의 기본값이고,
+           그때는 두 동작을 건너뛴다(확인할 저장소 자체가 없다). */
+        return await saveWeek(ctx.db, input, ctx.fanart ?? undefined);
       } catch (e) {
         /* 불러온 뒤 누군가 이 주를 먼저 저장했다. 전체 교체라 그대로 진행하면 그 사람의 항목이
            통째로 사라지므로 덮어쓰지 않고 거절한다 — 편집기가 이 코드를 받아 안내한다. */
@@ -49,6 +55,22 @@ export const scheduleRouter = router({
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "항목이 있어야 발행할 수 있습니다.",
+          });
+        }
+        /* 저장 후에 "그림 없이 작가 표기만"이 남는 조합. Zod 의 같은 규칙(한 요청 안의 조합)을
+           서버가 기존 값까지 합쳐 완성한 것이라 문구도 같다. */
+        if (e instanceof FanartCreditWithoutImage) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "그림 없이 작가 표기만 넣을 수 없습니다.",
+          });
+        }
+        /* 올린 그림이 저장소에 없다. 사용자가 할 수 있는 일이 "다시 올린다" 하나뿐이라 문구도
+           그것만 말한다 — 원인(키 위조·정리된 객체)은 화면에서 구분할 수단이 없다. */
+        if (e instanceof FanartImageMissing) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "올린 그림을 찾을 수 없습니다. 다시 올려 주십시오.",
           });
         }
         throw e;

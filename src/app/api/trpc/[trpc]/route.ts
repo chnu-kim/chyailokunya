@@ -33,6 +33,8 @@ async function createContext(): Promise<Context> {
     actor,
     authoritiesOf,
     chzzk: credsFromEnv(env.CHZZK_CLIENT_ID, env.CHZZK_CLIENT_SECRET),
+    // R2Bucket 이 FanartObjectStore 를 구조적으로 만족한다(ADR-0028) — 어댑터를 안 끼운다.
+    fanart: env.FANART,
   };
 }
 

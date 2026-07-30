@@ -456,6 +456,45 @@ build`·`npm run preview`(로컬 workerd) 전부 실제 프로덕션 CPU 시간�
   스펙만 봐선 모른다 — 받는다(실측 2026-07-26, `node:sqlite`). 마이그레이션을 만들면 생성된
   SQL 을 스크래치 sqlite 로 한 번 재생해 보는 습관이 이 자리를 덮는다.
 
+팬아트 R2(ADR-0028)에서 밟은 것들:
+
+- **`npm run cf-typegen` 은 로컬 `.dev.vars` 와 `.open-next` 에 오염된다.** 그냥 돌리면 생성물에
+  내 `.dev.vars` 의 변수와 `WORKER_SELF_REFERENCE: Service<typeof import("./.open-next/worker")>`
+  가 딸려 들어온다. CI 엔 그 둘이 없어 **typecheck 가 `.open-next` 를 못 찾아 깨질 수 있고**,
+  무관한 diff 가 커밋에 섞인다. 바인딩을 더할 땐 그 둘을 잠시 치우고 생성해 **새 바인딩 한 줄만**
+  늘었는지 확인한다(`.dev.vars` 는 cp 백업 + trap 으로 복구를 보장 — 비밀 파일이다).
+
+- **`caches` 는 workerd 전역이라 `next dev` 에 없다.** 서빙 라우트에서 무방비로 읽으면 로컬·e2e 가
+  `ReferenceError: caches is not defined` 로 500 난다. 지금까지 밟아 온 "로컬은 통과하는데 배포가
+  깨진다"의 **반대 방향**이다 — 여기선 로컬이 더 좁다. `typeof caches === "undefined"` 가드를
+  두되, 그 대가로 **캐시 관련 규칙은 e2e 가 통째로 못 본다**(캐시 키 정규화·캐시 히트 시 조건부
+  요청이 실제로 그렇게 새어 나갔다). 캐시 규칙은 순수 함수로 올려 단위 테스트가 보게 한다.
+
+- **R2 바인딩 메서드에 `Headers` 인스턴스를 넘기면 dev 에서 죽는다.** `object.writeHttpMetadata(headers)`
+  가 `DevalueError: Cannot stringify arbitrary non-POJOs` 로 터진다 — dev 는 R2 를 Miniflare
+  프록시로 부르는데 그 경계가 POJO 만 직렬화한다. 값을 직접 읽어 헤더를 세운다(`httpMetadata?.contentType`).
+  같은 이유로 `get(key, { onlyIf: req.headers })` 도 피한다.
+
+- **무거운 e2e 하나가 dev 서버를 묶어 무관한 스펙을 줄줄이 타임아웃시킨다.** 5MB 업로드 스펙
+  하나 때문에 전체 e2e 가 2.7분·5개 실패였다가, 그것만 빼니 1.2분·122개 전부 통과였다(실패하는
+  스펙이 실행마다 바뀌는 게 신호다 — 자원 경합이지 그 스펙의 결함이 아니다). 큰 본문·긴 연산이
+  필요한 계약은 판정을 순수 함수로 올려 단위 테스트에 맡긴다. `Content-Length` 만 위조해 싸게
+  재려는 우회는 안 통한다 — Playwright 가 실제 본문 길이로 덮어쓴다(실측).
+
+- **Cache API 는 요청 URL 전체를 키로 쓴다 — 공개 경로면 그게 증폭 통로다.** `?n=1`, `?n=2` … 를
+  붙이면 매번 캐시 미스인데 백엔드 조회는 같은 객체라, 인증 없는 이미지 URL 하나가 무한한 R2
+  재읽기가 된다. `cache.match`/`put` 에 넘기는 키는 **origin + pathname 으로 정규화**한다.
+
+- **삭제되는 자원에 `immutable` 을 걸지 않는다.** 키가 콘텐츠 해시/UUID 라 "내용이 안 바뀐다"는
+  참이어도, 그 자원이 **지워질 수 있으면** 1년 immutable 은 "내렸는데 안 내려간다"가 된다.
+  Cache API 의 `delete` 는 그 요청을 받은 콜로케이션만 비워 온전한 해결이 못 된다.
+
+- **전체 교체 뮤테이션의 부분 갱신은 "안 보낸 필드"만이 아니라 조합도 깨뜨린다.** 키만 보내고
+  짝이 되는 표기를 생략하면 그림을 내려도 표기가 남아 DB CHECK 가 batch 를 죽이고(그때는 이미
+  CAS 청구가 revision 을 올려 편집기가 **이유 없는 CONFLICT** 에 빠진다), 그림을 바꾸면 옛 표기가
+  새 그림에 붙는다(**잘못된 귀속**은 값이 사라지는 것보다 나쁘다). 최종 조합을 계산하는 함수를
+  **청구 전에** 두고 거기서 거절한다.
+
 ## 접근성 기준 (협상 대상 아님)
 
 구 사이트에서 검증된 기준을 그대로 잇는다.

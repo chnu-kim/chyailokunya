@@ -66,6 +66,7 @@ function makeCtx(
     db: makeDb(env.DB),
     actor: null,
     chzzk: over.chzzk ?? null,
+    fanart: null,
     authoritiesOf: async () => authorities,
   };
 }

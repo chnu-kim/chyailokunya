@@ -85,6 +85,13 @@
       "when": 1785332147180,
       "tag": "0011_slippery_zaladane",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1785342867698,
+      "tag": "0012_loud_boomerang",
+      "breakpoints": true
     }
   ]
 }

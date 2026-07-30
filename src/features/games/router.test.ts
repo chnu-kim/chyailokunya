@@ -17,7 +17,13 @@ const admin = authoritiesFor(["admin"]); // game:write + game:delete
 
 function makeCtx(over: { authorities?: ReadonlySet<Authority> } = {}): Context {
   const authorities = over.authorities ?? new Set<Authority>();
-  return { db: makeDb(env.DB), actor: null, chzzk: null, authoritiesOf: async () => authorities };
+  return {
+    db: makeDb(env.DB),
+    actor: null,
+    chzzk: null,
+    fanart: null,
+    authoritiesOf: async () => authorities,
+  };
 }
 
 const eldenring = { categoryId: "c1", categoryType: "GAME", categoryValue: "엘든링" } as const;

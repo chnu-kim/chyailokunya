@@ -50,6 +50,17 @@
       "migrations_dir": "drizzle",
     },
   ],
+  /* 팬아트 바이트(ADR-0028). 이 저장소의 첫 R2 다 — D1 과 같은 결로 바인딩 이름이 정본이고,
+     로컬(next dev·vitest·e2e)은 Miniflare 가 그 이름으로 별도 로컬 저장소를 쓴다.
+     **public bucket 을 열지 않는다**: 읽기도 /api/fanart 라우트가 프록시한다. 여기서 공개
+     도메인을 붙이면 apex 하나 원칙(위 routes 주석)이 깨지고, 그 주소는 우리 캐시·헤더 정책
+     밖으로 나간다. */
+  "r2_buckets": [
+    {
+      "binding": "FANART",
+      "bucket_name": "chyailokunya-fanart",
+    },
+  ],
   "observability": {
     "enabled": true,
   },

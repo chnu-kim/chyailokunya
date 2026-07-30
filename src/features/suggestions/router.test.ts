@@ -25,6 +25,7 @@ function makeCtx(
         ? null
         : { channelId: over.channelId ?? "ch-" + over.userId, userId: over.userId },
     chzzk: null,
+    fanart: null,
     authoritiesOf: async () => authorities,
   };
 }
