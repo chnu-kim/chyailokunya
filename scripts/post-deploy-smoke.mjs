@@ -66,17 +66,34 @@ function cfErrorIn(body) {
 }
 
 /* **요청마다 시한을 둔다.** 없으면 응답이 영영 안 오는 경우 이 스크립트가 매달리고, 그걸
-   부르는 CI·Deploy job 도 같이 매달린다 — 워크플로 타임아웃(수십 분)에 걸려서야 죽는데 그때
-   로그는 "무슨 일이 있었는지"를 말해 주지 않는다. 스모크가 재는 건 어차피 "즉시 응답하는가"라
-   10초면 넉넉하다(정상 응답은 로컬·프로덕션 모두 100ms 대). */
-const PROBE_TIMEOUT_MS = 10_000;
+   부르는 CI·Deploy job 도 같이 매달린다 — 워크플로 타임아웃에 걸려서야 죽는데 그때 로그는
+   "무슨 일이 있었는지"를 말해 주지 않는다. 스모크가 재는 건 어차피 "즉시 응답하는가"라 5초면
+   넉넉하다(정상 응답은 로컬·프로덕션 모두 100ms 대).
 
-/* **재시도는 하되, Cloudflare 에러 표식이 보이면 안 한다.** 배포 직후 첫 요청은 콜드 스타트나
-   전파 지연으로 한 번 튈 수 있고, 그걸로 좋은 배포를 빨갛게 만들면 "스모크가 가끔 빨갛다"가
-   되어 아무도 안 보게 된다. 하지만 **1102 는 그 자체가 간헐적**이라 무턱대고 재시도하면 이
-   층이 존재하는 이유를 스스로 지운다 — 표식이 보이는 실패는 첫 번에 확정한다.
+   **이 값은 워크플로 스텝 시한과 함께 골라야 한다.** 최악은 `대상수 × 라운드 × (시한 + 대기 +
+   시한)` 이다 — 6 × 2 × (5 + 3 + 5) = 156초. 스텝 시한 5분(300초)의 절반이라, 여러 대상이
+   "죽지는 않았는데 느린" 상태여도 **스크립트가 자기 진단을 먼저 출력하고 끝난다.** 처음엔
+   10초로 뒀다가 최악이 276초가 되어 여유가 24초뿐이었다(리뷰 지적) — 그러면 GitHub 이 스텝을
+   먼저 죽여, 진단을 남기려고 넣은 시한이 도로 무의미해진다. 이 상수를 올릴 땐 위 산술을 다시
+   하고 스텝 시한도 같이 본다. */
+const PROBE_TIMEOUT_MS = 5_000;
 
-   같은 이유로 4xx 도 재시도하지 않는다(라우트가 없는 것은 기다린다고 생기지 않는다). */
+/* **재시도는 하되, (1) Cloudflare 에러 표식이 보이면 안 하고 (2) 첫 라운드에서만 한다.**
+
+   배포 직후 첫 요청은 콜드 스타트나 전파 지연으로 한 번 튈 수 있고, 그걸로 좋은 배포를 빨갛게
+   만들면 "스모크가 가끔 빨갛다"가 되어 아무도 안 보게 된다. 그게 재시도를 두는 이유다.
+
+   그런데 무턱대고 재시도하면 이 층이 존재하는 이유를 스스로 지운다. 표식이 보이는 실패는 첫
+   번에 확정한다 — **1102 는 그 자체가 간헐적**이라서다.
+
+   **표식이 항상 있는 건 아니다.** Cloudflare 의 에러 셸이 아니라 워커 자신의 500(OpenNext
+   핸들러·잘린 응답)으로 나오면 표식이 없다. 그러면 이런 순서가 성립한다: 라운드 1 이 isolate 를
+   죽인다 → 라운드 2 가 표식 없는 500 을 받는다 → 3초 기다리는 사이 isolate 가 재활용된다 →
+   통과. **캐스케이드를 잡으려고 라운드를 둘로 둔 건데 재시도가 그걸 삼킨다**(리뷰 지적).
+   그래서 재시도를 **라운드 1 로 한정**한다 — 라운드 1 은 콜드 스타트를 흡수하고, 라운드 2 는
+   엄격하다. 두 규칙이 서로 안 싸운다.
+
+   4xx 는 어느 라운드에서도 재시도하지 않는다(없는 라우트는 기다린다고 생기지 않는다). */
 const RETRY_ONCE_AFTER_MS = 3_000;
 
 async function fetchOnce(url) {
@@ -94,22 +111,21 @@ function isTransient(attempt) {
   return attempt.res.status >= 500 && cfErrorIn(attempt.body) === null;
 }
 
-async function probe(path, { expectHtml }) {
+async function attemptFetch(url) {
+  try {
+    return await fetchOnce(url);
+  } catch (cause) {
+    return { res: null, body: "", cause };
+  }
+}
+
+async function probe(path, { expectHtml, expectType }, { allowRetry }) {
   const url = `${ORIGIN}${path}`;
 
-  let attempt;
-  try {
-    attempt = await fetchOnce(url);
-  } catch (cause) {
-    attempt = { res: null, body: "", cause };
-  }
-  if (isTransient(attempt)) {
+  let attempt = await attemptFetch(url);
+  if (allowRetry && isTransient(attempt)) {
     await new Promise((resolve) => setTimeout(resolve, RETRY_ONCE_AFTER_MS));
-    try {
-      attempt = await fetchOnce(url);
-    } catch (cause) {
-      attempt = { res: null, body: "", cause };
-    }
+    attempt = await attemptFetch(url);
   }
 
   const { res, body } = attempt;
@@ -119,15 +135,25 @@ async function probe(path, { expectHtml }) {
   if (cfError) return { ok: false, url, reason: `${cfError} (status ${res.status})` };
   if (res.status !== 200) return { ok: false, url, reason: `status ${res.status}` };
 
+  /* **상태 코드만 보면 안 된다 — 200 짜리 엉뚱한 응답이 통과한다.** 페이지는 우리 마크업인지,
+     자산은 그 형식이 맞는지까지 본다(리뷰 지적: 자산이 200 인데 HTML 폴백을 받고 있어도
+     status 만으론 초록이다). */
+  const type = res.headers.get("content-type") ?? "";
+
   if (expectHtml) {
-    const type = res.headers.get("content-type") ?? "";
     if (!type.includes("text/html")) return { ok: false, url, reason: `content-type ${type}` };
-    /* 상태 코드만 보면 **에러 페이지도 200 으로 통과한다.** 이 저장소는 사용자가 가리킬 요소에
-       `data-od-id` 를 붙이는 규약이 있으니(AGENTS 코드 컨벤션) 그게 하나라도 있으면 우리 페이지가
-       실제로 렌더된 것이다. 페이지마다 다른 마커를 고르면 이 스크립트가 화면 구조에 묶인다. */
+    /* 이 저장소는 사용자가 가리킬 요소에 `data-od-id` 를 붙이는 규약이 있으니(AGENTS 코드
+       컨벤션) 그게 하나라도 있으면 우리 페이지가 실제로 렌더된 것이다. 페이지마다 다른 마커를
+       고르면 이 스크립트가 화면 구조에 묶인다. */
     if (!body.includes("data-od-id=")) {
       return { ok: false, url, reason: "우리 마크업이 아니다(data-od-id 없음)" };
     }
+  } else if (expectType) {
+    if (!type.includes(expectType)) {
+      return { ok: false, url, reason: `content-type ${type} (기대: ${expectType})` };
+    }
+    // 빈 200 도 막는다 — 자산이 사라지면 프록시가 빈 본문을 200 으로 줄 수 있다.
+    if (body.length === 0) return { ok: false, url, reason: "본문이 비어 있다" };
   }
   return { ok: true, url };
 }
@@ -152,8 +178,8 @@ async function main() {
 
        `og-cover.jpg` 는 소셜 크롤러가 실제로 두드리는 URL 이라 여기 있다 — 이 자산이 죽으면
        공유 링크의 미리보기가 통째로 깨진다. */
-    { path: "/icon.svg", expectHtml: false },
-    { path: "/assets/og-cover.jpg", expectHtml: false },
+    { path: "/icon.svg", expectHtml: false, expectType: "image/svg+xml" },
+    { path: "/assets/og-cover.jpg", expectHtml: false, expectType: "image/jpeg" },
   ];
 
   console.log(`배포 후 스모크 — ${ORIGIN} (${targets.length}개 × ${ROUNDS}회)`);
@@ -161,7 +187,8 @@ async function main() {
   const failures = [];
   for (let round = 1; round <= ROUNDS; round++) {
     for (const target of targets) {
-      const result = await probe(target.path, target);
+      // 재시도는 라운드 1 에서만 — 라운드 2 의 캐스케이드 감지를 삼키지 않게(위 상수 주석).
+      const result = await probe(target.path, target, { allowRetry: round === 1 });
       console.log(`  [${round}/${ROUNDS}] ${result.ok ? "ok  " : "FAIL"} ${result.url}`);
       if (!result.ok) failures.push(`${result.url} — ${result.reason}`);
     }

@@ -17,13 +17,18 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Result } from "axe-core";
+import { KNOWN_PAGE_PATHS } from "@/features/routes";
 
 const WCAG_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
-/* 라우트 정본은 `src/features/routes.ts` 지만 여기서는 **일부러 손으로 적는다** — 페이지가
-   늘면 이 목록도 늘려야 하고, 그 사실은 `routes.spec.ts` 가 이미 강제한다(그 스펙이 app 을 훑어
-   라우트 목록과 대조한다). 여기까지 파생시키면 스펙 하나가 두 정본을 동시에 파싱하게 된다. */
-const PAGES = ["/", "/landing", "/games", "/schedule"] as const;
+/* **라우트 목록은 정본에서 가져온다 — 손으로 적지 않는다.** 한때 여기 배열을 직접 적어 두고
+   "`routes.spec.ts` 가 강제하니 괜찮다"고 근거를 달았는데 **그 근거가 틀렸다**(리뷰 지적):
+   그 스펙이 대조하는 건 `src/app` ↔ `KNOWN_PAGE_PATHS` 지 이 파일의 목록이 아니다. 페이지를
+   더하고 `routes.ts` 와 `app/` 만 고치면 routes.spec 은 초록인데 axe 는 그 페이지를 영영 안
+   본다 — 이 파일 맨 위에서 비판하는 `narrow-body.spec.ts` 의 손 열거 함정과 **같은 모양**이다.
+
+   Playwright 스펙은 Node 라 정본을 그대로 import 할 수 있다(`routes.spec.ts` 도 그렇게 한다). */
+const PAGES = KNOWN_PAGE_PATHS;
 
 /* 좁은 폭도 같이 본다. 대비·이름은 폭과 무관하지만 **타깃 크기와 겹침은 폭에서 갈린다** —
    이 저장소가 320px 를 기준 폭으로 삼는 이유(WCAG 1.4.10 reflow)와 같은 자리다. */
