@@ -653,10 +653,11 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
         page.locator('[data-od-id^="schedule-day-time-"]').first(),
         "하루 시작 시각",
       );
-      await expectTouchTarget(
-        page.locator('[data-od-id^="schedule-day-rest-"]').first().locator("xpath=.."),
-        "휴방 토글",
-      );
+      /* **부모(`xpath=..`)가 아니라 클래스로 잡는다**(2026-07-31). 히트 영역을 만드는 것은
+         "체크박스의 부모"라는 **위치**가 아니라 `.sched-day__rest-toggle` 이라는 **부품**이다 —
+         위치로 잡으면 그 토글을 다른 줄로 옮기는 순간(레이아웃 개편) 조상이 바뀌어, 검사가
+         엉뚱한 상자를 재거나 조용히 통과한다. 이름으로 잡으면 어디로 옮겨도 같은 것을 잰다. */
+      await expectTouchTarget(page.locator(".sched-day__rest-toggle").first(), "휴방 토글");
       await expectTouchTarget(
         page.locator('[data-od-id="schedule-publish-toggle"]'),
         "발행 상태 전환",

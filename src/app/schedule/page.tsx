@@ -104,12 +104,17 @@ export default async function SchedulePage({
             재실행되지 않는다. 그러면 옛 주의 draft(note·published·항목)가 새 주 화면에 남고,
             저장이 새 weekStartDate 로 나가 옛 주 상태를 새 주에 덮어쓴다. remount 로 새 주의
             initialWeek 에서 draft·baseline 이 깨끗하게 다시 선다. */}
+        {/* `today` 는 **서버가 준다** — 편집기가 클라이언트에서 다시 읽으면 안 된다.
+            `Temporal.Now` 는 eslint 가 막고(배포 Workers 에서 에포크 0 을 준다), `Date.now()`
+            로 읽더라도 SSR 이 그린 주와 갈려 하이드레이션이 튄다(WeekNav 주석과 같은 근거).
+            위 todayCached 라 generateMetadata·읽기 뷰와도 같은 값이다. */}
         <ScheduleEditor
           key={weekStart}
           weekStartDate={weekStart}
           initialWeek={weekView}
           games={games}
           currentWeek={currentWeek}
+          today={today}
         />
       </main>
     );

@@ -61,10 +61,19 @@ const WEEK: WeekView = {
 };
 
 const GAMES = [{ id: 7, categoryValue: "마인크래프트", posterImageUrl: null }];
+/* 오늘 칸 표시는 이 스펙의 관심사가 아니라 **그 주 밖의 날**을 준다 — 그 주 안의 날을 주면
+   "오늘" 칩과 `sched-day--today` 가 끼어 여기서 재는 것과 무관한 이유로 마크업이 흔들린다. */
+const OTHER_WEEK = "2036-05-25";
 
 function renderEditor() {
   const { container } = render(
-    <ScheduleEditor weekStartDate={MONDAY} initialWeek={WEEK} games={GAMES} currentWeek={MONDAY} />,
+    <ScheduleEditor
+      weekStartDate={MONDAY}
+      initialWeek={WEEK}
+      games={GAMES}
+      currentWeek={MONDAY}
+      today={OTHER_WEEK}
+    />,
   );
   const pick = <T extends HTMLElement>(odId: string) =>
     container.querySelector<T>(`[data-od-id="${odId}"]`);
@@ -159,6 +168,7 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
         initialWeek={{ ...WEEK, entries: [] }}
         games={GAMES}
         currentWeek={MONDAY}
+        today={OTHER_WEEK}
       />,
     );
     const toggle = container.querySelector<HTMLInputElement>(
