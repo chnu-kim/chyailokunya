@@ -223,7 +223,16 @@ function kstWeekRangeLabel(epochMs) {
   return `${md(monday)} – ${md(sunday)}`;
 }
 
-function checkCurrentWeek(body) {
+/* 서버가 그린 주가 **그 요청이 걸쳐 있던 순간들** 중 하나와 맞는지 본다.
+
+   `startedAt`/`endedAt` 은 이 요청을 보내기 직전·받은 직후에 찍은 시각이다. 보통 그 구간이
+   수백 ms 라 라벨이 하나뿐이고, KST 자정을 사이에 두고 주가 바뀌는 순간에만 둘이 된다.
+
+   **처음엔 "어제도 허용"으로 뒀다가 고쳤다**(GitHub codex 리뷰 P2). 무조건 24시간을 빼면
+   **KST 월요일마다 지난 주 라벨이 통째로 허용된다** — 서버가 UTC 로 계산해 일요일(=지난 주)을
+   그리거나 시계가 일주일 낡아도 스모크가 초록이다. 자정 오탐을 막으려고 넣은 여유가 게이트의
+   검출력을 그만큼 깎는 셈이라, **실제 요청 구간**으로만 좁힌다. */
+function checkCurrentWeek(body, startedAt, endedAt) {
   /* 그 요소의 **안쪽 전체**를 잡고 마크업을 걷어낸다 — React 가 텍스트 노드 사이에
      `<!-- -->` 를 끼우므로(실측: `12.29<!-- --> – <!-- -->1.4`) `[^<]+` 로는 앞 조각만
      읽힌다. 그러면 기대값과 영영 안 맞아 **고친 뒤에도 계속 빨간** 게이트가 된다. */
@@ -236,11 +245,10 @@ function checkCurrentWeek(body) {
   if (!shown) {
     return `주 범위(.sched__range)를 못 읽었다 — 마크업이 바뀌었으면 이 정규식도 같이 고친다`;
   }
-  const now = Date.now();
-  const allowed = [kstWeekRangeLabel(now), kstWeekRangeLabel(now - 86400000)];
+  const allowed = [...new Set([kstWeekRangeLabel(startedAt), kstWeekRangeLabel(endedAt)])];
   if (allowed.includes(shown)) return null;
   return (
-    `서버가 그린 이번 주가 "${shown}" 인데 실제 KST 이번 주는 "${allowed[0]}" 다 — ` +
+    `서버가 그린 이번 주가 "${shown}" 인데 실제 KST 이번 주는 "${allowed.join(" 또는 ")}" 다 — ` +
     `서버 시계가 틀렸다(1970 이면 Temporal.Now 회귀를 먼저 의심한다)`
   );
 }
@@ -351,11 +359,15 @@ async function main() {
   for (let round = 1; round <= ROUNDS; round++) {
     for (const target of targets) {
       // 재시도는 라운드 1 에서만 — 라운드 2 의 캐스케이드 감지를 삼키지 않게(위 상수 주석).
+      /* 요청 직전·직후를 찍는다 — 이번 주 검사가 허용할 라벨을 **그 구간으로만** 좁힌다
+         (checkCurrentWeek 주석). 재시도가 끼면 구간이 3초쯤 늘 뿐이라 규칙은 그대로다. */
+      const startedAt = Date.now();
       const result = await probe(target.path, target, { allowRetry: round === 1 });
+      const endedAt = Date.now();
       console.log(`  [${round}/${ROUNDS}] ${result.ok ? "ok  " : "FAIL"} ${result.url}`);
       if (!result.ok) failures.push(`${result.url} — ${result.reason}`);
       if (result.ok && target.path === CURRENT_WEEK_PATH && result.body) {
-        const weekProblem = checkCurrentWeek(result.body);
+        const weekProblem = checkCurrentWeek(result.body, startedAt, endedAt);
         console.log(
           `  [${round}/${ROUNDS}] ${weekProblem ? "FAIL" : "ok  "} ${result.url} (이번 주)`,
         );
