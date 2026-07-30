@@ -175,6 +175,23 @@ function jpegWith(width: number, height: number, lead: number[] = []): Uint8Arra
   return new Uint8Array([0xff, 0xd8, ...lead, ...sof]);
 }
 
+/* EXIF APP1 세그먼트. **엔디안 두 경로를 다 만든다** — TIFF 헤더가 스스로 밝히는 값이고
+   (`II`=LE, `MM`=BE) 파서가 그 둘을 갈라 읽으므로, 하나만 테스트하면 나머지 절반이 안 덮인다.
+   IFD0 에 Orientation(0x0112, SHORT) 하나만 넣는다. */
+function exifApp1(orientation: number, little: boolean): number[] {
+  const tiff = little
+    ? [0x49, 0x49, 0x2a, 0x00, 8, 0, 0, 0] // "II" + 매직 + IFD0 오프셋 8(TIFF 기준)
+    : [0x4d, 0x4d, 0x00, 0x2a, 0, 0, 0, 8];
+  const count = little ? [1, 0] : [0, 1];
+  const entry = little
+    ? [0x12, 0x01, 3, 0, 1, 0, 0, 0, orientation, 0, 0, 0]
+    : [0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0];
+  // "Exif\0\0" + TIFF + IFD0(엔트리 수 · 엔트리 · 다음 IFD 오프셋 0)
+  const payload = [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff, ...count, ...entry, 0, 0, 0, 0];
+  const len = payload.length + 2; // 길이 필드는 자기를 포함한다
+  return [0xff, 0xe1, len >> 8, len & 0xff, ...payload];
+}
+
 function vp8With(width: number, height: number): Uint8Array {
   const b = new Uint8Array(30);
   b.set([0x52, 0x49, 0x46, 0x46], 0); // RIFF
@@ -238,6 +255,53 @@ describe("readImageDimensions", () => {
     // 길이 0 은 오프셋을 안 늘린다. 상한이 없으면 여기서 루프가 끝나지 않는다.
     const evil = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x00, 0xff, 0xe0, 0x00, 0x00]);
     expect(readImageDimensions(evil, "jpeg")).toBeNull();
+  });
+
+  it("EXIF orientation 5~8 은 폭·높이를 뒤바꿔 준다 — 브라우저가 회전해 그린다", () => {
+    /* 브라우저는 `image-orientation: from-image` 가 기본값이라 EXIF 회전을 적용해 그리는데 SOF 가
+       적은 것은 **회전 전 픽셀 행렬**이다. 그 값을 그대로 예약에 쓰면 로드 순간 화면이 튄다 —
+       이 컬럼이 막으려던 바로 그 시프트다(plain 리뷰 6라운드). 폰으로 찍어 올린 세로 그림이
+       정확히 이 부류다. */
+    for (const little of [true, false]) {
+      // 6 = rotate 90 CW. 파일은 4000×3000(가로)인데 화면엔 3000×4000(세로)으로 뜬다.
+      const rotated = jpegWith(4000, 3000, exifApp1(6, little));
+      expect(readImageDimensions(rotated, "jpeg"), `little=${little}`).toEqual({
+        width: 3000,
+        height: 4000,
+      });
+      // 5·7·8 도 90/270 계열이라 같이 뒤바뀐다.
+      for (const o of [5, 7, 8]) {
+        expect(readImageDimensions(jpegWith(4000, 3000, exifApp1(o, little)), "jpeg")).toEqual({
+          width: 3000,
+          height: 4000,
+        });
+      }
+    }
+  });
+
+  it("orientation 1~4 는 그대로 둔다 — 회전이 없거나 180°·거울이다", () => {
+    for (const o of [1, 2, 3, 4]) {
+      expect(readImageDimensions(jpegWith(4000, 3000, exifApp1(o, true)), "jpeg")).toEqual({
+        width: 4000,
+        height: 3000,
+      });
+    }
+  });
+
+  it("EXIF 가 없거나 APP1 이 XMP 면 스왑하지 않는다 — 안전한 기본값이다", () => {
+    // 회전 정보가 없는 JPEG(대부분)와 같은 취급이어야 한다.
+    expect(readImageDimensions(jpegWith(4000, 3000), "jpeg")).toEqual({
+      width: 4000,
+      height: 3000,
+    });
+    /* APP1 이지만 "Exif\0\0" 서명이 아닌 경우(XMP 가 같은 마커를 쓴다) — 서명으로 갈라야
+       엉뚱한 바이트를 orientation 으로 읽지 않는다. */
+    const xmp = exifApp1(6, true);
+    xmp[4] = 0x68; // "Exif" → "hxif"
+    expect(readImageDimensions(jpegWith(4000, 3000, xmp), "jpeg")).toEqual({
+      width: 4000,
+      height: 3000,
+    });
   });
 
   it("WebP 세 변종을 모두 읽는다 — 하나만 파싱하면 정상 파일의 2/3 를 거절한다", () => {

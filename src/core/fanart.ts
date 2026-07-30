@@ -107,8 +107,59 @@ const JPEG_MAX_SEGMENTS = 64;
 const SOF_MARKERS = new Set([
   0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
 ]);
+
+/* EXIF Orientation(APP1) — **5~8 이면 표시 치수가 SOF 의 폭·높이와 뒤바뀐다.**
+
+   왜 봐야 하나: 브라우저는 `image-orientation: from-image` 가 기본값이라 EXIF 회전을 적용해
+   그린다. 그런데 SOF 가 적은 것은 **회전 전 픽셀 행렬**이라, 그 값을 `<img width height>` 에
+   그대로 실으면 예약 비율이 뒤집혀 로드 순간 화면이 튄다 — 이 컬럼이 막으려던 바로 그 시프트다
+   (plain 리뷰 6라운드). 폰으로 찍어 올린 세로 그림이 정확히 이 부류이고, 팬아트 맥락에서 흔하다.
+
+   파싱은 IFD0 의 태그 0x0112 하나만 본다. TIFF 헤더가 엔디안을 스스로 밝히므로(`II`/`MM`) 두
+   경로가 필요하고, 엔트리 순회에는 상한을 둔다 — 여기도 요청 경로다(JPEG_MAX_SEGMENTS 와 같은
+   이유). 못 읽으면 null 이고 그때는 **스왑하지 않는다**: 회전 정보가 없는 JPEG(대부분)와 같은
+   취급이라 안전한 기본값이다. */
+const EXIF_MAX_IFD_ENTRIES = 256;
+function exifOrientation(b: Uint8Array, at: number, len: number): number | null {
+  // "Exif\0\0" 뒤부터 TIFF 헤더다. APP1 이지만 XMP 인 경우도 있어 이 서명으로 가른다.
+  const sig = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
+  if (!startsWith(b, sig, at + 2)) return null;
+  const tiff = at + 2 + sig.length;
+  const le = b[tiff] === 0x49 && b[tiff + 1] === 0x49;
+  const be = b[tiff] === 0x4d && b[tiff + 1] === 0x4d;
+  if (!le && !be) return null;
+  const u16 = (o: number) => (le ? leU16(b, o) : beU16(b, o));
+  const u32 = (o: number) =>
+    le
+      ? b.length < o + 4
+        ? null
+        : (b[o]! | (b[o + 1]! << 8) | (b[o + 2]! << 16) | (b[o + 3]! << 24)) >>> 0
+      : beU32(b, o);
+
+  const ifd0 = u32(tiff + 4);
+  // 오프셋은 **TIFF 헤더 시작 기준**이다(파일 시작이 아니다) — 이걸 틀리면 엉뚱한 바이트를 읽는다.
+  if (ifd0 === null || ifd0 < 8) return null;
+  const dir = tiff + ifd0;
+  const count = u16(dir);
+  if (count === null) return null;
+  // 세그먼트 밖을 읽지 않는다 — 길이가 거짓인 파일이 다음 세그먼트를 침범해 읽는 걸 막는다.
+  const end = Math.min(at + len, b.length);
+  for (let i = 0; i < Math.min(count, EXIF_MAX_IFD_ENTRIES); i++) {
+    const e = dir + 2 + i * 12;
+    if (e + 12 > end) return null;
+    if (u16(e) !== 0x0112) continue;
+    /* SHORT(type 3) 이고 값이 4바이트 자리에 인라인으로 들어 있다 — 이 태그는 규격상 항상
+       그렇다. 엔디안에 따라 앞 2바이트가 값이다. */
+    const value = u16(e + 8);
+    return value !== null && value >= 1 && value <= 8 ? value : null;
+  }
+  return null;
+}
+
 function jpegSize(b: Uint8Array) {
   let at = 2; // FF D8(SOI) 다음
+  // APP1 은 보통 SOF 보다 앞에 온다 — 만나면 기억해 두고 SOF 에서 적용한다(스캔 한 번으로 끝난다).
+  let orientation: number | null = null;
   for (let hops = 0; hops < JPEG_MAX_SEGMENTS; hops++) {
     // 마커는 FF 로 시작한다. 패딩 FF 가 여러 개 올 수 있어 건너뛴다.
     while (at < b.length && b[at] === 0xff) at++;
@@ -119,10 +170,18 @@ function jpegSize(b: Uint8Array) {
     if ((marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) continue;
     const len = beU16(b, at);
     if (len === null || len < 2) return null; // 길이가 자기(2)보다 작으면 깨진 파일이다
+    if (marker === 0xe1 && orientation === null) {
+      orientation = exifOrientation(b, at, len);
+    }
     if (SOF_MARKERS.has(marker)) {
       const height = beU16(b, at + 3);
       const width = beU16(b, at + 5);
-      return width !== null && height !== null ? { width, height } : null;
+      if (width === null || height === null) return null;
+      /* 5~8 은 90°/270° 를 포함하는 값이라(transpose·rotate90·transverse·rotate270) 표시
+         치수가 뒤바뀐다. 1~4 는 회전이 없거나 180°·거울이라 그대로다. */
+      return orientation !== null && orientation >= 5 && orientation <= 8
+        ? { width: height, height: width }
+        : { width, height };
     }
     at += len;
   }
