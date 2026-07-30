@@ -175,6 +175,11 @@ test("픽셀 폭탄은 R2 에 들어가기 전에 거절된다 — 바이트 상
    `file(1)` 은 헤더만 보므로 그 상태를 통과시킨다(실측 2026-07-30). */
 const FANART_PNG = fileURLToPath(new URL("./fixtures/fanart-2x3.png", import.meta.url));
 const FANART_WEEK = "2033-03-07";
+/* 극단 비율(20×2000 = 4만 화소). **픽셀 예산·한 변 상한 둘 다 통과하는 정당한 업로드**다.
+   표시 상한(schedule.css 의 max-height)을 지우면 이 그림의 렌더 높이가 **2000px** 로 잡힌다
+   (실측 — 폭이 20px 이라 `.sched-fanart-card` 의 `fit-content` 가 그 폭을 그대로 준다: 뷰포트
+   800 의 2.5배다). 폭이 큰 쪽이 더 나쁘다 — 1200×20000 이면 420px 상한에서 7000px 이 된다. */
+const TALL_PNG = fileURLToPath(new URL("./fixtures/fanart-20x2000.png", import.meta.url));
 
 test("관리자가 올린 그림을 저장·발행하면 팬이 그걸 본다", async ({ browser, baseURL }) => {
   const admin = await contextAs(browser, baseURL!);
@@ -227,6 +232,34 @@ test("관리자가 올린 그림을 저장·발행하면 팬이 그걸 본다", 
   await expect
     .poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth))
     .toBeGreaterThan(0);
+
+  /* ── 극단 비율을 표시가 제한한다(적대적 리뷰 4라운드) ────────────────────────────────
+     같은 주의 그림을 20×2000 으로 **교체한다**(4만 화소 — 픽셀 예산·한 변 상한 둘 다 안이라
+     업로드가 정당하게 통과한다). max-height 를 지우면 렌더 높이가 2000px 로 잡히고(실측), 폭이
+     큰 그림이면 더 나쁘다(1200×20000 → 7000px) — 발행된 주를 여는 방문자가 그 아래를 못 본다.
+
+     교체를 쓰는 이유가 둘이다: 발행된 주를 하나 더 만들지 않아 픽스처 오염이 안 늘고, "키를
+     바꾸면 옛 객체를 치운다"는 서버 계약이 같은 흐름에서 한 번 더 돈다. */
+  await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(TALL_PNG);
+  await expect(thumb).toHaveAttribute("src", /^\/api\/fanart\/[0-9a-f-]{36}\.png$/);
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  await fan.reload();
+  const tall = fan.locator('[data-od-id="schedule-fanart"] img');
+  // 저장된 치수는 그대로다 — 제한은 데이터가 아니라 표시에 있다(그래야 레거시 행도 덮인다).
+  await expect(tall).toHaveAttribute("height", "2000");
+  await expect
+    .poll(() => tall.evaluate((el: HTMLImageElement) => el.naturalHeight))
+    .toBeGreaterThan(0);
+
+  const box = (await tall.boundingBox())!;
+  /* 720px 이 CSS 상한이다(min(720px, 80vh) — 이 뷰포트는 720 쪽이 작다). 상한이 없으면 여기가
+     42000 근처로 잡힌다. 1px 여유는 소수점 레이아웃의 반올림 몫이다. */
+  expect(box.height).toBeLessThanOrEqual(721);
+  // 문서가 그 그림 때문에 비정상적으로 길어지지도 않는다 — 상한이 실제 레이아웃에 먹었다는 뜻.
+  const docHeight = await fan.evaluate(() => document.documentElement.scrollHeight);
+  expect(docHeight).toBeLessThan(4000);
 
   await fanContext.close();
   await admin.close();
