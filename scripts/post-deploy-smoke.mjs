@@ -38,6 +38,16 @@ function knownPagePaths() {
         "정규식도 같이 고친다. 검사 대상 0 으로 통과시키지 않는다.",
     );
   }
+  /* 뽑은 값이 **우리 경로인지**도 본다. 오늘은 전부 루트 상대 경로지만, 그 배열에 외부 링크가
+     하나 들어오는 순간 `${ORIGIN}https://…` 라는 쓰레기 URL 을 두드린다 — 최악은 남의 호스트에
+     배포마다 요청을 보내는 것이다. "못 찾으면 죽는다"의 짝이 되는 가드다. */
+  const foreign = hrefs.filter((href) => !href.startsWith("/"));
+  if (foreign.length > 0) {
+    throw new Error(
+      `SITE_LINKS 에 루트 상대 경로가 아닌 항목이 있다: ${foreign.join(", ")} — 스모크는 우리 ` +
+        "origin 만 두드린다. 외부 링크를 그 배열에 넣었다면 여기서 걸러 낼 방법을 먼저 정한다.",
+    );
+  }
   return ["/", ...hrefs];
 }
 
@@ -55,16 +65,56 @@ function cfErrorIn(body) {
   return hit ? hit[1] : null;
 }
 
+/* **요청마다 시한을 둔다.** 없으면 응답이 영영 안 오는 경우 이 스크립트가 매달리고, 그걸
+   부르는 CI·Deploy job 도 같이 매달린다 — 워크플로 타임아웃(수십 분)에 걸려서야 죽는데 그때
+   로그는 "무슨 일이 있었는지"를 말해 주지 않는다. 스모크가 재는 건 어차피 "즉시 응답하는가"라
+   10초면 넉넉하다(정상 응답은 로컬·프로덕션 모두 100ms 대). */
+const PROBE_TIMEOUT_MS = 10_000;
+
+/* **재시도는 하되, Cloudflare 에러 표식이 보이면 안 한다.** 배포 직후 첫 요청은 콜드 스타트나
+   전파 지연으로 한 번 튈 수 있고, 그걸로 좋은 배포를 빨갛게 만들면 "스모크가 가끔 빨갛다"가
+   되어 아무도 안 보게 된다. 하지만 **1102 는 그 자체가 간헐적**이라 무턱대고 재시도하면 이
+   층이 존재하는 이유를 스스로 지운다 — 표식이 보이는 실패는 첫 번에 확정한다.
+
+   같은 이유로 4xx 도 재시도하지 않는다(라우트가 없는 것은 기다린다고 생기지 않는다). */
+const RETRY_ONCE_AFTER_MS = 3_000;
+
+async function fetchOnce(url) {
+  const res = await fetch(url, {
+    redirect: "manual",
+    headers: { "user-agent": "chyailokunya-smoke" },
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+  });
+  return { res, body: await res.text() };
+}
+
+// 재시도해도 될 실패인가 — 연결 자체 실패(res 없음)와 CF 표식 없는 5xx 만.
+function isTransient(attempt) {
+  if (!attempt.res) return true;
+  return attempt.res.status >= 500 && cfErrorIn(attempt.body) === null;
+}
+
 async function probe(path, { expectHtml }) {
   const url = `${ORIGIN}${path}`;
-  let res;
+
+  let attempt;
   try {
-    res = await fetch(url, { redirect: "manual", headers: { "user-agent": "chyailokunya-smoke" } });
+    attempt = await fetchOnce(url);
   } catch (cause) {
-    return { ok: false, url, reason: `요청 자체가 실패했다: ${cause}` };
+    attempt = { res: null, body: "", cause };
+  }
+  if (isTransient(attempt)) {
+    await new Promise((resolve) => setTimeout(resolve, RETRY_ONCE_AFTER_MS));
+    try {
+      attempt = await fetchOnce(url);
+    } catch (cause) {
+      attempt = { res: null, body: "", cause };
+    }
   }
 
-  const body = await res.text();
+  const { res, body } = attempt;
+  if (!res) return { ok: false, url, reason: `요청 자체가 실패했다: ${attempt.cause}` };
+
   const cfError = cfErrorIn(body);
   if (cfError) return { ok: false, url, reason: `${cfError} (status ${res.status})` };
   if (res.status !== 200) return { ok: false, url, reason: `status ${res.status}` };

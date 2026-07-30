@@ -16,6 +16,7 @@
 
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import type { Result } from "axe-core";
 
 const WCAG_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
@@ -31,6 +32,14 @@ const WIDTHS = [
   { label: "320px", width: 320, height: 800 },
 ] as const;
 
+/* 실패 메시지에 **어느 요소가 왜** 걸렸는지를 싣는다. axe 결과를 그대로 비교하면 수백 줄
+   JSON 이 나와 정작 무엇을 고쳐야 하는지가 안 보인다. */
+function summarize(violations: Result[]): string[] {
+  return violations.map(
+    (v) => `[${v.id}] ${v.help} — ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+  );
+}
+
 for (const { label, width, height } of WIDTHS) {
   test.describe(`axe · ${label}`, () => {
     for (const path of PAGES) {
@@ -43,13 +52,31 @@ for (const { label, width, height } of WIDTHS) {
 
         const { violations } = await new AxeBuilder({ page }).withTags(WCAG_AA).analyze();
 
-        /* 실패 메시지에 **어느 요소가 왜** 걸렸는지를 싣는다. axe 결과를 그대로 toEqual 하면
-           수백 줄 JSON 이 나와 정작 무엇을 고쳐야 하는지가 안 보인다. */
-        const summary = violations.map(
-          (v) => `[${v.id}] ${v.help} — ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
-        );
-        expect(summary, `${path} (${label})`).toEqual([]);
+        expect(summarize(violations), `${path} (${label})`).toEqual([]);
       });
     }
+
+    /* **모달을 안 열면 이 앱의 인터랙티브 표면 대부분이 스캔 밖이다.** 위 넷은 페이지의 초기·
+       닫힌 상태만 본다 — 그런데 이 저장소가 접근성으로 실제 애를 먹은 자리는 대개 다이얼로그
+       쪽이었다(포커스 복원·inert·터치 타깃). 게임 상세는 **공개**라 세션 없이 열 수 있어 여기
+       한 장을 표본으로 넣는다.
+
+       관리자 전용 모달(편집기·제안함·발행 확인)은 여전히 스캔 밖이다 — 신원이 갈리는 화면은
+       세션을 심어야 하고, 그건 `narrow-body.spec.ts` 가 이미 세션을 바꿔 가며 재는 자리라
+       거기로 미룬다. **"axe 가 접근성을 본다"는 말은 그 범위까지 참이 아니다.** */
+    test("게임 상세 다이얼로그에 WCAG 2.1 AA 위반이 없다", async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto("/games");
+
+      await page.locator(".game").filter({ hasText: "엘든 링" }).getByRole("button").click();
+      const detail = page.locator('dialog[data-od-id="game-detail"]');
+      // 열린 걸 확인하고 스캔한다 — 안 열렸는데 통과하면 검출력 0 인 테스트가 된다.
+      await expect(detail).toBeVisible();
+
+      const { violations } = await new AxeBuilder({ page }).withTags(WCAG_AA).analyze();
+
+      expect(summarize(violations), `game-detail (${label})`).toEqual([]);
+    });
   });
 }
