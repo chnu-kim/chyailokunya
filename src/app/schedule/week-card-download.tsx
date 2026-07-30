@@ -96,6 +96,46 @@ function snapshotCard(node: HTMLDivElement): { clone: HTMLDivElement; dispose: (
   return { clone, dispose: () => holder.remove() };
 }
 
+/* 캡처 전에 카드 안 그림을 **우리가** data URL 로 바꿔 끼우고 디코드까지 끝낸다(이슈 #122).
+
+   html-to-image 도 같은 일을 하지만(embed-images.js 의 embedImageNode) 그 결과가 그림을 **한 번씩
+   빠뜨린다.** 실측(2026-07-30, 같은 세션에서 6번 연속 캡처): 1·3·4·5·6번은 팬아트가 담겼고
+   **2번만 통째로 비었다.** 생성된 SVG 를 뜯어 보면 2번에도 `src="data:image/png;base64,…"` 가
+   제대로 들어 있다 — 즉 **인라인이 아니라 래스터화가 진다.** 1번은 네트워크에서 받아 오느라
+   (요청 로그에 `fetch`) 시간이 걸리는 사이 브라우저가 그 data URL 을 디코드해 두는데, 2번은
+   라이브러리 캐시에 맞아 요청이 없어(로그에 `image` 만) SVG 를 곧바로 그리고, 그때 안쪽 그림이
+   아직 디코드 전이라 빈 자리로 래스터된다. 3번부터는 디코드 캐시가 데워져 다시 나온다.
+
+   그래서 **같은 문자열을 미리 이 문서에서 디코드해 둔다** — `img.decode()` 가 끝나면 그 data URL
+   의 비트맵이 브라우저 캐시에 있으므로, SVG 안의 같은 data URL 은 그릴 때 바로 나온다. 덤으로
+   라이브러리의 fetch 가 사라져 왕복이 하나 준다.
+
+   실패하면 **주소를 그대로 둔다** — html-to-image 가 예전처럼 자기 경로로 시도한다(오늘과 같은
+   상태로 떨어질 뿐 더 나빠지지 않는다). 그림 한 장 때문에 일정 카드 전체를 못 받게 만들 이유가
+   없다. `decode` 가 없는 환경(테스트용 DOM 구현)에선 그 단계만 건너뛴다. */
+async function inlineImages(root: HTMLElement): Promise<void> {
+  const targets = [...root.querySelectorAll("img")].filter((img) => !img.src.startsWith("data:"));
+  await Promise.all(
+    targets.map(async (img) => {
+      try {
+        const res = await fetch(img.src);
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+        img.src = dataUrl;
+        if (typeof img.decode === "function") await img.decode();
+      } catch {
+        // 위 주석 — 원래 주소를 그대로 두고 라이브러리에 맡긴다.
+      }
+    }),
+  );
+}
+
 type InFlightMap = Map<string, Promise<string>>;
 
 /* 캐시 키는 오브젝트 참조가 아니라 "그 주 + 그 내용" 문자열이다(라운드 6 적대적 리뷰) — 참조로
@@ -150,6 +190,7 @@ function startCapture(
   const promise = (async () => {
     try {
       const [{ toPng }] = await Promise.all([import("html-to-image"), document.fonts.ready]);
+      await inlineImages(snapshot.clone);
       return await toPng(snapshot.clone, { pixelRatio: PIXEL_RATIO });
     } finally {
       snapshot.dispose();
