@@ -218,17 +218,19 @@ export class FanartUploadFailed extends Error {
   }
 }
 
-/* 업로드 라우트가 실패를 `{ error }` JSON 으로 말한다 — 그 문구를 뽑아 위 클래스에 싣는다.
-   못 읽으면 빈 문자열이고, 그때 아래 매퍼가 일반 문구로 떨어진다(우리가 확인하지 못한 것을
-   단정하지 않는다). `Response` 는 런타임 중립 타입이라 core 에 있어도 이 파일이 HTTP 를 아는
-   것은 아니다 — 실제 요청은 화면이 보낸다. */
-export async function fanartUploadErrorText(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: unknown };
-    return typeof body.error === "string" ? body.error : "";
-  } catch {
-    return "";
-  }
+/* 업로드 라우트가 실패를 `{ error }` JSON 으로 말한다 — 그 봉투에서 문구를 뽑아 위 클래스에
+   싣는다. 문구가 없으면 빈 문자열이고, 그때 아래 매퍼가 일반 문구로 떨어진다(우리가 확인하지
+   못한 것을 단정하지 않는다).
+
+   **`Response` 를 받지 않는다 — 이미 파싱된 값을 받는다.** 한때 `res.json()` 을 여기서 했는데,
+   그러면 `src/core` 가 HTTP 응답과 전송 본문 의미를 알게 되어 레이어 계약("core 는 HTTP·DB·React
+   무관")이 깨진다(GitHub codex 리뷰 P1). `Response` 는 전역 타입이라 **import 가 없어
+   dependency-cruiser 가 그 위반을 못 잡는다** — 기계가 안 잡는 자리라 규칙으로 지켜야 한다.
+   응답을 읽는 것은 app 쪽 업로드 어댑터의 일이고, 여기는 "봉투에서 문구를 꺼낸다"는 순수 규칙만
+   맡는다(그래서 단위 테스트가 그 분기를 그대로 본다). */
+export function fanartUploadErrorText(body: unknown): string {
+  const error = (body as { error?: unknown } | null | undefined)?.error;
+  return typeof error === "string" ? error : "";
 }
 
 export function fanartUploadErrorMessage(e: unknown): string {

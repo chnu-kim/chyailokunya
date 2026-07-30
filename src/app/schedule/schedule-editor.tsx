@@ -140,7 +140,18 @@ export function ScheduleEditor({
          본문은 raw 바이트다(multipart 가 아니다 — 파일 하나뿐이라 폼이 표현할 게 없다). */
       uploadRun: async ({ file }, signal) => {
         const res = await fetch("/api/fanart", { method: "POST", body: file, signal });
-        if (!res.ok) throw new FanartUploadFailed(res.status, await fanartUploadErrorText(res));
+        if (!res.ok) {
+          /* **응답을 읽는 것은 여기(app)의 일이다** — core 의 매퍼는 이미 파싱된 봉투에서 문구만
+             꺼낸다(레이어 계약: core 는 HTTP 를 모른다). JSON 이 아니면(502 HTML 등) 문구가 없는
+             것으로 두고, 매퍼가 원인을 단정하지 않는 일반 문구로 떨어진다. */
+          let envelope: unknown = null;
+          try {
+            envelope = await res.json();
+          } catch {
+            envelope = null;
+          }
+          throw new FanartUploadFailed(res.status, fanartUploadErrorText(envelope));
+        }
         /* **치수도 서버가 준다** — 픽셀 가드가 헤더에서 이미 읽었으므로 공짜다(라우트 주석).
            한때 여기서 `createImageBitmap` 으로 다시 읽었는데, 그건 예산 안(40MP)인 그림도
            160MB 비트맵으로 **관리자 탭에서 디코드**하는 일이라 그 가드가 막으려던 것과 같은

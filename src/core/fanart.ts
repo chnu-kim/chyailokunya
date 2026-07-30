@@ -226,8 +226,13 @@ function webpSize(b: Uint8Array) {
      APNG — `acTL` 청크. 규격이 **IDAT 앞**에 오도록 못박았으므로 IDAT 를 만나면 그만 본다.
      WebP — VP8X flags 바이트의 ANIMATION 비트(MSB 기준 6번째 = 0x02).
      JPEG — 애니메이션이 없다.
-   청크 순회에 상한을 둔다(요청 경로다 — JPEG 세그먼트 상한과 같은 이유). */
-const PNG_MAX_CHUNKS = 32;
+   **청크 순회에 횟수 상한을 두지 않는다.** 처음엔 32 로 잘랐는데, `acTL` 앞에 ancillary 청크가
+   그보다 많은 **유효한 APNG** 가 그 상한에 걸려 "정적"으로 통과했다(GitHub codex 리뷰 P2) —
+   상한을 CPU 방어로 두면서 초과를 fail-open 으로 처리한 것이라, 같은 파일의 픽셀 가드(못 읽으면
+   거절)와 방향이 어긋났다. 상한이 없어도 **종료는 보장된다**: 오프셋이 매 청크마다 최소 12바이트
+   증가하므로 5MB 본문에서 순회는 최대 ~43만 회이고 회당 하는 일은 4바이트 읽기 + 4바이트 비교다.
+   (JPEG 은 길이 0 으로 오프셋이 안 늘어 상한이 필요했다 — 그 차이가 여기 상한을 뺄 수 있는
+   이유다.) */
 export function isAnimatedImage(bytes: Uint8Array, type: FanartImageType): boolean {
   if (type === "jpeg") return false;
   if (type === "webp") {
@@ -236,16 +241,17 @@ export function isAnimatedImage(bytes: Uint8Array, type: FanartImageType): boole
     return bytes.length > 20 && (bytes[20]! & 0x02) !== 0;
   }
   let at = 8; // PNG 시그니처 다음
-  for (let i = 0; i < PNG_MAX_CHUNKS; i++) {
+  while (at + 8 <= bytes.length) {
     const len = beU32(bytes, at);
     if (len === null) return false;
     const kind = String.fromCharCode(...bytes.slice(at + 4, at + 8));
     if (kind === "acTL") return true;
-    // 첫 IDAT 뒤엔 acTL 이 못 온다(규격) — 거기서 멈추면 큰 파일을 끝까지 훑지 않는다.
+    // 첫 IDAT 뒤엔 acTL 이 못 온다(규격) — 거기서 멈추면 큰 파일의 픽셀 데이터를 안 훑는다.
     if (kind === "IDAT" || kind === "IEND") return false;
     at += 12 + len; // 길이(4) + 타입(4) + 데이터 + CRC(4)
-    if (at >= bytes.length) return false;
   }
+  /* IDAT 도 acTL 도 없이 끝났다 = 잘렸거나 깨진 파일이다. 애니메이션은 아니므로 false 이고, 그
+     파일은 브라우저가 못 그릴 뿐 우리 쪽 위험이 아니다(ADR-0028 의 "디코드는 안 한다"와 같은 결). */
   return false;
 }
 

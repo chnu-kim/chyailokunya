@@ -251,16 +251,20 @@ describe("fanartUploadErrorMessage(ADR-0028)", () => {
 });
 
 describe("fanartUploadErrorText", () => {
-  /* 업로드 라우트는 실패를 `{ error }` JSON 으로 말한다. **못 읽으면 빈 문자열**이고, 그때 매퍼가
-     일반 문구로 떨어진다 — 이 파일의 원칙(확인 안 된 것은 말하지 않는다)이 여기서 시작한다. */
-  it("서버가 준 문구를 뽑는다", async () => {
-    const res = Response.json({ error: "파일이 너무 큽니다." }, { status: 413 });
-    await expect(fanartUploadErrorText(res)).resolves.toBe("파일이 너무 큽니다.");
+  /* **`Response` 를 안 받는다** — 이미 파싱된 봉투를 받는다(레이어 계약: core 는 HTTP 를 모른다,
+     GitHub codex 리뷰 P1). 응답을 읽는 것은 app 쪽 업로드 어댑터의 일이고, 여기는 "봉투에서
+     문구를 꺼낸다"는 규칙만 맡는다. 문구가 없으면 빈 문자열이고 그때 매퍼가 일반 문구로 떨어진다
+     — 이 파일의 원칙(확인 안 된 것은 말하지 않는다)이 거기서 시작한다. */
+  it("서버가 준 문구를 뽑는다", () => {
+    expect(fanartUploadErrorText({ error: "파일이 너무 큽니다." })).toBe("파일이 너무 큽니다.");
   });
 
-  it("JSON 이 아니거나 error 가 문자열이 아니면 빈 문자열", async () => {
-    await expect(fanartUploadErrorText(new Response("<html>502</html>"))).resolves.toBe("");
-    await expect(fanartUploadErrorText(Response.json({ error: 42 }))).resolves.toBe("");
-    await expect(fanartUploadErrorText(Response.json({}))).resolves.toBe("");
+  it("문구가 없거나 문자열이 아니면 빈 문자열", () => {
+    // app 이 JSON 파싱에 실패했을 때 넘기는 값이 null 이다(502 HTML 등).
+    expect(fanartUploadErrorText(null)).toBe("");
+    expect(fanartUploadErrorText(undefined)).toBe("");
+    expect(fanartUploadErrorText({ error: 42 })).toBe("");
+    expect(fanartUploadErrorText({})).toBe("");
+    expect(fanartUploadErrorText("문자열 본문")).toBe("");
   });
 });

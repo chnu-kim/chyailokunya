@@ -392,6 +392,21 @@ describe("isAnimatedImage", () => {
     expect(isAnimatedImage(apng(), "png")).toBe(true);
   });
 
+  it("acTL 앞에 청크가 아무리 많아도 잡는다 — 순회 상한을 두면 그 자리가 통과한다", () => {
+    /* 처음엔 32 청크로 잘랐는데, **유효한 APNG 가 그보다 많은 ancillary 청크를 acTL 앞에 둘 수
+       있다** — 상한에 걸려 "정적"으로 통과했다(GitHub codex 리뷰 P2). 60개를 앞세워 그 회귀를
+       못박는다(되돌리면 빨개진다). */
+    const head = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    const ihdr = [0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, ...Array(13).fill(0), 0, 0, 0, 0];
+    // 길이 0 인 tEXt 청크 60개 — 각 12바이트다.
+    const filler = Array.from({ length: 60 }, () => [
+      0, 0, 0, 0, 0x74, 0x45, 0x58, 0x74, 0, 0, 0, 0,
+    ]).flat();
+    const actl = [0, 0, 0, 8, 0x61, 0x63, 0x54, 0x4c];
+    const bytes = new Uint8Array([...head, ...ihdr, ...filler, ...actl]);
+    expect(isAnimatedImage(bytes, "png")).toBe(true);
+  });
+
   it("정적 PNG 는 통과한다 — IDAT 를 만나면 그만 본다", () => {
     expect(isAnimatedImage(pngWith(100, 100), "png")).toBe(false);
     // acTL 이 아닌 청크(sRGB 등)는 애니메이션이 아니다.
