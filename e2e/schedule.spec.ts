@@ -198,6 +198,60 @@ test("관리자: 휴방만 정한 주도 발행할 수 있다(이슈 #117 결정
   await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("공개 중");
 });
 
+/* 카드 원본 크기 보기(2026-07-31).
+
+   미리보기는 열 폭에 맞춰 축소되므로(창 1300 에서 배율 0.633) 글자 수준 확인은 이 창이 맡는다.
+   여기서 재는 것 셋:
+
+   1. **열리면 카드가 1200px 원본이다** — 축소돼 뜨면 이 창의 존재 이유가 없다.
+   2. **닫힌 dialog 는 CSS 로도 숨는다**(적대적 리뷰 지적). 브라우저 기본은
+      `dialog:not([open]) { display: none }` 인데 author 가 무조건 `display: flex` 를 걸면 그걸
+      이겨 닫힌 창이 화면에 남는다. 지금 구현은 열렸을 때만 마운트해 그 상태를 안 만들지만
+      **그건 JS 규약이고 CSS 는 그걸 모른다** — 그래서 규칙 자체를 직접 잰다: 빈 dialog 를
+      만들어 붙였다 떼며 computed display 를 본다(dom 단위는 CSS 캐스케이드를 이 수준으로
+      계산하지 않아 이 축을 못 본다).
+   3. 닫으면 카드가 다시 하나다 — 사본이 남으면 od-id 가 둘이 되어 다른 스펙이 깨진다. */
+test("관리자: 카드를 원본 크기로 열고 닫는다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+  await page.setViewportSize({ width: 1400, height: 950 });
+  // 다른 스펙이 안 읽는 먼 미래 주. 저장을 안 하므로 공유 픽스처를 안 건드린다.
+  await page.goto("/schedule?week=2038-03-01");
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+
+  /* **닫힌 dialog 의 CSS 계약** — 열기 전에 먼저 잰다. `display: flex` 를 `[open]` 밖에 두면
+     이 값이 "flex" 가 되어 빨개진다(그게 이 단언의 이빨이다). */
+  const closedDisplay = await page.evaluate(() => {
+    const d = document.createElement("dialog");
+    d.className = "sched-zoom";
+    /* `append` 가 아니라 `appendChild` 다 — 이 파일은 Node 타입 환경에서 타입체크되는데
+       `append` 는 이름이 겹쳐 tsc 가 lib.dom 아닌 선언을 잡는다(실측: "Argument of type
+       'HTMLDialogElement' is not assignable to 'string | ReadableStream | Response'"). */
+    document.body.appendChild(d);
+    const display = window.getComputedStyle(d).display;
+    d.remove();
+    return display;
+  });
+  expect(closedDisplay).toBe("none");
+
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("확대 확인용");
+
+  await page.locator('[data-od-id="week-card-download-zoom"]').click();
+  const dialog = page.locator('[data-od-id="week-card-zoom"]');
+  await expect(dialog).toBeVisible();
+
+  // 원본 크기 — 미리보기의 축소본이 아니다.
+  const zoomedWidth = await dialog.locator(".week-card").evaluate((el) => el.clientWidth);
+  expect(zoomedWidth).toBe(1200);
+  /* 사본은 이름을 안 단다 — 같은 od-id 가 둘이면 Playwright strict 로케이터가 무관한 단언에서
+     깨진다(week-card.tsx 의 `identified`). 그 계약이 실제 브라우저에서도 서는지 여기서 본다. */
+  await expect(page.locator('[data-od-id="week-card"]')).toHaveCount(1);
+
+  await page.locator('[data-od-id="week-card-zoom-close"]').click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('[data-od-id="week-card"]')).toHaveCount(1);
+});
+
 /* 휴방 잠금의 흐림 계약(codex 리뷰 P2 둘, 2026-07-31).
 
    `opacity` 는 조상과 자손이 **곱해지고**, 조상에 걸면 합성 그룹이 생겨 **자손이 되돌릴 수

@@ -1417,14 +1417,24 @@ dialog.sched-zoom {
   max-width: none;
   max-height: calc(100vh - 2 * var(--space-5));
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
   padding: var(--space-5);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lift);
+}
+/* **`display` 는 `[open]` 에서만 준다**(적대적 리뷰 지적, 2026-07-31). 브라우저 기본 스타일은
+   `dialog:not([open]) { display: none }` 인데, author 가 무조건 `display: flex` 를 걸면 그걸
+   이겨 **닫힌 창이 화면에 그대로 남는다.** 지금 이 컴포넌트는 열렸을 때만 마운트하므로 그
+   상태가 안 만들어지지만 그건 JS 규약이고 CSS 는 그걸 모른다 — 나중에 누군가 항상 렌더하고
+   `open` 속성으로 여닫게 바꾸면 그 순간 드러난다.
+
+   같은 파일의 `dialog.sched-confirm` 은 애초에 `display` 를 안 건드려 이 문제가 없다.
+   관례를 여기서만 깨지 않는다. */
+dialog.sched-zoom[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 dialog.sched-zoom::backdrop {
   background-color: color-mix(in srgb, var(--brand-ink) 55%, transparent);
