@@ -480,19 +480,21 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-.sched-row__del:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* ── 휴방인 날의 잠긴 항목 덩어리(2026-07-31) ─────────────────────────────────
    점선 테두리를 **평소에도 투명으로 깔아 둔다** — 휴방을 켤 때만 테두리를 만들면 그 순간
    3px 이 생겨 아래 요일들이 통째로 밀린다. 색만 바뀌면 자리는 그대로다.
 
-   opacity 로 흐리는 건 잠긴 덩어리 **전체**다. 컨트롤마다 :disabled 로만 흐리면 그 사이
-   빈 공간과 "+ 항목 추가"의 점선이 또렷하게 남아 "이 영역이 통째로 잠겼다"가 안 읽힌다.
-   흐려진 글자의 대비는 WCAG 1.4.3 이 비활성 컴포넌트를 면제한다 — 대신 잠긴 이유는 아래
-   `.sched-day__rest-note` 가 정상 대비로 말한다(그 문장은 이 덩어리 밖이다). */
+   ── **덩어리에 opacity 를 걸지 않는다**(codex 리뷰 P2 둘, 2026-07-31) ─────────────────
+   첫 판은 `.sched-day__items--rest { opacity: .5 }` 로 덩어리째 흐렸는데 두 가지가 걸렸다:
+
+   1. opacity 는 조상과 자손이 **곱해진다** — 부모 0.5 × `.sched-field:disabled` 0.5 = 0.25 라
+      제목·표지는 25%, 항목추가는 50% 로 같은 덩어리 안에서 세기가 갈렸다.
+   2. opacity 는 **합성 그룹을 만들어 자손이 되돌릴 수 없다** — 그래서 이 덩어리 안에서 하나만
+      또렷하게 남기는 것이 불가능했다. 삭제 버튼이 정확히 그 하나여야 한다(아래).
+
+   그래서 흐림은 **잠긴 컨트롤 각자**(`:disabled`)가 맡고, "이 영역이 잠겼다"는 신호는 점선 +
+   배경 톤이 낸다. 흐려진 글자의 대비는 WCAG 1.4.3 이 비활성 컴포넌트를 면제한다 — 잠긴 이유는
+   아래 `.sched-day__rest-note` 가 정상 대비로 말한다(그 문장은 이 덩어리 밖이다). */
 .sched-day__items {
   display: flex;
   flex-direction: column;
@@ -502,18 +504,14 @@
   border-radius: var(--radius-sm);
 }
 .sched-day__items--rest {
-  opacity: 0.5;
   border-color: var(--border-strong);
+  background-color: var(--surface-2);
 }
-/* **안쪽 컨트롤은 자기 흐림을 끈다**(GitHub codex 리뷰 P2). opacity 는 조상과 자손이 곱해지므로
-   부모 0.5 × `.sched-field:disabled` 0.5 = **0.25** 가 되어, 같은 덩어리 안에서 제목·표지·삭제는
-   25% 인데 항목추가 버튼만 50% 로 서로 다른 세기가 됐다(그 버튼은 `:disabled` 에 opacity 를 안
-   줬다). 보존한 항목을 확인하라고 남겨 둔 자리인데 정작 25% 면 읽기 어렵다 — 흐림은 이 덩어리
-   한 겹으로만 건다. 휴방 밖(팬아트 표기 칸이 업로드 중 잠기는 자리)에선 `:disabled` 규칙이
-   그대로 유일한 흐림이라 영향이 없다. */
-.sched-day__items--rest .sched-field:disabled,
-.sched-day__items--rest .sched-row__del:disabled {
-  opacity: 1;
+/* **삭제만 또렷하다** — 휴방인 날에도 유일하게 살아 있는 조작이라(schedule-editor.tsx 의 근거
+   주석) 흐리면 거짓말이 된다. `:disabled` 가 안 붙으므로 아래 규칙들이 자동으로 비껴간다. */
+.sched-day__items--rest .sched-day__add:disabled,
+.sched-day__items--rest .sched-field:disabled {
+  opacity: 0.5;
 }
 /* 잠긴 이유. 값 칸이 아니라 말을 거는 자리라 문장이고, 합쇼체다(AGENTS). --fg-muted 는
    하루 카드 표면(--surface) 위 라이트 6.39:1 · 다크 6.69:1 로 14px 게이트(4.5:1)를 넘는다. */
@@ -688,8 +686,9 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-/* 휴방인 날엔 못 누른다. 감싸는 덩어리가 이미 흐리므로 여기선 커서만 바꾼다 — opacity 를
-   또 걸면 두 겹이 곱해져 이 버튼만 유독 사라진다. */
+/* 휴방인 날엔 못 누른다. 흐림은 휴방 컨테이너 규칙이 한 번만 주므로(.sched-day__items--rest)
+   여기선 커서만 바꾼다 — 여기에도 opacity 를 두면 두 자리가 같은 사실을 각자 정하게 되고,
+   한쪽만 고쳐지는 날 세기가 갈린다(이 PR 이 실제로 그렇게 갈렸다). */
 .sched-day__add:disabled {
   cursor: not-allowed;
 }

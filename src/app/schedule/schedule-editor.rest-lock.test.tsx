@@ -93,7 +93,6 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
     // 잠겨 있었다"와 구분이 안 된다.
     expect(ui.gameTrigger()).toBeEnabled();
     expect(ui.title()).toBeEnabled();
-    expect(ui.del()).toBeEnabled();
     expect(ui.add()).toBeEnabled();
     expect(ui.note()).toBeNull();
 
@@ -101,8 +100,12 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
 
     expect(ui.gameTrigger()).toBeDisabled();
     expect(ui.title()).toBeDisabled();
-    expect(ui.del()).toBeDisabled();
     expect(ui.add()).toBeDisabled();
+    /* **삭제는 안 잠근다**(codex 리뷰 P2). 막았더니 빠져나갈 길이 없는 자리가 생겼다:
+       "+항목 추가"로 빈 줄을 만든 뒤 그 날을 휴방으로 정하면 빈 제목이 저장을 막는데
+       (firstBlankTitleEntry) 제목도 못 쓰고 삭제도 못 했다 — 그 오류 문구가 "제목을 채우거나
+       삭제해 주십시오"라고 두 길을 안내하는데 화면이 둘 다 막고 있었다. */
+    expect(ui.del()).toBeEnabled();
     // 시각은 이슈 #117 부터 이미 잠겨 있었다 — 그 계약이 안 깨졌는지 함께 본다.
     expect(ui.time()).toBeDisabled();
     expect(ui.note()).toHaveTextContent("휴방인 날은 항목이 나가지 않습니다");
@@ -134,6 +137,18 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
     // **값까지 본다.** 항목 행이 다시 그려지기만 하고 값이 비었다면 "잠그는 대신 지웠다"는
     // 뜻이고, 그건 schema.ts 가 명시적으로 거절한 설계다.
     expect(ui.title()).toHaveValue("마인크래프트");
+    expect(ui.note()).toBeNull();
+  });
+
+  it("휴방인 날에도 항목을 지울 수 있다 — 빈 제목이 저장을 막는 막다른 골목을 막는다", () => {
+    const ui = renderEditor();
+
+    fireEvent.click(ui.restToggle);
+    fireEvent.click(ui.del());
+
+    // 실제로 사라져야 한다 — 버튼이 눌리기만 하고 아무 일도 안 나면 길이 없는 건 그대로다.
+    expect(ui.container.querySelector('[data-od-id="schedule-entry-title-db-1"]')).toBeNull();
+    // 항목이 없어졌으니 안내도 함께 사라진다(그 문장은 "지금 들어 있는 것"을 가리킨다).
     expect(ui.note()).toBeNull();
   });
 

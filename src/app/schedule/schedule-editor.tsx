@@ -578,10 +578,17 @@ export function ScheduleEditor({
                               onChange={(ev) => patch(e.key, { title: ev.target.value })}
                             />
 
+                            {/* **삭제만은 휴방에도 열어 둔다**(codex 리뷰 P2, 2026-07-31).
+                                잠금의 목적은 "휴방인 날에 나가지 않을 내용을 새로 만들거나
+                                고치지 마라"이고, 지우는 건 그 반대 방향(정리)이라 걸릴 이유가
+                                없다. 막았더니 **빠져나갈 길이 없는 자리**가 생겼다: "+항목
+                                추가"로 빈 줄을 만든 뒤 마음을 바꿔 그 날을 휴방으로 정하면,
+                                빈 제목이 저장을 막는데(firstBlankTitleEntry) 제목도 못 쓰고
+                                삭제도 못 한다 — 그 오류 문구 자체가 "제목을 채우거나 삭제해
+                                주십시오"라고 두 길을 안내하는데 화면이 둘 다 막고 있었다. */}
                             <button
                               type="button"
                               className="sched-row__del"
-                              disabled={day.rest}
                               data-od-id={`schedule-entry-del-${e.key}`}
                               onClick={() => remove(e.key)}
                             >
