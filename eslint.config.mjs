@@ -10,6 +10,8 @@ const eslintConfig = [
       ".open-next/**",
       ".wrangler/**",
       "node_modules/**",
+      // istanbul HTML 리포트(gitignore 됨). 안 빼면 리포터의 번들 js 가 lint 경고를 낸다.
+      "coverage/**",
       // 생성물 — 손대지 않으므로 린트 대상 아님(자체 eslint-disable 주석이 노이즈를 낸다).
       "next-env.d.ts",
       "cloudflare-env.d.ts",

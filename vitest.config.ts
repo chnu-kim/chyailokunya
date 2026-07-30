@@ -18,6 +18,52 @@ export default defineConfig(async () => {
   const migrations = await readD1Migrations("./drizzle");
   return {
     test: {
+      /* 커버리지는 **항상 켜져 있다.** 별도 스크립트로 빼면 로컬 `npm test` 와 CI 게이트가
+         갈려서, "로컬에서 게이트를 그대로 돌린다"(AGENTS.md)가 깨진다. 값은 싸다 — 계측을
+         켜도 8.6s → 10.5s 다(실측).
+
+         **provider 는 istanbul 이어야 한다.** 기본값 v8 은 `node:inspector` 의 Session 을
+         쓰는데 workerd 엔 그게 없다 — 워커 풀 스펙 35개가 `ERR_METHOD_NOT_IMPLEMENTED` 로
+         죽고 리포트가 dom 프로젝트만 담은 32% 로 나온다(실측). istanbul 은 소스를 계측해
+         변환하므로 런타임 API 에 안 기댄다.
+
+         **`all: true` 가 핵심이다.** 없으면 테스트가 한 번도 import 하지 않은 파일이 리포트에
+         아예 안 실려 수치가 부풀려진다 — 이 저장소는 86.5% 로 보였지만 실제는 68.3% 였고,
+         빠진 26개 파일에 OAuth 콜백 라우트가 들어 있었다. 커버리지의 값어치는 "덮인 곳"이
+         아니라 "안 덮인 곳"을 세는 데 있으므로 안 덮인 파일이 빠지면 도구가 자기 목적을
+         배반한다. */
+      coverage: {
+        // `--coverage` 플래그 없이도 켜진다 — 게이트를 옵트인으로 두면 아무도 안 켠다.
+        enabled: true,
+        // `as const` 가 없으면 리터럴이 `string` 으로 넓혀져 defineConfig 오버로드가 통째로
+        // 안 맞는다 — 이 콜백이 Promise 를 반환해 추론이 한 단계 더 늦게 일어나기 때문이다.
+        provider: "istanbul" as const,
+        all: true,
+        include: ["src/**/*.{ts,tsx}"],
+        exclude: [
+          "src/**/*.test.{ts,tsx}",
+          "src/**/*.d.ts",
+          // 테스트 하네스와 픽스처 — 스스로가 검증 도구라 커버리지 대상이 아니다.
+          "src/test/**",
+          "src/app/games/test-fixtures.ts",
+        ],
+        reporter: ["text-summary", "json-summary", "html"],
+        reportsDirectory: "./coverage",
+        /* **래칫이다 — 목표가 아니라 바닥이다.** 지금 수치 바로 아래에 박아 두고, 테스트를
+           늘릴 때마다 같이 올린다. 목표치(80% 등)를 미리 박으면 숫자를 채우려는 테스트가
+           섞여 들어오는데, 이 저장소가 테스트에서 얻는 건 커버리지가 아니라 회귀 차단이다.
+
+           수치가 낮은 자리(`src/app` 48.9%)가 곧 위험은 아니다 — page/layout/컴포넌트는
+           e2e 가 실제로 렌더해서 본다. 이 숫자는 **유닛이 보는 범위**만 말하고, 그래서
+           낮은 값이 "여긴 e2e 에만 걸려 있다"를 정직하게 드러낸다. 층별로 무엇이 무엇을
+           보는지는 ADR-0029. */
+        thresholds: {
+          statements: 68,
+          branches: 64,
+          functions: 76,
+          lines: 69,
+        },
+      },
       projects: [
         {
           resolve: { alias },

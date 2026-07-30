@@ -40,10 +40,14 @@
 
 정적 사이트 시절과 달리 이제 **기계가 검증한다.** 로컬에서 게이트를 그대로 돌릴 수 있다:
 
+검증은 **층으로 쌓여 있고 각 층이 구조적으로 못 보는 것이 있다** — 새 검증을 어디 둘지는
+"어느 층이 이걸 볼 수 있나"로 답한다. 층 표는
+[ADR-0029](./docs/adr/0029-verification-layers-and-coverage-ratchet.md) 가 정본이다.
+
 ```bash
 npm run dev            # 로컬 개발 (http://localhost:3000)
 npm run build          # next build (컴파일 + 타입체크 + 정적 생성)
-npm test               # Vitest — workerd(서버·도메인·머신) + dom(클라이언트 컴포넌트) 두 프로젝트
+npm test               # Vitest — workerd(서버·도메인·머신) + dom(클라이언트) 두 프로젝트 + 커버리지 래칫
 npm run typecheck      # tsc --noEmit (strict)
 npm run lint           # eslint (flat config)
 npm run boundaries     # dependency-cruiser 레이어 경계
@@ -71,10 +75,16 @@ npm run db:seed        # 게임 시드(`-- --remote` 로 원격)
 치지직 OAuth 를 태우지 않고 access 쿠키를 직접 서명하지만 진짜 서버 경로가 돈다 —
 근거와 함정은 [ADR-0021](./docs/adr/0021-e2e-session-fixture-signed-access-cookie.md).
 
-CI(`.github/workflows/ci.yml`)가 PR·main 에서 `format · lint · typecheck · boundaries · unit ·
-drizzle-kit check · build · **배포 빌드(opennextjs-cloudflare)**` 게이트와 **e2e 스모크**(별도
-job)를 돌린다. 배포 빌드가 게이트에 있는 이유는 아래 Phase 4 지뢰를 보라 — `next build` 만으론
-배포 실패를 못 잡는다. **시각 스냅샷은 CI 에 없다** —
+**`npm test` 는 커버리지를 항상 켜고 임계치를 못 넘기면 죽는다**(ADR-0029). 임계치는 목표가
+아니라 **래칫(바닥)** 이다 — 지금 수치 바로 아래에 박혀 있고, **테스트를 늘리는 PR 은
+`vitest.config.ts` 의 `thresholds` 도 같이 올린다.** 안 올리면 바닥이 낡아 새 코드가 안 덮여도
+통과한다. 수치가 낮은 자리(`src/app`)가 곧 위험은 아니다 — 거긴 e2e 가 렌더해서 본다.
+위험한 건 **어느 층에도 안 걸린 코드**이고, 그건 층 표와 커버리지를 겹쳐 봐야 보인다.
+
+CI(`.github/workflows/ci.yml`)가 PR·main 에서 `format · lint · typecheck · boundaries ·
+unit+커버리지 · drizzle-kit check · build · **배포 빌드(opennextjs-cloudflare)**` 게이트와
+**e2e 스모크**(별도 job)를 돌린다. 배포 빌드가 게이트에 있는 이유는 아래 Phase 4 지뢰를 보라 —
+`next build` 만으론 배포 실패를 못 잡는다. **시각 스냅샷은 CI 에 없다** —
 베이스라인이 OS 별 파일이라(`-darwin`/`-linux`) macOS 에서 만든 게 리눅스 CI 와 안 맞기
 때문이다. `npm run e2e`(=`--project=smoke`)는 크로스플랫폼 동작 검증만 하고, 시각 회귀
 (`--project=visual`)는 로컬 dev 회귀 + 사람의 육안 패리티 판단용이다. 배포는 CI 게이트가 아니라
