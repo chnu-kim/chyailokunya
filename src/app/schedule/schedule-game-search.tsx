@@ -57,6 +57,23 @@ const ARROW_MOVES: Partial<Record<string, ComposerActiveMove>> = {
 const optionClass = (active: boolean) =>
   active ? "sched-picker__result sched-picker__result--active" : "sched-picker__result";
 
+/* 결과 한 줄 앞의 표지 마크(2026-07-31). 30×40 은 치지직 포스터의 실제 비율(300×400, 실측)
+   이고 읽기 화면의 항목 표지와 같은 값이라, 같은 게임이 두 화면에서 같은 크기로 선다.
+
+   **이름을 대신하지 않는다** — `alt=""`(폴백은 `aria-hidden`)이라 접근 가능한 이름은 옆
+   글자에서만 나온다. 표지는 "맞게 골랐나"를 눈으로 한 번 더 확인시키는 보조다: 비슷한 이름의
+   다른 게임이 이미 보드에 있을 때 그 차이가 글자보다 그림에서 먼저 보인다. */
+function PosterMark({ src, initial }: { src: string | null; initial: string }) {
+  if (src) return <img className="sched-picker__poster" src={src} alt="" width={30} height={40} />;
+  /* 표지가 없는 게임은 이니셜만. 게임 보드 폴백의 빗금 패턴은 안 가져온다 — 30×40 상자에서
+     9px 주기 빗금이 글자를 덮는다(편집기 행 트리거와 같은 근거). */
+  return (
+    <span className="sched-picker__poster sched-picker__poster--none" aria-hidden="true">
+      {initial}
+    </span>
+  );
+}
+
 const keepFocusInInput = (e: React.MouseEvent) => e.preventDefault();
 
 export function ScheduleGameSearch({
@@ -86,6 +103,10 @@ export function ScheduleGameSearch({
     },
   });
   const adding = addState.matches("submitting");
+  /* 지금 걸린 게임. 부모가 id 만 넘기므로(patch 가 다루는 값이 id 다) 이름은 여기서 찾는다 —
+     `localGames` 는 이번 세션에 새로 추가한 게임까지 포함된 목록이라 방금 만든 게임도 잡힌다. */
+  const currentGame =
+    currentGameId !== null ? (localGames.find((g) => g.id === currentGameId) ?? null) : null;
   const query = state.context.query.trim();
   const step = composerStep(state.context);
   const optionCount = composerOptionCount(state.context);
@@ -249,18 +270,28 @@ export function ScheduleGameSearch({
 
   return (
     <div className="sched-picker" data-od-id={idPrefix + "picker"}>
+      {/* **무엇이 연결돼 있는지 먼저 말한다**(적대적 리뷰 지적, 2026-07-31). 전엔 "연결 해제"
+          버튼만 있어서 무엇을 해제하는지가 화면 어디에도 없었다 — 트리거가 아이콘이 되면서
+          그 이름을 볼 수 있는 자리가 더 줄었으므로, 해제를 누르기 전에 확인할 곳이 필요하다.
+          목록에 없는 게임이면(다른 관리자가 방금 지웠다) 이름 대신 그 사실을 말한다: 여기서
+          이름을 지어내면 관리자가 없는 게임을 그대로 두고 넘어간다. */}
       {currentGameId !== null && (
-        <button
-          type="button"
-          className="sched-picker__unlink"
-          data-od-id={idPrefix + "unlink"}
-          onClick={() => {
-            onUnlink();
-            onClose();
-          }}
-        >
-          연결 해제
-        </button>
+        <div className="sched-picker__current">
+          <p className="sched-picker__current-name" data-od-id={idPrefix + "current"}>
+            지금 연결: {currentGame?.categoryValue ?? "보드에 없는 게임"}
+          </p>
+          <button
+            type="button"
+            className="sched-picker__unlink"
+            data-od-id={idPrefix + "unlink"}
+            onClick={() => {
+              onUnlink();
+              onClose();
+            }}
+          >
+            연결 해제
+          </button>
+        </div>
       )}
 
       {step === "search" && (
@@ -302,7 +333,8 @@ export function ScheduleGameSearch({
                       onClose();
                     }}
                   >
-                    {g.categoryValue}
+                    <PosterMark src={g.posterImageUrl} initial={g.categoryValue.charAt(0)} />
+                    <span className="sched-picker__result-name">{g.categoryValue}</span>
                   </button>
                 </li>
               ))}
@@ -341,7 +373,15 @@ export function ScheduleGameSearch({
                   onMouseMove={() => send({ type: "activeSet", index: DIRECT_ENTRY_INDEX })}
                   onClick={chooseDirect}
                 >
-                  ‘{query}’ 직접 추가
+                  {/* 이 줄만 표지 자리에 ＋ 를 세운다 — 아직 게임이 아니라 표지가 없고, 빈
+                      자리로 두면 아래 결과들과 글자 시작선이 어긋난다. */}
+                  <span
+                    className="sched-picker__poster sched-picker__poster--new"
+                    aria-hidden="true"
+                  >
+                    +
+                  </span>
+                  <span className="sched-picker__result-name">‘{query}’ 직접 추가</span>
                 </li>
               )}
               {state.context.results.map((c, i) => {
@@ -356,7 +396,8 @@ export function ScheduleGameSearch({
                     onMouseMove={() => send({ type: "activeSet", index: idx })}
                     onClick={() => choose(c)}
                   >
-                    {c.categoryValue}
+                    <PosterMark src={c.posterImageUrl} initial={c.categoryValue.charAt(0)} />
+                    <span className="sched-picker__result-name">{c.categoryValue}</span>
                   </li>
                 );
               })}

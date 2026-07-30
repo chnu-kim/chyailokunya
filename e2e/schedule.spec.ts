@@ -183,6 +183,65 @@ test("관리자: 휴방만 정한 주도 발행할 수 있다(이슈 #117 결정
   await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("공개 중");
 });
 
+/* 휴방 잠금의 흐림 계약(codex 리뷰 P2 둘, 2026-07-31).
+
+   `opacity` 는 조상과 자손이 **곱해지고**, 조상에 걸면 합성 그룹이 생겨 **자손이 되돌릴 수
+   없다.** 첫 판은 잠긴 덩어리에 0.5 를 걸었는데 그래서 두 가지가 한꺼번에 걸렸다 — 안쪽
+   `:disabled` 0.5 와 곱해져 25% 대 50% 로 세기가 갈렸고, 그 방식으론 **삭제 버튼 하나만 또렷하게
+   남기는 것이 불가능**했다. 삭제는 휴방인 날에도 살아 있어야 하는 유일한 조작이라(빈 제목이
+   저장을 막는 막다른 골목을 푸는 길) 흐리면 거짓말이 된다.
+
+   그래서 흐림은 잠긴 컨트롤 각자가 맡는다. 이 스펙이 재는 것은 셋이다:
+   잠긴 것끼리 **같은 세기** · 삭제는 **또렷** · 잠긴 이유도 **또렷**.
+
+   **이건 e2e 가 아니면 못 본다** — dom 단위(happy-dom)는 CSS 캐스케이드를 이 수준으로 계산하지
+   않고, 조상 곱셈은 computed style 하나만 봐선 드러나지도 않는다. 저장을 안 하므로 이 스펙은
+   공유 픽스처를 안 건드린다. */
+test("관리자: 휴방인 날 잠긴 것은 같은 세기로 흐리고 삭제는 또렷하다", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 쓰는 주. 저장하지 않으므로 상태도 안 남는다.
+  await page.goto("/schedule?week=2037-06-01");
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("마인크래프트 하기");
+  await page.locator('[data-od-id^="schedule-day-rest-"]').first().check();
+  await expect(page.locator('[data-od-id^="schedule-day-rest-note-"]').first()).toBeVisible();
+
+  const effective = await page.evaluate(() => {
+    const read = (sel: string) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      let o = 1;
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        o *= Number(getComputedStyle(n).opacity);
+      }
+      return Math.round(o * 1000) / 1000;
+    };
+    return {
+      title: read('[data-od-id^="schedule-entry-title-"]'),
+      poster: read('[data-od-id^="schedule-entry-game-trigger-"]'),
+      del: read('[data-od-id^="schedule-entry-del-"]'),
+      add: read('[data-od-id^="schedule-day-add-"]'),
+      note: read('[data-od-id^="schedule-day-rest-note-"]'),
+    };
+  });
+
+  // 잠긴 것끼리는 같은 세기여야 한다 — 고정값(0.5)이 아니라 서로 같은지를 재는 이유: 디자인이
+  // 흐림 정도를 바꿔도 이 계약("한 겹")은 그대로 유효해야 한다.
+  expect(effective.title).toBe(effective.add);
+  expect(effective.poster).toBe(effective.add);
+  // 잠긴 것이 실제로 흐려지긴 해야 한다 — 위 셋이 전부 1.0 이어도 서로 같기는 하다.
+  expect(effective.add).toBeLessThan(1);
+  // 삭제는 유일하게 살아 있는 조작이라 또렷하다. 흐리면 "여기도 잠겼다"는 거짓말이 된다.
+  expect(effective.del).toBe(1);
+  // 잠긴 이유도 또렷해야 한다 — 그게 안 읽히면 잠금이 표시로서 성립하지 않는다.
+  expect(effective.note).toBe(1);
+});
+
 /* 공개 읽기의 PNG 다운로드 회귀(적대적 리뷰 지적, PR #112). WeekCardDownload 의 submit 머신
    run 은 마운트 시점에 얼어붙는데(submit.machine.ts), 읽기 화면은 편집기와 달리 이 컴포넌트를
    key 로 리마운트시키지 않는다 — WeekNav 클라이언트 네비로 주를 넘기면 같은 컴포넌트 인스턴스가
@@ -536,7 +595,12 @@ test("관리자: 게임 검색 — 보드에 있는 게임은 로컬에서 즉�
   await page.locator('[data-od-id="schedule-day-add-2033-11-07"]').click();
 
   const trigger = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
-  await expect(trigger).toHaveText("게임 연결");
+  /* **연결된 게임명은 이제 버튼의 접근 가능한 이름으로만 있다**(2026-07-31). 이 버튼은 44×44
+     아이콘이 됐고 안에는 표지(또는 돋보기)만 들어간다 — 이름을 글자로 담던 시절엔 행의 3분의
+     1을 먹었고, 그 이름은 바로 옆 제목 칸이 대개 같은 값으로 이미 말하고 있었다. `toHaveText`
+     로 재면 표지 폴백의 이니셜 한 글자("엘")를 읽게 되므로 aria-label 로 잰다 — 스크린리더가
+     실제로 듣는 값이라 계약으로서도 이쪽이 맞다. */
+  await expect(trigger).toHaveAttribute("aria-label", "게임 연결");
   await trigger.click();
 
   // 로컬 매치는 검색어가 있어야 뜬다(빈 채로 보드 전체를 나열하지 않는다, schedule-game-search.tsx).
@@ -544,7 +608,7 @@ test("관리자: 게임 검색 — 보드에 있는 게임은 로컬에서 즉�
   const localItem = page.locator(".sched-picker__result", { hasText: "엘든 링" });
   await localItem.click();
 
-  await expect(trigger).toHaveText("엘든 링");
+  await expect(trigger).toHaveAttribute("aria-label", "게임 연결: 엘든 링");
   // 제목이 비어 있었으니 게임명으로 채워진다(옛 select 와 같은 규칙).
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]').first()).toHaveValue(
     "엘든 링",
@@ -553,7 +617,7 @@ test("관리자: 게임 검색 — 보드에 있는 게임은 로컬에서 즉�
   // 연결 해제도 이 패널에서 한다.
   await trigger.click();
   await page.locator('[data-od-id$="-unlink"]').click();
-  await expect(trigger).toHaveText("게임 연결");
+  await expect(trigger).toHaveAttribute("aria-label", "게임 연결");
 });
 
 /* 적대적 리뷰 지적(2026-07-28, PR #114 2라운드) — 로컬 부분 일치("엘든"을 찾는데 로컬엔
@@ -631,7 +695,8 @@ test("관리자: 게임 검색 — 로컬에 없으면 치지직에서 찾아 �
 
   // 치지직 결과는 확인 없이 바로 추가된다(결정 19 — 정본 카테고리라 되돌릴 이유가 약하다).
   await page.locator(".sched-picker__result", { hasText: "e2e 신규 게임" }).click();
-  await expect(trigger).toHaveText("e2e 신규 게임");
+  // 이름은 버튼 글자가 아니라 접근 가능한 이름에 있다(위 로컬 매치 스펙의 같은 자리 주석 참고).
+  await expect(trigger).toHaveAttribute("aria-label", "게임 연결: e2e 신규 게임");
 
   /* 이 항목 자체는 미저장이라 새로고침하면 사라지지만, games.add 는 playedDate:null 로 게임
      행만 즉시 만들었으므로(결정 19) **게임은 서버에 남아 있어야 한다** — 새로고침 뒤 새
