@@ -536,7 +536,12 @@ test("관리자: 게임 검색 — 보드에 있는 게임은 로컬에서 즉�
   await page.locator('[data-od-id="schedule-day-add-2033-11-07"]').click();
 
   const trigger = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
-  await expect(trigger).toHaveText("게임 연결");
+  /* **연결된 게임명은 이제 버튼의 접근 가능한 이름으로만 있다**(2026-07-31). 이 버튼은 44×44
+     아이콘이 됐고 안에는 표지(또는 돋보기)만 들어간다 — 이름을 글자로 담던 시절엔 행의 3분의
+     1을 먹었고, 그 이름은 바로 옆 제목 칸이 대개 같은 값으로 이미 말하고 있었다. `toHaveText`
+     로 재면 표지 폴백의 이니셜 한 글자("엘")를 읽게 되므로 aria-label 로 잰다 — 스크린리더가
+     실제로 듣는 값이라 계약으로서도 이쪽이 맞다. */
+  await expect(trigger).toHaveAttribute("aria-label", "게임 연결");
   await trigger.click();
 
   // 로컬 매치는 검색어가 있어야 뜬다(빈 채로 보드 전체를 나열하지 않는다, schedule-game-search.tsx).
@@ -544,7 +549,7 @@ test("관리자: 게임 검색 — 보드에 있는 게임은 로컬에서 즉�
   const localItem = page.locator(".sched-picker__result", { hasText: "엘든 링" });
   await localItem.click();
 
-  await expect(trigger).toHaveText("엘든 링");
+  await expect(trigger).toHaveAttribute("aria-label", "게임 연결: 엘든 링");
   // 제목이 비어 있었으니 게임명으로 채워진다(옛 select 와 같은 규칙).
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]').first()).toHaveValue(
     "엘든 링",
@@ -553,7 +558,7 @@ test("관리자: 게임 검색 — 보드에 있는 게임은 로컬에서 즉�
   // 연결 해제도 이 패널에서 한다.
   await trigger.click();
   await page.locator('[data-od-id$="-unlink"]').click();
-  await expect(trigger).toHaveText("게임 연결");
+  await expect(trigger).toHaveAttribute("aria-label", "게임 연결");
 });
 
 /* 적대적 리뷰 지적(2026-07-28, PR #114 2라운드) — 로컬 부분 일치("엘든"을 찾는데 로컬엔
@@ -631,7 +636,8 @@ test("관리자: 게임 검색 — 로컬에 없으면 치지직에서 찾아 �
 
   // 치지직 결과는 확인 없이 바로 추가된다(결정 19 — 정본 카테고리라 되돌릴 이유가 약하다).
   await page.locator(".sched-picker__result", { hasText: "e2e 신규 게임" }).click();
-  await expect(trigger).toHaveText("e2e 신규 게임");
+  // 이름은 버튼 글자가 아니라 접근 가능한 이름에 있다(위 로컬 매치 스펙의 같은 자리 주석 참고).
+  await expect(trigger).toHaveAttribute("aria-label", "게임 연결: e2e 신규 게임");
 
   /* 이 항목 자체는 미저장이라 새로고침하면 사라지지만, games.add 는 playedDate:null 로 게임
      행만 즉시 만들었으므로(결정 19) **게임은 서버에 남아 있어야 한다** — 새로고침 뒤 새
