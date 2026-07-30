@@ -166,3 +166,65 @@ for (const theme of ["light", "dark"] as const) {
     });
   });
 }
+
+/* 주간 일정 **편집기**. 이 화면은 시각 베이스라인이 하나도 없었는데(#130·#131 이전 11장은 전부
+   home·landing·games·nav), 2026-07-31 의 3부작이 `schedule.css` 의 편집기 구역을 통째로 다시
+   썼다 — 2열 골격 · 하루 머리 줄 · 표지 아이콘 · 휴방 잠금 · 미리보기. 앞으로 이 화면을 고칠 때
+   무엇이 함께 움직였는지 볼 눈이 필요하다.
+
+   **폭은 1400 이다** — 편집기만 넓힌 값이고(schedule.css) 그보다 좁으면 2열 자체가 안 뜬다.
+   **높이 2200 은 편집기 전체(실측 2033)보다 크게 잡은 값이다.** 첫 판은 1700 이었는데 요소가
+   뷰포트보다 커서 Playwright 가 스크롤했고, sticky 인 nav 와 저장 바가 **그림 중간에 겹쳐
+   구워졌다** — 제목이 nav 에 가리고 저장 바가 토요일 카드 위에 앉았다(games 스냅샷 주석이
+   경고한 바로 그 결합: 그 둘을 고칠 때마다 이 베이스라인이 엉뚱하게 깨진다). 요소가 한 번에
+   들어가면 스크롤이 없어 sticky 가 제자리에 머문다.
+
+   **주를 못박는 이유**가 하나 더 있다: `?week=` 없이 열면 "오늘" 칩이 이번 주 어딘가에 찍혀
+   **날짜가 바뀔 때마다 스냅샷이 달라진다**. 픽스처가 안 건드리는 먼 과거 주를 고정해 오늘이 그
+   안에 절대 안 들어가게 한다 — 간헐 실패를 설계로 없앤다.
+
+   상태를 손으로 만든다(공지 · 항목 둘 · 휴방 하나): 빈 주를 찍으면 이번 개편이 바꾼 것들이
+   그림에 거의 안 나온다 — 항목 행도 잠금도 카드 내용도 전부 "무언가 들어 있을 때" 생긴다. */
+for (const theme of ["light", "dark"] as const) {
+  test(`시각: 주간 일정 편집기 · ${theme}`, async ({ page, baseURL }) => {
+    await page.addInitScript((t) => {
+      try {
+        localStorage.setItem("theme", t);
+      } catch {
+        // 위 스냅샷들과 같은 이유로 무해하다.
+      }
+    }, theme);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1400, height: 2200 });
+    await signIn(page.context(), baseURL!);
+
+    // 다른 스펙이 안 읽는 먼 과거 주 — 오늘이 여기 들 일이 없다.
+    await page.goto("/schedule?week=2019-04-01");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expectSignedIn(page);
+    await page.evaluate(() => document.fonts.ready);
+
+    await page.locator('[data-od-id="schedule-note-input"]').fill("이번 주는 건축 위주로 갑니다");
+    const add = page.locator('[data-od-id^="schedule-day-add-"]');
+    const titles = page.locator('[data-od-id^="schedule-entry-title-"]');
+    await add.first().click();
+    await titles.first().fill("마인크래프트 — 건축 계속");
+    await add.nth(1).click();
+    await titles.nth(1).fill("저챗");
+    // 휴방 잠금(점선 + 흐림 + 안내)이 그림에 들도록 항목이 있는 날을 쉬게 한다.
+    await add.nth(2).click();
+    await titles.nth(2).fill("이 항목은 안 나갑니다");
+    await page.locator('[data-od-id^="schedule-day-rest-"]').nth(2).check();
+
+    /* 카드가 입력을 실제로 따라왔는지 보고 찍는다 — 안 기다리면 옛 상태가 구워져, 이 장이
+       지키려는 계약("미리보기가 편집 중인 값을 그린다")을 정작 스냅샷이 안 담는다. */
+    await expect(page.locator('[data-od-id="week-card"]')).toContainText(
+      "마인크래프트 — 건축 계속",
+    );
+
+    await expect(page.locator('[data-od-id="schedule-editor"]')).toHaveScreenshot(
+      `schedule-editor-${theme}.png`,
+      { animations: "disabled" },
+    );
+  });
+}

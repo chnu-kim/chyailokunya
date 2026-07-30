@@ -13,6 +13,7 @@ import { FANART_IMAGE_TYPES } from "@/core/fanart";
 import {
   dayOf,
   draftDayInputs,
+  draftEntryInputs,
   draftHasContent,
   entriesForDate,
   isWeekDirty,
@@ -202,43 +203,60 @@ export function ScheduleEditor({
   const canPublish = !dirty && revision !== null && draftHasContent(baseline);
   const canUnpublish = revision !== null;
 
-  /* 다운로드 카드는 **저장된 상태**(baseline)에서만 만든다 — draft(화면에 입력 중인, 아직
-     안 저장한 값)로 만들면 결정 2("미완성본이 박제되면 안 된다")가 저장 전 편집 중에도 뚫린다.
-     baseline.published 는 이 주가 지금 실제로 공개돼 있는지를 그대로 반영한다(weekToDraft 가
-     publishedAt !== null 로 세팅) — 발행 체크박스를 켰지만 아직 저장을 안 눌렀다면 여전히
-     null(비활성)이다. 저장에 성공하면 baseline 이 서버 응답으로 갈아 끼워지므로(schedule-save
-     머신) 새로고침 없이 바로 활성화된다.
+  /* ── 미리보기는 **편집 중인 값**(draft)을 그린다(2026-07-31) ─────────────────────
+     한때 `baseline.published ? … : null` 이었다 — 저장된 값만, 그것도 발행된 주만 그렸다.
+     그러면 옆에 둔 이 창이 정작 두 흔한 상태에서 아무것도 안 말한다: **미발행 주는 통째로
+     비고**(새 주를 짜는 동안이 정확히 그 상태다), 편집 중에는 마지막 저장분이 떠 있어 지금
+     고치는 것과 다른 그림을 보여준다.
 
-     useMemo 로 baseline 이 실제로 바뀔 때만 새 오브젝트를 만든다 — note 입력·항목 추가 등
-     draft 가 바뀔 때마다 이 컴포넌트가 다시 그려지는데, 그때마다 buildWeekCard 를 새로 불러
-     날짜 배열까지 매번 다시 만들 이유가 없다(순수 최적화). week-card-download.tsx 의 in-flight
-     캐시는 이 오브젝트의 참조가 아니라 내용(JSON)으로 가르므로(라운드 6 적대적 리뷰) 이
-     useMemo 가 없어도 캐시 판정 자체는 그르치지 않는다 — 다만 없으면 타이핑 한 글자마다
-     buildWeekCard 를 다시 부르는 낭비가 남는다. */
+     **결정 2("미완성본이 박제되면 안 된다")는 안 깨진다** — 그 규칙이 지키는 것은 *받아지는
+     파일*이지 화면의 거울이 아니다. 그래서 규칙은 다운로드 쪽으로 옮겨 더 강해졌다:
+     미저장이면 버튼을 아예 잠근다(week-card-download.tsx). 그 결과 **"보이는 것 = 받는 것"이
+     항상 참**이 된다 — 잠기지 않은 순간의 draft 는 정의상 baseline 과 같기 때문이다. 전에는
+     화면과 파일이 서로 다를 수 있었고 그 차이를 문장 하나로 경고할 뿐이었다.
+
+     의존이 `draft` 라 타이핑 한 글자마다 새 카드를 만든다. useMemo 는 그대로 두되 이제
+     "값이 안 바뀐 리렌더"만 걸러 낸다(팬아트 업로드 상태 전이 등) — 캡처의 in-flight 캐시는
+     참조가 아니라 내용(JSON)으로 가르므로(라운드 6 적대적 리뷰) 이 최적화가 캐시 판정을
+     그르치지 않는다. */
   const card = useMemo(
     () =>
-      baseline.published
-        ? buildWeekCard({
-            weekStartDate,
-            note: baseline.note,
-            entries: baseline.entries,
-            days: draftDayInputs(baseline),
-            /* baseline 이라 **방금 올린 그림도 저장 뒤에 나타난다** — 업로드만 하고 저장을 안 한
-               상태에서 카드에 실리면 결정 2("미완성본이 박제되면 안 된다")가 뚫린다. 표기의 `""`
-               는 buildWeekCard 가 정규화한다. */
-            fanartImageKey: baseline.fanartImageKey,
-            fanartCredit: baseline.fanartCredit,
-            /* **편집기 미리보기엔 치수가 없다.** baseline 은 `WeekDraft` 이고 그 타입은 치수를
-               일부러 안 갖는다 — 저장 페이로드와 같은 모양이라 담는 순간 화면이 서버 소유
-               값(R2 객체 메타에서 읽은 치수)을 되돌려 보내게 되고, 그건 ADR-0030 이 막은 바로
-               그것이다. 대가는 관리자 화면에서 그림이 뜨는 순간 사진지가 한 번 늘어나는
-               것뿐이고, **받아지는 PNG 는 영향이 없다**(캡처 전에 디코드를 끝낸다). 팬이 보는
-               읽기 화면은 `WeekView` 를 그대로 넘겨 치수가 실린다. */
-            fanartImageWidth: null,
-            fanartImageHeight: null,
-          })
-        : null,
-    [weekStartDate, baseline],
+      buildWeekCard({
+        weekStartDate,
+        /* 공지도 **저장될 값**으로 접는다(codex 리뷰 P2 — 아래 entries 와 같은 부류를 여기만
+           빠뜨렸다). 서버 스키마는 공백만인 공지를 `null` 로 접고 나머지는 trim 하며
+           (features/schedule/schema.ts), `isWeekDirty` 도 `.trim()` 으로 비교한다 — 그래서
+           공백만 타이핑하면 **dirty 가 아닌데** 날것을 넘기면 카드에 빈 공지 블록이 생긴다.
+           받아지는 파일엔 없는 그 블록이 화면에만 있는 셈이고, 저장하거나 새로고침하면 사라진다. */
+        note: draft.note.trim() || null,
+        /* **저장될 값으로 그린다**(적대적 리뷰 지적, 2026-07-31). `draft.entries` 를 날것으로
+           넘기면 "보이는 것 = 받는 것"이 정확히 한 자리에서 깨진다: "+항목 추가"로 만든 빈 제목
+           항목은 저장 페이로드에서 버려지는데(`draftEntryInputs`) **`isWeekDirty` 도 그 정규형을
+           보므로 dirty 가 아니다** — 즉 카드엔 빈 줄이 생기고 다운로드는 열려 있어, 받으면 그
+           줄이 없는 파일이 나온다. `days` 를 진작 `draftDayInputs` 로 넘기고 있었으니(바로 아래)
+           항목만 날것이던 셈이다.
+
+           덤으로 제목 앞뒤 공백도 저장과 같게 접힌다 — 그 자체로는 거의 안 보이지만, 카드가
+           읽는 값과 저장이 읽는 값을 **한 함수로** 모아 두면 다음에 정규화가 늘어도 두 곳이
+           안 갈린다. */
+        entries: draftEntryInputs(draft),
+        days: draftDayInputs(draft),
+        /* 방금 올린 그림도 **바로** 뜬다. 업로드는 이미 R2 에 객체를 만든 뒤라 이 키로 서빙
+           경로가 살아 있고, 저장을 안 해도 관리자가 "이 그림이 이 자리에 이렇게 앉는다"를
+           확인할 수 있어야 이 창을 옆에 둔 값어치가 산다. 표기의 `""` 는 buildWeekCard 가
+           정규화한다. */
+        fanartImageKey: draft.fanartImageKey,
+        fanartCredit: draft.fanartCredit,
+        /* **편집기 미리보기엔 치수가 없다.** draft 는 `WeekDraft` 이고 그 타입은 치수를 일부러
+           안 갖는다 — 저장 페이로드와 같은 모양이라 담는 순간 화면이 서버 소유 값(R2 객체
+           메타에서 읽은 치수)을 되돌려 보내게 되고, 그건 ADR-0030 이 막은 바로 그것이다.
+           대가는 관리자 화면에서 그림이 뜨는 순간 사진지가 한 번 늘어나는 것뿐이고, **받아지는
+           PNG 는 영향이 없다**(캡처 전에 디코드를 끝낸다). 팬이 보는 읽기 화면은 `WeekView` 를
+           그대로 넘겨 치수가 실린다. */
+        fanartImageWidth: null,
+        fanartImageHeight: null,
+      }),
+    [weekStartDate, draft],
   );
 
   /* 미저장 이탈 경고. 두 겹이 필요하다 — 한 겹으로는 절반만 덮인다.
@@ -451,7 +469,13 @@ export function ScheduleEditor({
               확인하려면 매번 페이지 끝까지 내려야 했다(사용자 지적). 읽기 화면이 이미
               공지 → 카드 → 목록 순서라(schedule-read.tsx) 두 화면의 순서가 여기서 같아진다. */}
           <div className="sched__preview">
-            <WeekCardDownload card={card} weekStartDate={weekStartDate} stale={dirty} />
+            <WeekCardDownload
+              card={card}
+              weekStartDate={weekStartDate}
+              /* 사유의 **순서가 뜻을 갖는다** — 발행이 먼저다. 미발행 주는 저장을 아무리 해도
+                 못 받으므로 "저장하면 받을 수 있습니다"가 거짓이 된다. */
+              blockedReason={!baseline.published ? "unpublished" : dirty ? "unsaved" : null}
+            />
           </div>
 
           <ol className="sched__days" data-od-id="schedule-days">

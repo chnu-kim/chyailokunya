@@ -93,23 +93,87 @@ describe("WeekCardDownload", () => {
     expect(screen.queryByTestId("week-card")).not.toBeInTheDocument();
   });
 
-  it("카드가 있으면 미리보기를 그리고 버튼이 활성이다", () => {
+  it("카드가 있고 막힌 이유가 없으면 미리보기를 그리고 버튼이 활성이다", () => {
     render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
     expect(screen.getByTestId("week-card-download-btn")).toBeEnabled();
     expect(screen.getByTestId("week-card")).toBeInTheDocument();
-    // stale 을 안 넘기면(읽기 화면 — baseline 개념이 없다) 힌트도 없다.
-    expect(screen.queryByTestId("week-card-download-stale")).not.toBeInTheDocument();
+    // blockedReason 을 안 넘기면(읽기 화면의 발행된 주) 안내도 없다.
+    expect(screen.queryByTestId("week-card-download-blocked")).not.toBeInTheDocument();
   });
 
-  it("stale 이면(편집기의 미저장 변경) 저장을 권하는 힌트를 얹는다", () => {
-    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" stale />);
-    expect(
-      screen.getByText(
-        "저장하지 않은 변경이 있습니다. 지금 받으면 마지막으로 저장한 내용이 나갑니다.",
-      ),
-    ).toBeInTheDocument();
-    // 미저장 변경은 캡처를 막을 이유가 아니다 — 그저 지금 뭐가 나가는지 알려줄 뿐이다.
-    expect(screen.getByTestId("week-card-download-btn")).toBeEnabled();
+  /* **잠긴 이유는 언제나 화면에 있다**(2026-07-31). 미리보기가 draft 를 그리게 되면서 편집기의
+     `card` 는 절대 null 이 아니게 됐고, 그러면 "발행된 주만…" 안내가 들어 있던 `!card` 가지가
+     통째로 안 닿는다 — 미발행인데 저장은 된 주에서 **이유 없이 잠긴 버튼**이 남는다. 그래서
+     사유를 값으로 받고, 각 값이 자기 문장과 함께 잠그는지를 잰다. */
+  it.each([
+    ["unpublished", "발행된 주만 카드로 내려받을 수 있습니다."],
+    ["unsaved", "저장하지 않은 변경이 있습니다. 저장하면 이 카드를 받을 수 있습니다."],
+  ] as const)("%s 이면 버튼을 잠그고 그 이유를 말한다", (reason, message) => {
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" blockedReason={reason} />);
+
+    expect(screen.getByTestId("week-card-download-blocked")).toHaveTextContent(message);
+    /* **잠근다**(전엔 안 잠갔다). 미저장이어도 받을 수 있고 문구로만 경고하던 시절엔 화면과
+       파일이 서로 다를 수 있었다 — 이제 잠그므로 "보이는 것 = 받는 것"이 항상 참이다. */
+    expect(screen.getByTestId("week-card-download-btn")).toBeDisabled();
+    // 카드는 그대로 그린다 — 못 받는 것과 못 보는 것은 다른 사실이다.
+    expect(screen.getByTestId("week-card")).toBeInTheDocument();
+  });
+
+  /* 확대 창(2026-07-31). **카드가 둘이 되는 유일한 자리**라 두 가지를 함께 잰다:
+     사본이 뜨는가 · 그 사본이 `data-od-id` 를 안 다는가. 후자를 안 재면 같은 이름이 둘이 되어
+     Playwright strict 로케이터가 **무관한 e2e 단언에서** 깨진다(그때 원인이 이 컴포넌트라는 걸
+     알아내기 어렵다). happy-dom 은 showModal 을 구현하므로 실제로 열린다. */
+  it("원본 크기로 보기를 누르면 카드 사본이 뜨고, 그 사본은 od-id 를 안 단다", () => {
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+    expect(screen.queryByTestId("week-card-zoom")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("week-card-download-zoom"));
+
+    const dialog = screen.getByTestId("week-card-zoom");
+    expect(dialog).toBeInTheDocument();
+    // 카드는 여전히 하나만 이름을 갖는다 — 미리보기 쪽 하나.
+    expect(screen.getAllByTestId("week-card")).toHaveLength(1);
+    // 그런데 사본은 실제로 그려져 있다(이름만 없다).
+    expect(dialog.querySelectorAll(".week-card")).toHaveLength(1);
+  });
+
+  it("확대 창은 미저장이어도 열린다 — 못 받는 것과 못 보는 것은 다른 사실이다", () => {
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" blockedReason="unsaved" />);
+
+    expect(screen.getByTestId("week-card-download-btn")).toBeDisabled();
+    // 확대는 읽기 전용이라 저장 상태와 무관하다.
+    expect(screen.getByTestId("week-card-download-zoom")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("week-card-download-zoom"));
+    expect(screen.getByTestId("week-card-zoom")).toBeInTheDocument();
+  });
+
+  /* 배경 클릭으로 닫는 계약(2026-07-31). 발행 확인창(`publish-confirm-dialog`)은 **안 닫는다** —
+     그건 서버 쓰기를 다뤄 실수로 스치는 클릭에 안 걸려야 하기 때문이다. 확대 창은 읽기 전용이라
+     반대로 고른 것이고, 그 차이가 실수로 뒤집히지 않게 여기서 못박는다.
+
+     **카드 위 클릭은 안 닫는다**는 짝도 함께 잰다: `dialog` 자신이 배경까지 포함한 상자라
+     `e.target` 을 안 가리면 카드를 눌러도 닫혀서, 확대해 놓고 들여다보는 동작이 성립하지 않는다. */
+  it("확대 창은 배경 클릭으로 닫히고, 카드 위 클릭으로는 안 닫힌다", () => {
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+    fireEvent.click(screen.getByTestId("week-card-download-zoom"));
+
+    const dialog = screen.getByTestId("week-card-zoom");
+    // 카드(안쪽)를 눌러도 살아 있어야 한다.
+    fireEvent.click(dialog.querySelector(".week-card")!);
+    expect(screen.getByTestId("week-card-zoom")).toBeInTheDocument();
+
+    // 배경(dialog 자신)을 누르면 닫힌다.
+    fireEvent.click(dialog);
+    expect(screen.queryByTestId("week-card-zoom")).not.toBeInTheDocument();
+  });
+
+  it("확대 창의 닫기 버튼이 창을 닫는다", () => {
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+    fireEvent.click(screen.getByTestId("week-card-download-zoom"));
+    expect(screen.getByTestId("week-card-zoom")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("week-card-zoom-close"));
+    expect(screen.queryByTestId("week-card-zoom")).not.toBeInTheDocument();
   });
 
   it("버튼을 누르면 캡처해 파일명을 붙여 내려받는다", async () => {
