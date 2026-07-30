@@ -100,10 +100,18 @@ function pngSize(b: Uint8Array) {
    u16(자기 포함)이 붙는데, SOI·EOI·RST·TEM 은 **길이가 없어** 건너뛰는 방식이 다르다.
    SOF 페이로드: 길이(2) + 정밀도(1) + 높이(2) + 폭(2) — 높이가 먼저다.
 
-   **점프 횟수에 상한을 둔다.** 길이 0·1 같은 값을 넣으면 오프셋이 안 늘어 무한 루프가 되고,
-   악성 파일이 그걸 만들 수 있다(요청 경로에서 도는 코드라 그 자체가 CPU 공격이 된다).
-   정상 JPEG 의 SOF 는 앞쪽 몇 개 세그먼트 안에 오므로 넉넉히 잡아도 64 로 충분하다. */
+   **상한이 둘 필요하다 — 세그먼트 수만으로는 비용이 안 묶인다.**
+     세그먼트 수(64) — 길이 0·1 같은 값을 넣으면 오프셋이 안 늘어 무한 루프가 된다. 정상 JPEG 의
+       SOF 는 앞쪽 몇 개 세그먼트 안에 온다.
+     마커 앞 패딩(16) — 마커는 `FF` 로 시작하고 그 앞에 패딩 `FF` 가 올 수 있어 건너뛰는데, **그
+       스킵에 상한이 없으면 5MB 를 전부 `0xff` 로 채운 파일이 한 반복에서 ~500만 회를 돈다**
+       (GitHub codex 리뷰 P1). 세그먼트 예산은 그때까지 1 도 안 줄어들어 아무 보호가 되지 않는다.
+       정상 JPEG 의 패딩은 0~몇 개이고, 상한을 넘으면 깨진 파일로 보고 거절한다(fail-closed —
+       APNG 스캔 예산과 같은 방향).
+   요청 경로에서 도는 코드라 이 상한들이 없으면 **방어 코드 자체가 10ms CPU 한도를 먹는다**
+   (이 저장소는 그 한도로 프로덕션 인시던트를 냈다 — Error 1102). */
 const JPEG_MAX_SEGMENTS = 64;
+const JPEG_MAX_PADDING = 16;
 const SOF_MARKERS = new Set([
   0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
 ]);
@@ -161,8 +169,13 @@ function jpegSize(b: Uint8Array) {
   // APP1 은 보통 SOF 보다 앞에 온다 — 만나면 기억해 두고 SOF 에서 적용한다(스캔 한 번으로 끝난다).
   let orientation: number | null = null;
   for (let hops = 0; hops < JPEG_MAX_SEGMENTS; hops++) {
-    // 마커는 FF 로 시작한다. 패딩 FF 가 여러 개 올 수 있어 건너뛴다.
-    while (at < b.length && b[at] === 0xff) at++;
+    // 마커는 FF 로 시작한다. 패딩 FF 가 여러 개 올 수 있어 건너뛴다 — **그 스킵에도 상한이
+    // 있다**(위 주석: 세그먼트 예산은 이 안쪽 비용을 못 묶는다).
+    let pad = 0;
+    while (at < b.length && b[at] === 0xff) {
+      at++;
+      if (++pad > JPEG_MAX_PADDING) return null;
+    }
     if (at >= b.length) return null;
     const marker = b[at]!;
     at++;

@@ -283,6 +283,18 @@ describe("readImageDimensions", () => {
     expect(readImageDimensions(evil, "jpeg")).toBeNull();
   });
 
+  it("마커 앞 패딩 스캔에도 상한이 있다 — 세그먼트 예산이 그 안쪽 비용을 못 묶는다", () => {
+    /* 5MB 를 전부 `0xff` 로 채우면 한 반복에서 ~500만 회를 돌고, 세그먼트 예산(64)은 그때까지
+       1 도 안 줄어든다(GitHub codex 리뷰 P1). 여기선 그 성질만 재면 되므로 작은 배열로 충분하다 —
+       상한(16)을 넘는 패딩이 거절되는지 본다. 상한을 지우면 이 단언이 값을 얻는 대신 위 5MB
+       파일에서 CPU 를 먹는다. */
+    const padded = new Uint8Array([0xff, 0xd8, ...Array(64).fill(0xff)]);
+    expect(readImageDimensions(padded, "jpeg")).toBeNull();
+    // 정상 범위의 패딩은 통과한다 — 상한이 정상 파일을 막지 않는지 함께 본다.
+    const ok = jpegWith(800, 600, [0xff, 0xff]);
+    expect(readImageDimensions(ok, "jpeg")).toEqual({ width: 800, height: 600 });
+  });
+
   it("EXIF orientation 5~8 은 폭·높이를 뒤바꿔 준다 — 브라우저가 회전해 그린다", () => {
     /* 브라우저는 `image-orientation: from-image` 가 기본값이라 EXIF 회전을 적용해 그리는데 SOF 가
        적은 것은 **회전 전 픽셀 행렬**이다. 그 값을 그대로 예약에 쓰면 로드 순간 화면이 튄다 —
