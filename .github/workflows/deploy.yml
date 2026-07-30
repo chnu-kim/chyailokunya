@@ -85,3 +85,20 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx opennextjs-cloudflare deploy
+
+      # 검증 층 5(ADR-0029) — 배포된 진짜 origin 에 진짜 요청을 보낸다.
+      #
+      # 이 층이 있어야 하는 이유는 인시던트 하나다: 2026-07-27 에 og:image 라우트가 Workers 의
+      # 요청당 CPU 10ms 를 넘겨 isolate 를 죽였고 무관한 요청까지 연쇄로 실패했다(Error 1102).
+      # 로컬 게이트 8종 중 어느 하나도 못 잡는다 — 빌드는 성립하고 런타임 정책만 다르다.
+      # 그때 발견한 건 게이트가 아니라 사람이었다.
+      #
+      # **실패해도 되돌리지 않는다.** D1 마이그레이션은 안 되돌아가므로 워커만 롤백하면 위
+      # 주석이 경계하는 "구 워커 + 새 스키마" 스큐가 된다. 이 스텝의 일은 워크플로를 빨갛게
+      # 만들어 사람을 부르는 것이다. 자격 증명도 안 받는다 — 공개 읽기만 한다.
+      #
+      # 스텝 시한을 둔다 — 스크립트가 요청마다 10초 시한을 걸지만, 그 위에 한 겹 더 둬야
+      # 예상 못 한 이유로 매달릴 때 워크플로가 수십 분을 안 태운다.
+      - name: 배포 후 프로덕션 스모크
+        timeout-minutes: 5
+        run: node scripts/post-deploy-smoke.mjs

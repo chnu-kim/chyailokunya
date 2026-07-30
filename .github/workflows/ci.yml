@@ -74,6 +74,32 @@ jobs:
       - name: 배포 빌드 (opennextjs-cloudflare build)
         run: npx opennextjs-cloudflare build
 
+      # 검증 층 4(ADR-0029) — **빌드가 성립하는 것과 그 번들이 부팅해 페이지를 서빙하는 것은
+      # 다른 사실이다.** 위 스텝은 앞의 것만 본다. 여기서 방금 만든 .open-next 번들을 진짜
+      # workerd 로 띄우고, 층 5(배포 후 스모크)와 **같은 스크립트**를 로컬 origin 에 대고 돌린다.
+      # 배포 전에 도는 유일한 "실제로 서빙되는가" 검사다.
+      #
+      # 스키마가 없으면 games 페이지가 500 이므로 마이그레이션을 먼저 건다(--local 이라 CF 인증
+      # 불요). **시드는 안 넣는다** — 빈 목록도 렌더돼야 맞다. 이건 짐작이 아니라 실측이다:
+      # 개발 머신의 `.wrangler/state` 는 e2e 가 이미 픽스처로 채워 둔 상태라 "행이 없을 때"를
+      # 재현하지 못하므로, 스크래치 상태 디렉터리(`--persist-to`)에 스키마만 적용해 따로 확인했다
+      # (2026-07-30). 특히 `/schedule` 은 발행된 주가 **하나도 없는** 상태를 e2e 픽스처가 만들지
+      # 않는데, 그 상태에서도 200 + 마커로 렌더된다.
+      - name: 로컬 D1 스키마 (배포 번들 스모크용)
+        run: npm run db:migrate:local
+      # 스텝 시한을 둔다 — 이게 없으면 wrangler 가 안 뜨거나 스모크가 매달릴 때 job 이 기본
+      # 워크플로 타임아웃(수십 분)까지 살아 있고, 그때 로그는 무슨 일이 있었는지 안 말해 준다.
+      - name: 배포 번들 스모크 (workerd)
+        timeout-minutes: 5
+        run: |
+          npx wrangler dev --port 3200 --local &
+          WRANGLER_PID=$!
+          # 스모크가 실패해도 워커를 반드시 걷는다(run 은 -e 라 실패 시 아래 줄로 안 간다).
+          trap 'kill $WRANGLER_PID 2>/dev/null || true' EXIT
+          # 준비될 때까지 기다리되 무한정은 아니다 — 안 뜨면 그 자체가 실패다.
+          timeout 90 bash -c 'until curl -sf -o /dev/null http://localhost:3200/; do sleep 2; done'
+          node scripts/post-deploy-smoke.mjs http://localhost:3200
+
   e2e:
     name: e2e 스모크 · Playwright
     runs-on: ubuntu-latest
