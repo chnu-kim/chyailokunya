@@ -903,10 +903,28 @@ dialog.sched-confirm::backdrop {
   color: var(--fg-muted);
 }
 
+/* 공지는 카드에서 **두 줄까지**다(GitHub codex 리뷰 P2). 저장 상한이 500자인데 줄 수 제한이
+   없어, 긴 공지가 본문 높이를 먹고 일정 목록을 눌렀다 — 실측: 7열 모양은 500자에서 목록이
+   356→104px 로 눌려 항목이 잘렸고(이 PR 이전부터 그랬다), 팬아트 모양은 폭이 780 이라 200자에서
+   이미 잘리고 500자면 **목록 높이가 0** 이 됐다(일정이 통째로 사라진다).
+
+   **자르는 쪽을 고른 이유:** 이 카드의 주인공은 일정이고 공지는 딸린 한 줄이다(읽기 화면의
+   `.sched__note` 는 안 자르므로 전문은 사이트에 그대로 있다). 두 줄이면 7열에서 ~108자,
+   팬아트 모양에서 ~70자까지 보인다 — 공지가 페이지 본문의 `line-height: 1.6` 을 물려받아 한
+   줄이 35.2px 이므로 두 줄은 70px 이고, 본문(406)에서 그것과 위 여백(22)을 빼면 목록에
+   **314px** 이 남는다(팬아트 모양의 일곱 행이 각 44px 로 서는 데 필요한 높이보다 넉넉하다). `flex: none` 은 반대 방향
+   (목록이 공지를 누르는 것)을 막는다 — 공지 높이는 clamp 가 정하지 그때그때 남는 공간이
+   정하지 않는다. `overflow-wrap: anywhere` 는 공백 없는 긴 문자열(주소 등)이 가로로 새는 것. */
 .week-card__note {
+  flex: none;
   margin: 22px 0 0;
   font-size: 22px;
   color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 /* ── 팬아트가 걸린 주의 모양 (이슈 #122) ──────────────────────────────────────

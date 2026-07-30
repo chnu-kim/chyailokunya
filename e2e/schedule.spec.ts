@@ -263,6 +263,8 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
   await page.goto("/schedule?week=2032-02-02");
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("PNG 검증 항목");
+  // 7열 모양도 같은 결함이 있었다(500자 공지에서 목록이 356→104px 로 눌려 항목이 잘렸다).
+  await page.locator('[data-od-id="schedule-note-input"]').fill("공".repeat(500));
   await page.locator('[data-od-id="schedule-save"]').click();
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
   await publishNow(page);
@@ -284,12 +286,41 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
      여기까지 그대로 통과한다. 실제로 그런 상태로 살아 있었다(캡처 복제본에 걸린
      `position: fixed`가 SVG 안에서 카드를 화면 밖으로 밀었다, week-card-download.tsx).
      그래서 종이 색이 실제로 칠해졌는지 한 점을 찍는다: 카드 왼쪽 위 여백은 --thumb-paper 다. */
+  await expectListNotSquashed(page);
+
   const paper = await samplePng(page, buf, { x: 24 * 2, y: 24 * 2 });
   expect(paper[3]).toBe(255); // 불투명 — 빈 캡처면 여기서 0 이다
   for (const [i, want] of [244, 238, 233].entries()) {
     expect(Math.abs(paper[i]! - want)).toBeLessThanOrEqual(6);
   }
 });
+
+/* 긴 공지가 일정 목록을 누르지 않는지 — 두 모양이 같은 규칙(공지 두 줄 상한)을 쓴다.
+
+   **줄 수는 computed line-height 로 나눈다.** 상수로 나눴다가 헛발을 짚었다: 카드 공지는
+   페이지 본문의 `line-height: 1.6` 을 물려받아 한 줄이 35.2px 인데, 스크래치 목업은 그 값을
+   안 물려받아 28px 이었다 — 목업 수치를 그대로 옮기면 두 줄(70px)을 세 줄로 읽는다. 본문
+   높이 406 에서 공지 두 줄(70)과 그 위 여백(22)을 빼면 목록은 314px 이 남는다. */
+async function expectListNotSquashed(page: Page): Promise<void> {
+  const m = await page.evaluate(() => {
+    const root = document.querySelector('[data-od-id="week-card"]') as HTMLElement;
+    const note = root.querySelector(".week-card__note") as HTMLElement;
+    const days = root.querySelector(".week-card__days") as HTMLElement;
+    const first = root.querySelector(".week-card__day") as HTMLElement;
+    const entries = first.querySelector(".week-card__entries") as HTMLElement;
+    const lh = parseFloat(getComputedStyle(note).lineHeight);
+    return {
+      noteLines: Math.round(note.offsetHeight / lh),
+      noteOverflowsX: note.scrollWidth > note.clientWidth + 1,
+      daysH: days.offsetHeight,
+      entriesClipped: entries.scrollHeight > entries.clientHeight + 1,
+    };
+  });
+  expect(m.noteLines).toBeLessThanOrEqual(2);
+  expect(m.noteOverflowsX).toBe(false);
+  expect(m.daysH).toBeGreaterThanOrEqual(300);
+  expect(m.entriesClipped).toBe(false);
+}
 
 /* 받은 PNG 의 한 점을 읽는다. 압축된 PNG 를 Node 에서 직접 풀려면 필터 해제까지 손으로 해야
    하고 이미지 라이브러리는 이 저장소의 직접 의존이 아니라, 이미 열려 있는 브라우저에 맡긴다. */
@@ -339,6 +370,10 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("팬아트 카드 항목");
 
+  /* 공지도 **저장 상한(500자)까지** 채운다 — 줄 수 제한이 없으면 긴 공지가 본문 높이를 먹어
+     일정 목록을 누른다(실측: 팬아트 모양은 200자에서 이미 항목이 잘리고 500자면 목록 높이가
+     0 이 됐다 — GitHub codex 리뷰 P2). 아래 단언이 그 자리를 잡는다. */
+  await page.locator('[data-od-id="schedule-note-input"]').fill("공".repeat(500));
   await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(SOLID_FANART);
   await expect(page.locator('[data-od-id="schedule-fanart-thumb"]')).toBeVisible();
   /* 표기를 **저장 상한(100자)까지** 채운다 — 짧은 표기로만 재면 사진지가 카드를 밀어내는
@@ -377,6 +412,7 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
   expect(fit.capLines).toBeLessThanOrEqual(2);
   expect(fit.capOverflowsX).toBe(false);
   expect(fit.figClipsContent).toBe(false);
+  await expectListNotSquashed(page);
 
   // 찍을 두 점(카드 좌표계) — 그림 중앙과 목록 첫 행 중앙.
   const points = await page.evaluate(() => {
