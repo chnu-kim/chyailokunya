@@ -33,6 +33,27 @@ export function isOverFanartLimit(byteLength: number): boolean {
   return Number.isFinite(byteLength) && byteLength > FANART_MAX_BYTES;
 }
 
+/* 저장할 수 있는 픽셀 치수의 상한(읽기 화면의 자리 예약, ADR-0028). 저장 Zod 와 **치수를 읽는
+   화면**이 같은 값을 봐야 한다 — 갈리면 화면이 읽어 보낸 값이 경계에서 거절돼 **그림 자체를 못
+   거는** 상태가 된다(치수는 레이아웃 힌트일 뿐인데 그것 때문에 업로드가 통째로 무의미해진다).
+   그래서 상한을 넘는 치수는 화면이 미리 버리고(null = 예약 없이 그린다) 그림만 저장한다.
+
+   20000 은 현실적인 이미지 치수의 위쪽이고, 상한 자체가 필요한 이유는 위조 클라이언트가 거대한
+   정수를 보내면 그 값이 그대로 img 속성에 실려 그림 한 장이 화면을 통째로 밀어낸다는 것이다. */
+export const FANART_MAX_DIMENSION = 20000;
+
+/* 화면이 읽은 치수를 저장할 수 있는 값으로 정규화한다. 못 읽었거나(null) 범위를 벗어나면 **쌍째로
+   버린다** — 한쪽만 남으면 저장 경계가 거절하고(폭과 높이는 함께 보내야 한다) DB CHECK 도 같은
+   규칙이라, 반쪽을 만들어 보내는 것보다 없는 게 낫다. 순수 함수라 단위 테스트가 경계값을 본다. */
+export function normalizeFanartSize(
+  width: number | null | undefined,
+  height: number | null | undefined,
+): { width: number | null; height: number | null } {
+  const ok = (v: number | null | undefined): v is number =>
+    typeof v === "number" && Number.isInteger(v) && v > 0 && v <= FANART_MAX_DIMENSION;
+  return ok(width) && ok(height) ? { width, height } : { width: null, height: null };
+}
+
 const CONTENT_TYPES: Record<FanartImageType, string> = {
   png: "image/png",
   jpeg: "image/jpeg",

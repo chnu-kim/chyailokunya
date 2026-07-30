@@ -1,5 +1,6 @@
+import { fileURLToPath } from "node:url";
 import { expect, test, type APIRequestContext, type Browser } from "@playwright/test";
-import { E2E_FAN, signIn } from "./session";
+import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
 /* 팬아트 업로드·서빙 라우트(ADR-0028). 파일 바이트가 오가는 경계라 tRPC 단위 테스트가 못 닿는다
    — 인가·CSRF·형식 판정·상한이 전부 HTTP 계층에 있고, R2 왕복까지 실제로 돌아야 계약이 증명된다.
@@ -121,6 +122,78 @@ test("확장자·Content-Type 이 아니라 바이트로 판정한다", async ({
    `isOverFanartLimit` — 상한 정확히·+1·헤더 부재·쓰레기 헤더). 이 파일이 증명하는 것은
    "라우트가 거절을 실제 상태 코드로 낸다"이고 그 계약은 아래 415·400 이 이미 보여 준다.
    상한만 유일하게 e2e 밖에 남는 것이 아니라, **같은 종류의 거절을 재는 경로가 이미 있다.** */
+
+/* ── 화면 왕복(PR 2) ────────────────────────────────────────────────────────────
+   위 테스트들은 라우트 계약을, 이 하나는 **관리자가 올린 그림이 팬 화면에 뜨는 전 구간**을 본다:
+   파일 선택 → 업로드 → 미리보기 → 저장 → 발행 → 비로그인 읽기. 단위 테스트는 이 구간을 못
+   잇는다(브라우저의 파일 선택·치수 판독과 서버 저장·서빙이 각각 다른 층에 있다).
+
+   **먼 주를 쓰고 발행한다.** e2e 는 D1 픽스처 하나를 공유하므로(AGENTS) 현재 주를 발행하면
+   schedule.spec 의 "미발행 현재 주 = 준비 중"이 조용히 깨진다. 2033-03-07 은 다른 스펙이 안
+   읽는 월요일이다. */
+/* 손으로 인코딩한 2×3 PNG. **1×1 을 쓰지 않는 이유**: 폭과 높이가 같으면 둘이 뒤바뀌어도
+   단언이 통과한다(치수는 두 컬럼·두 Zod 필드·두 img 속성을 거치는데 그 전 구간에서 뒤바뀜이
+   안 잡힌다). 그리고 **CRC 가 맞아야 한다** — 널리 복사되는 1×1 base64 중 IDAT CRC 가 깨진
+   판이 있고, 그걸 쓰면 브라우저가 디코드를 거부해(InvalidStateError) 치수가 null 로 저장된다.
+   `file(1)` 은 헤더만 보므로 그 상태를 통과시킨다(실측 2026-07-30). */
+const FANART_PNG = fileURLToPath(new URL("./fixtures/fanart-2x3.png", import.meta.url));
+const FANART_WEEK = "2033-03-07";
+
+test("관리자가 올린 그림을 저장·발행하면 팬이 그걸 본다", async ({ browser, baseURL }) => {
+  const admin = await contextAs(browser, baseURL!);
+  const page = await admin.newPage();
+  await page.goto(`/schedule?week=${FANART_WEEK}`);
+  await expectSignedIn(page);
+
+  // 빈 주는 발행할 수 없다(결정 22) — 항목을 하나 만들어 둔다.
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("팬아트 주");
+
+  /* 파일을 고르면 업로드가 곧바로 나간다(별도 "올리기" 버튼이 없다) — 성공하면 미리보기가
+   **실제 서빙 경로**로 뜬다. objectURL 이 아니라 그걸 쓰는 것이 이 화면의 계약이다. */
+  await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(FANART_PNG);
+  const thumb = page.locator('[data-od-id="schedule-fanart-thumb"]');
+  await expect(thumb).toBeVisible();
+  await expect(thumb).toHaveAttribute("src", /^\/api\/fanart\/[0-9a-f-]{36}\.png$/);
+
+  // 표기 칸은 **그림이 있을 때만** 열린다(그림 없이 표기만 있는 조합을 화면이 못 만든다).
+  await page.locator('[data-od-id="schedule-fanart-credit"]').fill("e2e 그린 사람");
+
+  const save = page.locator('[data-od-id="schedule-save"]');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  // 발행해야 공개 읽기가 그 주를 준다(ADR-0022).
+  await page.locator('[data-od-id="schedule-publish-toggle"]').click();
+  await page.locator('[data-od-id="schedule-publish-confirm-confirm"]').click();
+  await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("공개 중");
+
+  /* 팬이 보는 화면은 **다른 컨텍스트**로 연다 — 관리자에겐 편집기가 뜨므로 같은 세션으로는
+     읽기 화면 자체를 못 본다(서버가 신원으로 뷰를 가른다). */
+  const fanContext = await browser.newContext({ baseURL });
+  const fan = await fanContext.newPage();
+  await fan.goto(`/schedule?week=${FANART_WEEK}`);
+
+  const fanart = fan.locator('[data-od-id="schedule-fanart"]');
+  await expect(fanart).toBeVisible();
+  await expect(fanart.getByText("e2e 그린 사람")).toBeVisible();
+
+  const img = fanart.locator("img");
+  /* 치수가 실려 그림이 뜨기 전에 자리를 예약한다 — 1×1 PNG 를 올렸으니 그 값이다. 관리자
+     브라우저가 읽어 보낸 값이 컬럼을 거쳐 여기까지 오는지가 이 단언의 질문이다. 폭≠높이인
+     그림을 쓰는 이유는 위 상수 주석에 있다(뒤바뀜을 잡는다). */
+  await expect(img).toHaveAttribute("width", "2");
+  await expect(img).toHaveAttribute("height", "3");
+  /* 그림이 실제로 서빙되는지 — naturalWidth 가 0 이 아니면 브라우저가 바이트를 받아 디코드했다.
+     src 만 보면 404 여도 통과한다(그게 dangling key 의 증상이다). */
+  await expect
+    .poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth))
+    .toBeGreaterThan(0);
+
+  await fanContext.close();
+  await admin.close();
+});
 
 test("서빙: 키 형식이 아니거나 없는 객체는 404", async ({ request }) => {
   // 경로 순회. 키 검증이 이 한 자리에서 막으므로 R2 를 두드리지도 않는다.

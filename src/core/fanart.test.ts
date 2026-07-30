@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   FANART_MAX_BYTES,
+  FANART_MAX_DIMENSION,
   fanartCacheKey,
   fanartContentType,
   fanartKey,
   fanartObjectKey,
   isFanartKey,
   isOverFanartLimit,
+  normalizeFanartSize,
   sniffImageType,
 } from "./fanart";
 
@@ -149,5 +151,37 @@ describe("isOverFanartLimit", () => {
     /* Infinity 도 여기서 안 걸린다 — 유한하지 않으면 헤더를 못 믿는 것으로 보고 미룬다.
        거절은 아래(실제 본문 길이)에서 나므로 이 값으로 상한을 우회할 수는 없다. */
     expect(isOverFanartLimit(Infinity)).toBe(false);
+  });
+});
+
+describe("normalizeFanartSize", () => {
+  /* 치수는 **레이아웃 힌트라 fail-open** 이다(ADR-0028·db/schema.ts). 그래서 이 함수의 일은
+     "믿을 수 없는 값을 거절하는 것"이 아니라 **저장할 수 있는 쌍만 통과시키고 나머지는 쌍째로
+     버리는 것**이다 — 반쪽을 보내면 저장 경계가 그림까지 거절해, 힌트 하나 때문에 업로드가
+     통째로 무의미해진다. 화면이 못 읽는 경우(디코드 실패)와 상한 초과가 같은 결과로 접힌다. */
+  it("온전한 쌍만 통과한다", () => {
+    expect(normalizeFanartSize(1200, 1600)).toEqual({ width: 1200, height: 1600 });
+    expect(normalizeFanartSize(1, 1)).toEqual({ width: 1, height: 1 });
+    expect(normalizeFanartSize(FANART_MAX_DIMENSION, FANART_MAX_DIMENSION)).toEqual({
+      width: FANART_MAX_DIMENSION,
+      height: FANART_MAX_DIMENSION,
+    });
+  });
+
+  it("한쪽이라도 못 쓰는 값이면 쌍째로 버린다", () => {
+    // 상한을 **넘으면 그림을 못 거는 게 아니라 예약을 포기한다** — 저장 Zod 와 같은 값을 본다.
+    expect(normalizeFanartSize(FANART_MAX_DIMENSION + 1, 600)).toEqual({
+      width: null,
+      height: null,
+    });
+    expect(normalizeFanartSize(800, 0)).toEqual({ width: null, height: null });
+    expect(normalizeFanartSize(-1, 600)).toEqual({ width: null, height: null });
+    // 디코드 실패(둘 다 null)와 반쪽만 읽힌 경우가 같은 결과로 접힌다.
+    expect(normalizeFanartSize(null, null)).toEqual({ width: null, height: null });
+    expect(normalizeFanartSize(800, null)).toEqual({ width: null, height: null });
+    expect(normalizeFanartSize(undefined, undefined)).toEqual({ width: null, height: null });
+    // 소수·NaN 은 정수가 아니다(브라우저는 정수를 주지만 계약을 코드에 적어 둔다).
+    expect(normalizeFanartSize(800.5, 600)).toEqual({ width: null, height: null });
+    expect(normalizeFanartSize(NaN, 600)).toEqual({ width: null, height: null });
   });
 });

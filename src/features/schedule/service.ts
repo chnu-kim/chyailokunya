@@ -50,6 +50,10 @@ export type WeekView = {
      같은 origin 에서 뜬다), 라우트를 옮길 때 저장된 값이 아니라 조립부 한 곳만 바뀐다. */
   fanartImageKey: string | null;
   fanartCredit: string | null;
+  /* 그 그림의 픽셀 치수. 읽기 화면이 자리를 예약하는 데만 쓴다 — **없을 수 있다**(관리자
+     브라우저가 파일을 못 디코드한 경우). 그때 화면은 예약 없이 그린다(db/schema.ts). */
+  fanartImageWidth: number | null;
+  fanartImageHeight: number | null;
   entries: ScheduleEntry[];
   /* 그 주 7일 중 **기본값이 아닌 날만**(시각이 있거나 휴방인 날). 행이 없는 날은 "시각 미정 ·
      휴방 아님"과 같은 뜻이라 목록에 안 실린다(db/schema.ts 의 "행이 없는 것 = 기본값").
@@ -109,6 +113,8 @@ export async function getWeekForEdit(db: Db, weekStartDate: string): Promise<Wee
     publishedAt: meta?.publishedAt ?? null,
     fanartImageKey: meta?.fanartImageKey ?? null,
     fanartCredit: meta?.fanartCredit ?? null,
+    fanartImageWidth: meta?.fanartImageWidth ?? null,
+    fanartImageHeight: meta?.fanartImageHeight ?? null,
     /* 메타가 없는 주의 draft 는 "관리자가 뭔가 정해 뒀나"로 가른다 — 휴방만 있는 주도 정해 둔
        주다(결정 9). 항목 수만 보면 그런 주가 "아직 아무도 안 짠 새 주"로 읽혀 보드에서 사라진다. */
     draft: meta?.draft ?? !weekHasContent(entries.length, days.filter((d) => d.rest).length),
@@ -190,11 +196,26 @@ export class FanartImageMissing extends Error {
    2. **그림을 바꾸면 표기를 안 물려준다.** 새 그림에 옛 작가 이름이 붙는 건 **잘못된 귀속**이라
       값이 사라지는 것보다 나쁘다(코드 리뷰 지적). 새 표기를 함께 보내면 그 값이 쓰인다.
    3. 그림 없이 표기만 남는 조합은 거절한다 — 위 두 규칙을 지나고도 남는 경우는 "표기만 보냈는데
-      걸린 그림이 없다"뿐이고, 그건 화면이 만들 수 없는 요청이다. */
+      걸린 그림이 없다"뿐이고, 그건 화면이 만들 수 없는 요청이다.
+   4. **치수는 항상 한 쌍으로, 그림과 함께 움직인다.** 표기와 같은 규칙(보냈으면 그 값 · 키가
+      바뀌었으면 버림)에 둘을 갈라 받지 않는다는 조건이 더 붙는다 — 반쪽 조합이 DB CHECK 를
+      깨기 때문이다. 그림이 없어지면 치수는 **조용히 접는다**(표기처럼 던지지 않는다): 표기는
+      사람이 입력한 값이라 사라지는 걸 알려야 하지만 치수는 파일에서 파생된 값이라 잃을 것이
+      없고, 여기서 접으면 batch 가 CHECK 로 죽는 경로가 확실히 닫힌다. */
 export function nextFanart(
-  input: Pick<SaveWeekInput, "fanartImageKey" | "fanartCredit">,
-  existing: { fanartImageKey: string | null; fanartCredit: string | null } | undefined,
-): { key: string | null; credit: string | null } {
+  input: Pick<
+    SaveWeekInput,
+    "fanartImageKey" | "fanartCredit" | "fanartImageWidth" | "fanartImageHeight"
+  >,
+  existing:
+    | {
+        fanartImageKey: string | null;
+        fanartCredit: string | null;
+        fanartImageWidth: number | null;
+        fanartImageHeight: number | null;
+      }
+    | undefined,
+): { key: string | null; credit: string | null; width: number | null; height: number | null } {
   const currentKey = existing?.fanartImageKey ?? null;
   const key = input.fanartImageKey !== undefined ? input.fanartImageKey : currentKey;
 
@@ -204,8 +225,32 @@ export function nextFanart(
   else if (key !== currentKey) credit = null;
   else credit = existing?.fanartCredit ?? null;
 
+  /* 치수는 **둘을 함께** 받거나 함께 버린다. 한쪽만 온 입력을 부분 반영하면 반쪽 조합이 DB 까지
+     가 CHECK 로 batch 를 죽인다(그 시점엔 이미 청구가 revision 을 올려 편집기가 이유 없는
+     CONFLICT 를 본다) — Zod 는 둘 다 보낸 요청만 검사하므로 여기가 그 마지막 자리다. 옛 그림의
+     치수를 새 그림에 물려주지 않는 이유는 표기의 "잘못된 귀속"과 같은 결인데, 여기선 결과가
+     눈에 보인다: 예약한 자리와 실제 그림의 비율이 달라 레이아웃이 튄다. */
+  let width: number | null;
+  let height: number | null;
+  if (input.fanartImageWidth !== undefined && input.fanartImageHeight !== undefined) {
+    width = input.fanartImageWidth;
+    height = input.fanartImageHeight;
+  } else if (key !== currentKey) {
+    width = null;
+    height = null;
+  } else {
+    width = existing?.fanartImageWidth ?? null;
+    height = existing?.fanartImageHeight ?? null;
+  }
+
   if (key === null && credit !== null) throw new FanartCreditWithoutImage();
-  return { key, credit };
+  /* 그림이 없으면 치수는 정의상 존재할 수 없다. 도달 경로는 "키를 안 보내(유지) 걸린 그림이
+     없는데 치수만 보냈다"뿐이라 Zod(`fanartImageKey === null` 만 본다)가 못 보는 자리다. */
+  if (key === null) {
+    width = null;
+    height = null;
+  }
+  return { key, credit, width, height };
 }
 
 /* 다음 revision. revision 은 그 주 메타의 last_updated_at 이지만 **단조 증가가 정본이다** —
@@ -346,6 +391,10 @@ export async function saveWeek(
         // 둘 다 필요하다 — 키만 보고 credit 을 그대로 두면 아래 nextFanart 의 두 사고가 난다.
         fanartImageKey: scheduleWeeks.fanartImageKey,
         fanartCredit: scheduleWeeks.fanartCredit,
+        // 치수도 부분 갱신 대상이라 같은 이유로 읽는다 — 안 보낸 요청이 옛 치수를 유지하려면
+        // 그 값을 알아야 한다(키만 보고 치수를 그대로 두면 새 그림에 옛 비율이 붙는다).
+        fanartImageWidth: scheduleWeeks.fanartImageWidth,
+        fanartImageHeight: scheduleWeeks.fanartImageHeight,
       })
       .from(scheduleWeeks)
       .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate)),
@@ -472,6 +521,8 @@ export async function saveWeek(
       publishedAt,
       fanartImageKey: fanartNext.key,
       fanartCredit: fanartNext.credit,
+      fanartImageWidth: fanartNext.width,
+      fanartImageHeight: fanartNext.height,
     })
     .where(eq(scheduleWeeks.weekStartDate, input.weekStartDate));
   const clearEntries = db

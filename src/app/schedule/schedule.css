@@ -101,6 +101,83 @@
   margin-bottom: 6px;
 }
 
+/* ── 팬아트(편집기, ADR-0028) ─────────────────────────────────────────────────
+   **사진지 섬(.polaroid)을 여기선 안 쓴다.** 조작이 들어 있는 블록이라 그 섬의 크림 종이 위에서
+   폼 컨트롤의 테두리·포커스 대비가 씻긴다(kunya-design §4 "입력 컨트롤을 섬 안에 두지 마라").
+   읽기 화면은 조작이 없어 거기가 폴라로이드다 — 같은 값을 두 화면이 다른 부품으로 그리는 게
+   맞는 자리다. */
+.sched-fanart {
+  margin-bottom: var(--space-5); /* .sched-note 와 같은 리듬 */
+}
+.sched-fanart__row {
+  display: flex;
+  gap: var(--space-3);
+  /* 썸네일(96)과 버튼 스택의 높이를 억지로 맞추지 않는다 — 44×2+8 이 96 과 같아 보이지만 그건
+     우연이고, 어느 쪽 값을 바꾸면 조용히 어긋난다. 위로 정렬해 시작선만 맞춘다. */
+  align-items: flex-start;
+  margin-top: 6px; /* .sched-note__label 의 margin-bottom 과 같은 값 */
+}
+/* 96 고정 슬롯 + contain. 그림마다 높이가 달라지면 아래 요일 목록이 통째로 밀린다 — 편집기에서
+   알고 싶은 건 "무엇을 올렸나"이지 정확한 비율이 아니다(읽기 화면은 반대로 실제 치수로 자리를
+   예약한다: 거기선 그림이 주인공이라 비율이 정보다). */
+.sched-fanart__thumb {
+  flex: none;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.sched-fanart__acts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+/* .btn 계열엔 min-height 가 없다 — 패딩만으로 서는 컨트롤은 글자 크기가 바뀌면 44 가 조용히
+   깨진다(kunya-design §5). 하한을 명시하고, label 을 버튼으로 쓰므로 가운데 정렬도 여기서 준다. */
+.sched-fanart__pick,
+.sched-fanart__del {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sched-fanart__pick {
+  cursor: pointer;
+}
+/* 파일 input 은 .sr-only 라 포커스 링을 제 자리에 못 그린다(1px 상자로 clip 돼 있다) — 링을
+   보이는 부품(label)으로 옮긴다. 레시피는 .sched-field:focus 와 같은 값이다. */
+.sched-fanart__pick:focus-within {
+  outline: 0;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px var(--focus);
+}
+/* **label 에는 :disabled 가 안 붙는다** — 안의 input 이 잠겨도 `.btn:disabled` 가 안 걸려,
+   내리기 버튼만 흐려지고 바꾸기는 멀쩡해 보인다(같은 순간 둘 다 안 눌리는데). 그 파일의
+   :disabled 처리와 같은 값을 여기서 준다. */
+.sched-fanart__pick:has(input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* .sched-note__label 과 같은 조합(--text-sm + --fg-muted)이라 대비가 이미 검증된 자리다. */
+.sched-fanart__hint,
+.sched-fanart__busy {
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  margin: var(--space-2) 0 0;
+}
+/* .sched-err 는 margin: 0 이라 이 블록 안에선 위 요소와 붙는다 — 이 자리에서만 띄운다. */
+.sched-fanart .sched-err {
+  margin-top: var(--space-2);
+}
+/* 표기 칸은 이 블록의 마지막이라 아래 여백은 부모(.sched-fanart)가 준다 — .sched-note 의 기본
+   24px 을 안 지우면 요일 목록과의 간격이 두 번 붙는다. */
+.sched-fanart__credit {
+  margin-top: var(--space-3);
+  margin-bottom: 0;
+}
+
 /* ── 요일 카드 목록 ─────────────────────────────────────────────────────────── */
 .sched__days {
   list-style: none;
@@ -566,6 +643,34 @@ dialog.sched-confirm::backdrop {
 }
 .sched-confirm__btn {
   min-height: 44px;
+}
+
+/* ── 팬아트(읽기, ADR-0028) ───────────────────────────────────────────────────
+   사진지 섬(.polaroid, chrome.css)을 그대로 쓴다 — 크기와 여백만 이 화면에 맞춘다. 섬 안 토큰
+   되돌림·figcaption 대비는 그 파일이 이미 세워 뒀으므로 여기서 색을 다시 정하지 않는다
+   (건드리면 다크 크림 위에서 씻긴다, kunya-design §4).
+
+   폭 상한이 있는 이유: 팬아트는 세로로 긴 일러스트가 흔한데 상한이 없으면 화면 높이를 통째로
+   먹어 "보너스"가 본문을 밀어낸다. 가운데 정렬은 목록(왼쪽 정렬)과 결을 갈라, 이 블록이 일정의
+   일부가 아니라 딸린 그림임을 자리로 말한다.
+
+   **클래스명이 편집기와 갈려 있다** — 편집기 블록은 `.sched-fanart` 다. 이름을 공유하면 이
+   폴라로이드 치수(fit-content·420 상한·가운데 정렬)가 그 입력들에 그대로 새서 버튼이 쪼그라들고
+   가운데로 몰린다. 같은 기능의 두 화면이라도 부품이 다르면 이름도 다르다. */
+.sched-fanart-card {
+  margin: var(--space-7) auto 0;
+  width: fit-content;
+  max-width: min(100%, 420px);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+/* 사진지 안쪽 그림. **width/height 속성과 짝이다** — 속성이 비율을 주고 이 두 줄이 그 비율을
+   유지하며 상한 안으로 줄인다(CLS 를 막는 표준 조합). block 이 아니면 인라인 여백이 아래에
+   남아 종이 테두리가 비뚤어 보인다. */
+.sched-fanart-card__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 2px;
 }
 
 /* ── 빈 상태(읽기, 미발행 주) ──────────────────────────────────────────────── */

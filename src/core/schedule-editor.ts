@@ -45,6 +45,16 @@ export type WeekDraft = {
   published: boolean;
   entries: DraftEntry[];
   days: Record<string, DraftDay>;
+  /* 그 주 팬아트(ADR-0028). **키는 `null` 이고 표기는 `""` 다** — 타입이 갈리는 이유는 값의
+     출처가 다르기 때문이다: 표기는 사람이 타이핑하는 입력 칸이라 note·startTime 처럼 빈
+     문자열이 곧 "안 적음"이고(서버 Zod 가 접는다), 키는 입력 칸이 아니라 **업로드가 돌려준
+     결과**라 "없음"을 빈 문자열로 흉내 낼 이유가 없다. 치수도 같은 결이다(파일에서 읽은 값). */
+  fanartImageKey: string | null;
+  fanartCredit: string;
+  /* 키와 **함께만** 움직인다 — 업로드가 새 키와 함께 세우고 내리기가 함께 지운다. 브라우저가
+     파일을 못 디코드하면 키만 있고 이 둘은 null 이다(읽기 화면이 자리 예약 없이 그린다). */
+  fanartImageWidth: number | null;
+  fanartImageHeight: number | null;
 };
 
 /* 그 날짜의 속성. 키가 없으면 기본값 — "행이 없는 것 = 기본값"을 클라이언트에서도 그대로 쓴다. */
@@ -189,6 +199,14 @@ export function isWeekDirty(a: WeekDraft, b: WeekDraft): boolean {
   /* **하루 속성도 저장되는 값이다**(이슈 #117) — 빼먹으면 시각을 바꾸거나 휴방을 켜도 저장
      버튼이 계속 비활성이고, 같은 판정을 읽는 다운로드 카드의 미저장 힌트도 조용해진다. */
   if (canonicalDays(a) !== canonicalDays(b)) return true;
+  /* 팬아트도 같은 규칙이다 — **저장에 실리는 값은 전부 여기 든다**(위 하루 속성과 같은 자리).
+     빼먹으면 그림을 올려도 저장 버튼이 안 열려 업로드한 객체가 어느 주에도 안 걸린다.
+     치수는 키와 함께만 바뀌어 키 비교가 이미 잡지만 그래도 적는다: "저장되는 값"이라는 규칙을
+     예외 없이 두는 편이, 나중에 치수만 바뀌는 경로가 생겼을 때 이 자리를 다시 안 놓친다. */
+  if (a.fanartImageKey !== b.fanartImageKey) return true;
+  if (a.fanartCredit.trim() !== b.fanartCredit.trim()) return true;
+  if (a.fanartImageWidth !== b.fanartImageWidth) return true;
+  if (a.fanartImageHeight !== b.fanartImageHeight) return true;
   return canonicalEntries(a) !== canonicalEntries(b);
 }
 

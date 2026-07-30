@@ -71,6 +71,19 @@ function blankTitleMessage(entry: DraftEntry): string {
    실패해서 남은 옛 문구"를 발행 확인창이 "방금 발행이 실패했다"로 오독할 창이 생긴다(둘 다 같은
    `ready` 상태로 돌아오므로 시점만으론 못 가른다).
 
+   ── 팬아트 업로드는 세 번째 submit 자식이다(ADR-0028, 이슈 #120 PR 2) ────────────────
+   파일 바이트가 `POST /api/fanart` 로 나가 `{ key }` 를 받는 비동기 왕복이고, 진행·실패·성공이
+   갈리며 성공값이 **draft 에 반영돼야** 한다 — 위 두 자식과 정확히 같은 모양이라 새 머신을
+   만들지 않고 자식을 하나 더 얹는다(AGENTS 의 8종 머신 표에서 "수명·공유 범위가 비슷한 자리를
+   찾아 따라간다"). 루트에 두는 이유도 같다: 관리자가 한 화면에서 그림을 여러 번 바꿀 수 있다.
+
+   **업로드 중에는 `SAVE` 를 받지 않는다**(`uploading` 상태에 `on` 이 없다). 저장이 먼저 나가면
+   아직 키가 없는 draft 가 저장돼 "올렸는데 안 걸렸다"가 되고, 관리자는 업로드가 실패한 것으로
+   읽는다. 편집 이벤트는 기존대로 루트 `on` 이라 업로드 중에도 공지·항목을 계속 고칠 수 있다.
+
+   에러도 셋으로 나눈다(`error`/`publishError`/`fanartError`) — 하나를 공유하면 "저장이 실패해서
+   남은 문구"를 업로드 자리가 자기 실패로 보여준다(그 둘은 화면의 다른 자리에 뜬다).
+
    `PUBLISH`·`UNPUBLISH` 는 **`ready` 에서만** 받는다(SAVE 와 같은 자리) — 이 판정은 UI 버튼
    disabled 의 보험이지 유일한 방어선은 아니다(disabled 가 유일한 방어선이면 안 된다는 원칙은
    submit.machine.ts 의 "저장 중 재제출 무시"와 같다). 두 가드는 **비대칭**이다(Plan 에이전트
@@ -94,6 +107,26 @@ export type SaveWeekValues = {
   /* 하루의 속성(이슈 #117). 기본값인 날은 draftDayInputs 가 이미 접어 낸다 — 서버도 같은
      필터를 다시 걸지만, 여기서 접어야 dirty 판정과 저장 페이로드가 같은 정규형을 본다. */
   days: DraftDayInput[];
+  /* 팬아트 넷(ADR-0028). **편집기는 항상 넷을 다 보낸다** — 서버의 `undefined = 유지` 규약은
+     이 필드를 모르는 옛 클라이언트(배포 중 열려 있던 탭)를 위한 것이고, 화면이 그 규약에
+     기대면 "지움"을 표현할 수 없다. 치수는 한 쌍으로만 보낸다(서버 Zod 가 반쪽을 거절한다). */
+  fanartImageKey: string | null;
+  fanartCredit: string | null;
+  fanartImageWidth: number | null;
+  fanartImageHeight: number | null;
+};
+
+/* 업로드 자식이 실어 보낼 값과 받아 올 결과. `Blob` 은 workerd·브라우저 공통 전역이라
+   core/fanart.ts 의 `Uint8Array` 와 같은 급의 런타임 중립 타입이다 — 이 파일은 여전히 HTTP 를
+   모르고, 실제 POST 와 치수 판독은 호출자가 준 `uploadRun` 안에 있다.
+
+   치수가 nullable 인 이유: 브라우저가 그 파일을 못 디코드하면 못 읽는다. 그때도 **키는 살린다**
+   — 그림을 못 거는 것보다 자리 예약 없이 그리는 편이 낫다(db/schema.ts). */
+export type FanartUploadValues = { file: Blob };
+export type FanartUploadResult = {
+  key: string;
+  width: number | null;
+  height: number | null;
 };
 
 /* run 의 반환 shape. 실제 tRPC 응답(WeekView, features 타입)을 core 가 못 보므로, 호출자가
@@ -124,12 +157,18 @@ export type PublishWeekResult = {
 
 const publishSubmitMachine = createSubmitMachine<PublishWeekValues, PublishWeekResult>();
 
+const uploadSubmitMachine = createSubmitMachine<FanartUploadValues, FanartUploadResult>();
+
 export type ScheduleSaveInput = SubmitInput<SaveWeekValues, SaveWeekResult> & {
   weekStartDate: string;
   initialDraft: WeekDraft;
   initialRevision: number | null;
   // publish 자식 전용 run — mapError 는 submit 과 함께 쓴다(위 SubmitInput 이 이미 담고 있다).
   publishRun: SubmitInput<PublishWeekValues, PublishWeekResult>["run"];
+  // 업로드 자식 전용 run. **mapError 는 공유하지 않는다** — 저장 매퍼는 tRPC 오류 코드를 읽는데
+  // (`data.code`) 업로드는 Route Handler 의 상태 코드로 실패하므로 어휘가 통째로 다르다.
+  uploadRun: SubmitInput<FanartUploadValues, FanartUploadResult>["run"];
+  mapUploadError: SubmitInput<FanartUploadValues, FanartUploadResult>["mapError"];
 };
 
 type ScheduleSaveContext = ScheduleSaveInput & {
@@ -139,6 +178,8 @@ type ScheduleSaveContext = ScheduleSaveInput & {
   error: string;
   // 발행·비공개 전환 전용 에러 — error(저장)와 나눈 이유는 파일 상단 주석 참고.
   publishError: string;
+  // 팬아트 업로드 전용 에러 — 화면의 다른 자리(팬아트 블록 안)에 뜬다.
+  fanartError: string;
   announcement: string;
   // 새 항목 키의 단조 카운터 — core 는 순수라 이 값 자체가 상태다(원본의 useRef 를 대신한다).
   seq: number;
@@ -152,6 +193,13 @@ type ScheduleSaveEvent =
   /* 하루의 속성(시각·휴방, 이슈 #117). 항목 이벤트와 갈라 두는 이유는 대상이 다르기 때문이다 —
      항목은 key 로, 하루는 날짜로 지목한다. */
   | { type: "DAY_PATCHED"; date: string; patch: Parameters<typeof setDay>[2] }
+  /* 팬아트 셋(ADR-0028). 브랜치 초판(외부 URL)은 두 칸을 patch 하나로 받았지만, R2 판에선 세
+     행위가 서로 다르다: 파일을 **올린다**(비동기, 키·치수가 서버에서 온다) · 표기를 **적는다**
+     (동기 입력) · 그림을 **내린다**(넷을 함께 지운다). 한 이벤트로 뭉치면 화면이 키를 직접
+     만들어 보낼 수 있게 되는데, 키의 출처는 업로드 응답 하나뿐이어야 한다. */
+  | { type: "FANART_UPLOAD"; file: Blob }
+  | { type: "FANART_CREDIT_CHANGED"; credit: string }
+  | { type: "FANART_REMOVED" }
   | { type: "SAVE" }
   | { type: "PUBLISH" }
   | { type: "UNPUBLISH" };
@@ -166,6 +214,12 @@ function saveValues(context: ScheduleSaveContext): SaveWeekValues {
     published: context.draft.published,
     entries: draftEntryInputs(context.draft),
     days: draftDayInputs(context.draft),
+    fanartImageKey: context.draft.fanartImageKey,
+    // '' → null 은 서버 Zod 도 하지만, dirty 비교가 같은 정규형을 봐야 저장 직후 깨끗해진다
+    // (note·startTime 과 같은 규약).
+    fanartCredit: context.draft.fanartCredit.trim() || null,
+    fanartImageWidth: context.draft.fanartImageWidth,
+    fanartImageHeight: context.draft.fanartImageHeight,
   };
 }
 
@@ -201,7 +255,7 @@ export const scheduleSaveMachine = setup({
     events: ScheduleSaveEvent;
     input: ScheduleSaveInput;
   },
-  actors: { submit: saveSubmitMachine, publish: publishSubmitMachine },
+  actors: { submit: saveSubmitMachine, publish: publishSubmitMachine, upload: uploadSubmitMachine },
 }).createMachine({
   id: "scheduleSave",
   context: ({ input }) => ({
@@ -211,6 +265,7 @@ export const scheduleSaveMachine = setup({
     revision: input.initialRevision,
     error: "",
     publishError: "",
+    fanartError: "",
     announcement: "",
     seq: 0,
   }),
@@ -283,6 +338,44 @@ export const scheduleSaveMachine = setup({
         },
       ],
     },
+    {
+      id: "upload",
+      src: "upload",
+      input: ({ context }) => ({ run: context.uploadRun, mapError: context.mapUploadError }),
+      onSnapshot: [
+        {
+          guard: ({ event }) => event.snapshot.matches("done"),
+          target: ".ready",
+          actions: assign(({ context, event }) => {
+            const result = event.snapshot.context.result!;
+            return {
+              draft: {
+                ...context.draft,
+                fanartImageKey: result.key,
+                /* **새 그림에 옛 표기를 물려주지 않는다.** 업로드는 매번 새 UUID 를 내므로 키가
+                   반드시 바뀌고, 그 상태에서 표기가 남으면 잘못된 귀속이다 — 서버의 같은 규칙
+                   (nextFanart 규칙 2)에 맡길 수 없다: 편집기는 표기를 **항상 함께 보내므로**
+                   보낸 값이 이겨 그 규칙이 발동하지 않는다. 화면이 지워야 한다. */
+                fanartCredit: "",
+                fanartImageWidth: result.width,
+                fanartImageHeight: result.height,
+              },
+              fanartError: "",
+              /* 업로드만으로는 **어느 주에도 안 걸린다** — 저장을 눌러야 반영된다. 미리보기가
+                 떠서 눈으로는 달라 보이므로, 남은 한 걸음은 글자로 말해야 전해진다(팬 제안이
+                 "보드를 안 바꾸는 쓰기는 화면이 직접 말해야 한다"로 겪은 자리와 같은 결). */
+              announcement: "팬아트를 올렸습니다. 저장해야 반영됩니다.",
+            };
+          }),
+        },
+        {
+          guard: ({ event }) =>
+            event.snapshot.matches("idle") && event.snapshot.context.error !== "",
+          target: ".ready",
+          actions: assign({ fanartError: ({ event }) => event.snapshot.context.error }),
+        },
+      ],
+    },
   ],
   /* 편집 이벤트 넷은 `ready`·`saving`·`publishing` 어느 쪽에 있든 받는다 — 원본이 저장 중에도
      입력을 안 잠그기 때문이다(파일 상단 주석). PUBLISHED_CHANGED 는 이제 없다 — 발행 체크박스가
@@ -308,6 +401,15 @@ export const scheduleSaveMachine = setup({
     DAY_PATCHED: {
       actions: assign({
         draft: ({ context, event }) => setDay(context.draft, event.date, event.patch),
+      }),
+    },
+    /* 표기 입력은 **다른 편집 이벤트와 같은 자리**(루트)다 — 저장 중에도 타이핑을 잠그지 않는
+       기존 계약을 그대로 따른다(그 대가도 같다: 저장이 성공하면 서버 응답이 draft 를 덮는다).
+       반대로 업로드·내리기는 `ready` 안에 있다(아래) — 그 둘은 업로드 자식과 **같은 값을**
+       만지므로 진행 중에 끼면 결과가 순서에 달린다. */
+    FANART_CREDIT_CHANGED: {
+      actions: assign({
+        draft: ({ context, event }) => ({ ...context.draft, fanartCredit: event.credit }),
       }),
     },
   },
@@ -363,6 +465,29 @@ export const scheduleSaveMachine = setup({
             })),
           ],
         },
+        /* 파일을 올린다. 옛 실패 문구를 먼저 지우는 이유는 SAVE 와 같다 — 안 지우면 새 업로드가
+           도는 중에도 지난 실패가 그 자리에 남아 있다. */
+        FANART_UPLOAD: {
+          target: "uploading",
+          actions: [
+            assign({ fanartError: "" }),
+            sendTo("upload", ({ event }) => ({ type: "submit", values: { file: event.file } })),
+          ],
+        },
+        /* 내린다 — **넷을 함께 지운다.** 그림이 없으면 표기도 치수도 가리킬 대상이 없다(서버
+           nextFanart·DB CHECK 와 같은 규칙). 화면에서 사라진 값은 데이터에서도 사라지는 게 맞고,
+           표기만 남기면 저장이 거절되는데 그 칸이 화면에 없어 관리자가 고칠 수단이 없다. */
+        FANART_REMOVED: {
+          actions: assign({
+            draft: ({ context }) => ({
+              ...context.draft,
+              fanartImageKey: null,
+              fanartCredit: "",
+              fanartImageWidth: null,
+              fanartImageHeight: null,
+            }),
+          }),
+        },
       },
     },
     // submit 자식이 "submitting" 인 동안 머문다 — 위 onSnapshot 이 결론(done/실패)에서 .ready 로
@@ -371,5 +496,10 @@ export const scheduleSaveMachine = setup({
     saving: {},
     // publish 자식이 "submitting" 인 동안 머문다 — saving 과 같은 결.
     publishing: {},
+    /* upload 자식이 바이트를 보내는 동안 머문다. **`on` 이 비어 있는 것이 이 상태의 일이다** —
+       SAVE 가 여기서 무시되므로 "아직 키가 없는 draft 가 저장되는" 경로가 닫힌다(그러면 관리자는
+       올린 그림이 안 걸린 것을 업로드 실패로 읽는다). 팬아트 조작(FANART_UPLOAD·FANART_REMOVED)도
+       같은 이유로 여기서 안 받는다 — 자식과 같은 값을 만져 결과가 순서에 달린다. */
+    uploading: {},
   },
 });

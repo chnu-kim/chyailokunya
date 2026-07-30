@@ -18,9 +18,12 @@ const WEEK: WeekView = {
   draft: false,
   revision: 1753600000000,
   days: [],
-  // 팬아트는 PR 2(화면)에서 붙는다 — 지금은 뷰 타입을 만족시키는 값이다.
+  /* 기본은 "팬아트 없는 주"다 — 아래 팬아트 테스트가 필요한 값만 얹어 rerender 한다. 치수는
+     그림이 있어도 없을 수 있어(브라우저가 못 디코드한 파일) 두 경로를 따로 잰다. */
   fanartImageKey: null,
   fanartCredit: null,
+  fanartImageWidth: null,
+  fanartImageHeight: null,
   entries: [
     {
       id: 1,
@@ -104,5 +107,81 @@ describe("ScheduleReadView 의 오늘 표시", () => {
     const note = screen.getByTestId("schedule-note");
     const card = screen.getByTestId("week-card-download");
     expect(note.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("ScheduleReadView 의 팬아트(ADR-0028)", () => {
+  const KEY = "0189d1f0-3a4b-7c8d-9e0f-1a2b3c4d5e6f.png";
+
+  function renderFanart(over: Partial<WeekView>) {
+    return render(
+      <ScheduleReadView
+        weekStartDate={WEEK_START}
+        week={{ ...WEEK, ...over }}
+        games={[]}
+        currentWeek={WEEK_START}
+        today="2026-07-29"
+      />,
+    );
+  }
+
+  it("목록 아래에 사진지로 서고, 표기는 있을 때만 붙는다", () => {
+    /* 이 화면의 주인공은 일정이라 팬아트가 목록을 밀어내면 안 된다(문서 순서로 못박는다).
+       표기는 선택이다 — 작가를 모르거나 본인이 그린 경우가 있다. */
+    const { rerender } = renderFanart({ fanartImageKey: KEY, fanartCredit: "그린 사람" });
+    const fanart = screen.getByTestId("schedule-fanart");
+    // 화면은 키에서 서빙 경로를 조립한다 — DB 엔 조각만 산다(core/fanart 가 형식의 정본).
+    expect(within(fanart).getByAltText("팬아트")).toHaveAttribute("src", `/api/fanart/${KEY}`);
+    expect(within(fanart).getByText("그린 사람")).toBeInTheDocument();
+
+    const list = screen.getByTestId("schedule-days");
+    expect(list.compareDocumentPosition(fanart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    rerender(
+      <ScheduleReadView
+        weekStartDate={WEEK_START}
+        week={{ ...WEEK, fanartImageKey: KEY, fanartCredit: null }}
+        games={[]}
+        currentWeek={WEEK_START}
+        today="2026-07-29"
+      />,
+    );
+    expect(screen.queryByText("그린 사람")).not.toBeInTheDocument();
+    expect(screen.getByAltText("팬아트")).toBeInTheDocument();
+  });
+
+  it("팬아트가 없으면 그 자리 자체가 없다", () => {
+    renderFanart({});
+    expect(screen.queryByTestId("schedule-fanart")).not.toBeInTheDocument();
+  });
+
+  it("치수가 있으면 width·height 로 자리를 예약하고, 없으면 속성을 안 단다", () => {
+    /* 속성이 있어야 그림이 로드되기 전에 브라우저가 비율을 알고 자리를 비운다 — 없으면 lazy
+       로드가 끝나는 순간 아래(푸터)가 밀린다. 그래서 치수를 컬럼으로 저장한다(db/schema.ts).
+
+       **없을 때 안 다는 것도 계약이다.** 반쪽(width 만)을 주면 브라우저가 비율을 잘못 잡아
+       그림이 늘어난다 — 있으나 없으나 둘 다 온전한 상태로만 그린다. */
+    const { rerender } = renderFanart({
+      fanartImageKey: KEY,
+      fanartImageWidth: 1200,
+      fanartImageHeight: 1600,
+    });
+    const img = screen.getByAltText("팬아트");
+    expect(img).toHaveAttribute("width", "1200");
+    expect(img).toHaveAttribute("height", "1600");
+
+    // 브라우저가 못 디코드한 파일 — 그림은 그대로 뜨고 예약만 없다(우아한 저하).
+    rerender(
+      <ScheduleReadView
+        weekStartDate={WEEK_START}
+        week={{ ...WEEK, fanartImageKey: KEY }}
+        games={[]}
+        currentWeek={WEEK_START}
+        today="2026-07-29"
+      />,
+    );
+    const plain = screen.getByAltText("팬아트");
+    expect(plain).not.toHaveAttribute("width");
+    expect(plain).not.toHaveAttribute("height");
   });
 });

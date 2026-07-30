@@ -78,6 +78,8 @@ describe("일정 라우터", () => {
       days: [],
       fanartImageKey: null,
       fanartCredit: null,
+      fanartImageWidth: null,
+      fanartImageHeight: null,
       entries: [],
     });
   });
@@ -1120,6 +1122,158 @@ describe("팬아트", () => {
           fanartImageKey: bad,
         }),
       ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+  });
+
+  /* 치수(읽기 화면의 자리 예약). 표기와 같은 규약을 따르지만 **한 쌍**이라는 조건이 더 붙는다 —
+     반쪽 조합은 DB CHECK 가 batch 를 죽인다(그 시점엔 revision 이 이미 올라 편집기가 이유 없는
+     CONFLICT 를 본다). 아래가 그 조합들을 하나씩 못박는다. */
+  it("치수를 함께 저장하고 되읽는다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      fanartImageKey: KEY_A,
+      fanartImageWidth: 1200,
+      fanartImageHeight: 1600,
+    });
+    const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageWidth).toBe(1200);
+    expect(week.fanartImageHeight).toBe(1600);
+  });
+
+  it("치수 없이 그림만 저장하는 것은 정상이다 — 브라우저가 못 읽은 파일이 그 경로다", async () => {
+    /* 치수를 필수로 걸면 그때 저장이 통째로 막혀 "그림은 올라갔는데 어느 주에도 걸 수 없다"가
+       된다. 예약 없이 그리는 저하가 맞다(db/schema.ts 의 nullable 근거) — 그 저하 경로가 실제로
+       열려 있는지 여기서 못박는다. */
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "젤다" }],
+      fanartImageKey: KEY_A,
+      fanartImageWidth: null,
+      fanartImageHeight: null,
+    });
+    const week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageKey).toBe(KEY_A);
+    expect(week.fanartImageWidth).toBeNull();
+    expect(week.fanartImageHeight).toBeNull();
+  });
+
+  it("안 보낸 저장은 기존 치수를 유지하고, 그림을 내리면 치수도 사라진다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+      fanartImageWidth: 800,
+      fanartImageHeight: 600,
+    });
+    // 팬아트 칸을 아예 안 싣는다(이 필드를 모르는 옛 클라이언트가 보내는 모양).
+    await saveWeekAsEditor(caller, { weekStartDate: MON, days: [], entries });
+    let week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageWidth).toBe(800);
+    expect(week.fanartImageHeight).toBe(600);
+
+    // 그림을 내린다 — 치수는 가리킬 그림이 없어져 함께 사라진다(표기와 같은 규칙).
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: null,
+    });
+    week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageWidth).toBeNull();
+    expect(week.fanartImageHeight).toBeNull();
+  });
+
+  it("그림을 바꾸면 옛 치수를 안 물려준다 — 예약한 자리와 비율이 어긋난다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+      fanartImageWidth: 800,
+      fanartImageHeight: 600,
+    });
+    // 새 그림만 싣는다(치수 생략) — 세로 긴 그림에 가로 비율이 붙으면 화면이 튄다.
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_B,
+    });
+    let week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageWidth).toBeNull();
+    expect(week.fanartImageHeight).toBeNull();
+
+    // 새 치수를 함께 보내면 그 값이 쓰인다(화면이 하는 일이다).
+    await saveWeekAsEditor(caller, {
+      weekStartDate: MON,
+      days: [],
+      entries,
+      fanartImageKey: KEY_A,
+      fanartImageWidth: 1200,
+      fanartImageHeight: 1600,
+    });
+    week = await caller.schedule.getWeek({ weekStartDate: MON });
+    expect(week.fanartImageWidth).toBe(1200);
+    expect(week.fanartImageHeight).toBe(1600);
+  });
+
+  it("반쪽 치수·그림 없는 치수·상한 초과는 경계에서 거절한다", async () => {
+    const caller = createCaller(makeCtx({ authorities: admin }));
+    const entries = [{ scheduledDate: "2026-07-20", title: "젤다" }];
+    const bad: Parameters<typeof saveWeekAsEditor>[1][] = [
+      // 폭만 — 예약 계산이 성립하지 않는다.
+      { weekStartDate: MON, days: [], entries, fanartImageKey: KEY_A, fanartImageWidth: 800 },
+      // 높이만.
+      { weekStartDate: MON, days: [], entries, fanartImageKey: KEY_A, fanartImageHeight: 600 },
+      // 한쪽만 null — "함께 있거나 함께 없다"를 깬다.
+      {
+        weekStartDate: MON,
+        days: [],
+        entries,
+        fanartImageKey: KEY_A,
+        fanartImageWidth: 800,
+        fanartImageHeight: null,
+      },
+      // 그림을 지우면서 치수를 싣는다 — 가리킬 그림이 없다.
+      {
+        weekStartDate: MON,
+        days: [],
+        entries,
+        fanartImageKey: null,
+        fanartImageWidth: 800,
+        fanartImageHeight: 600,
+      },
+      // 상한 초과 — 거대한 정수가 img 속성에 실리면 그림 한 장이 화면을 밀어낸다.
+      {
+        weekStartDate: MON,
+        days: [],
+        entries,
+        fanartImageKey: KEY_A,
+        fanartImageWidth: 20001,
+        fanartImageHeight: 600,
+      },
+      // 0 이하 — 비율 계산이 깨진다(DB CHECK 와 같은 규칙).
+      {
+        weekStartDate: MON,
+        days: [],
+        entries,
+        fanartImageKey: KEY_A,
+        fanartImageWidth: 0,
+        fanartImageHeight: 600,
+      },
+    ];
+    for (const input of bad) {
+      await expect(saveWeekAsEditor(caller, input)).rejects.toMatchObject({ code: "BAD_REQUEST" });
     }
   });
 });

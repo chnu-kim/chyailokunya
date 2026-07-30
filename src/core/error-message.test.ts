@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   deleteErrorMessage,
+  FanartUploadFailed,
+  fanartUploadErrorMessage,
   isAborted,
   readErrorMessage,
   updateErrorMessage,
@@ -199,5 +201,50 @@ describe("readErrorMessage", () => {
 
   it("상한에 걸리면 검색이 멈췄다고 말한다", () => {
     expect(readErrorMessage(wrapped(timeout()))).toContain("오래 걸려서 멈췄습니다");
+  });
+});
+
+describe("fanartUploadErrorMessage(ADR-0028)", () => {
+  /* 업로드는 이 파일의 유일한 **HTTP 상태 코드** 매퍼다(나머지는 tRPC 코드) — 그래서 분기가
+     따로인데, 원칙은 같다: 우리가 확인한 것만 말한다. */
+  it("413·415·400 은 서버 문구를 그대로 쓴다 — 상한·허용 형식의 정본이 서버다", () => {
+    expect(
+      fanartUploadErrorMessage(
+        new FanartUploadFailed(413, "파일이 너무 큽니다. 5MB 이하만 올릴 수 있습니다."),
+      ),
+    ).toBe("파일이 너무 큽니다. 5MB 이하만 올릴 수 있습니다.");
+    expect(
+      fanartUploadErrorMessage(
+        new FanartUploadFailed(415, "PNG · JPEG · WebP 이미지만 올릴 수 있습니다."),
+      ),
+    ).toContain("PNG");
+  });
+
+  it("인가 실패는 우리가 다시 쓴다 — 서버 문구는 무엇을 해야 하는지 안 말한다", () => {
+    for (const status of [401, 403]) {
+      const msg = fanartUploadErrorMessage(new FanartUploadFailed(status, "로그인이 필요합니다"));
+      expect(msg).toContain("다시 로그인해 주십시오");
+    }
+  });
+
+  it("서버 문구를 못 읽었으면 원인을 말하지 않는다", () => {
+    /* 이 파일이 프로덕션에서 어긴 원칙 그대로다 — 모르는 자리에 원인을 단정하는 문구를 두면
+       사용자가 안 되는 일을 계속 재시도한다. */
+    const msg = fanartUploadErrorMessage(new FanartUploadFailed(500, ""));
+    expect(msg).toBe("그림을 올리지 못했습니다. 잠시 후 다시 시도해 주십시오.");
+    expect(msg).not.toContain("네트워크");
+    expect(msg).not.toContain("크기");
+  });
+
+  it("상한(timeout)은 기다림을 멈췄다고만 말한다 — 올라갔는지는 모른다", () => {
+    const msg = fanartUploadErrorMessage(wrapped(timeout()));
+    expect(msg).toContain("오래 걸려");
+    // "올리지 못했습니다" 로 단정하지 않는다 — 서버엔 닿았을 수 있다.
+    expect(msg).not.toContain("올리지 못했");
+  });
+
+  it("우리 것이 아닌 에러도 기본 문구로 떨어진다", () => {
+    expect(fanartUploadErrorMessage(new Error("boom"))).toContain("잠시 후 다시 시도");
+    expect(fanartUploadErrorMessage(null)).toContain("잠시 후 다시 시도");
   });
 });
