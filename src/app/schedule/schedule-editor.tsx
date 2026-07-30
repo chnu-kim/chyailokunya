@@ -509,7 +509,12 @@ export function ScheduleEditor({
                               type="button"
                               className="sched-field sched-row__game-trigger"
                               aria-haspopup="true"
-                              aria-expanded={openGameSearchKey === e.key}
+                              /* **`!day.rest` 가 여기에도 걸린다**(codex 리뷰 P3). 패널은 아래에서
+                                 휴방일 때 언마운트되는데 `openGameSearchKey` 는 그대로 두므로
+                                 (휴방을 도로 끄면 열어 뒀던 자리가 돌아오게), 이 조건을 안 맞추면
+                                 "펼쳐졌다고 말하지만 펼쳐진 것이 없는" 잠긴 버튼이 된다 — 보조
+                                 기술에는 없는 팝업을 가리키는 컨트롤로 들린다. */
+                              aria-expanded={openGameSearchKey === e.key && !day.rest}
                               aria-label={gameLabel}
                               title={gameLabel}
                               disabled={day.rest}
@@ -591,6 +596,29 @@ export function ScheduleEditor({
                               <span className="sr-only">항목 삭제</span>
                             </button>
                           </div>
+
+                          {/* **제목이 게임명을 대신 말하지 못할 때만** 연결을 글자로 적는다
+                              (적대적 리뷰 지적, 2026-07-31).
+
+                              트리거를 아이콘으로 줄이면서 게임명을 `aria-label`·`title` 로
+                              옮겼는데, `title` 은 hover 전용이라 터치·키보드 사용자에겐 없는
+                              것과 같고 표지 없는 게임은 이니셜 한 글자로 접힌다. `gameId` 는
+                              저장돼 공개 화면과 게임 보드를 좌우하므로, 잘못 이어진 항목을
+                              화면에서 잡을 길이 없으면 그대로 나간다.
+
+                              그렇다고 항상 적으면 아이콘화로 얻은 자리를 도로 내준다 — 제목이
+                              게임명과 같은 흔한 경우(고를 때 빈 제목이 게임명으로 자동으로
+                              채워진다)엔 같은 글자가 한 행에 두 번 선다. 그래서 **다를 때만**
+                              적는다: 그게 정확히 위험한 경우다. 비교는 trim 만 하고 대소문자는
+                              안 접는다 — 게임명 표기가 다른 것도 관리자가 알아야 할 차이다. */}
+                          {linkedName !== null && linkedName !== e.title.trim() && (
+                            <p
+                              className="sched-row__linked"
+                              data-od-id={`schedule-entry-linked-${e.key}`}
+                            >
+                              연결: {linkedName}
+                            </p>
+                          )}
 
                           {/* 휴방을 켜면 열려 있던 패널도 함께 사라진다 — 트리거만 잠그면 그
                               아래 검색창은 멀쩡히 살아 있어 "잠갔다"는 표시와 어긋난다.

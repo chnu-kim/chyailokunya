@@ -442,6 +442,17 @@
   flex: 1 1 0;
   min-width: 0;
 }
+/* 제목이 게임명과 다를 때만 뜨는 연결 표기(적대적 리뷰, schedule-editor.tsx 주석에 근거).
+   행 아래 한 줄이라 폭을 안 먹고, 왼쪽 들여쓰기(44+8)로 표지 버튼 오른쪽에 맞춰 서서 "이
+   항목에 딸린 사실"임이 자리로 읽힌다. --fg-muted 는 하루 카드 표면 위 라이트 6.39:1 ·
+   다크 6.69:1. */
+.sched-row__linked {
+  margin: 4px 0 0;
+  padding-left: calc(44px + var(--space-2));
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
 /* 삭제는 44×44 아이콘 버튼. 잉크 테두리로 항목 행의 다른 컨트롤과 같은 종족으로 읽힌다. */
 .sched-row__del {
   flex: 0 0 auto;
@@ -513,6 +524,23 @@
   background: var(--surface);
   border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
+}
+/* 지금 연결된 게임 + 해제 버튼. 좁은 폭(320)에서 이름이 길면 버튼이 아래로 내려가야 하므로
+   wrap 을 켠다 — 한 줄에 억지로 세우면 44 하한을 지키는 버튼이 이름을 밀어낸다. */
+.sched-picker__current {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* --fg-muted 는 이 패널 표면(--surface) 위 라이트 6.39:1 · 다크 6.69:1 로 14px 게이트를 넘는다.
+   값 칸이라 문장이 아니라 표기다(AGENTS). */
+.sched-picker__current-name {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
 }
 .sched-picker__unlink {
   align-self: flex-start;

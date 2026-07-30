@@ -103,6 +103,10 @@ export function ScheduleGameSearch({
     },
   });
   const adding = addState.matches("submitting");
+  /* 지금 걸린 게임. 부모가 id 만 넘기므로(patch 가 다루는 값이 id 다) 이름은 여기서 찾는다 —
+     `localGames` 는 이번 세션에 새로 추가한 게임까지 포함된 목록이라 방금 만든 게임도 잡힌다. */
+  const currentGame =
+    currentGameId !== null ? (localGames.find((g) => g.id === currentGameId) ?? null) : null;
   const query = state.context.query.trim();
   const step = composerStep(state.context);
   const optionCount = composerOptionCount(state.context);
@@ -266,18 +270,28 @@ export function ScheduleGameSearch({
 
   return (
     <div className="sched-picker" data-od-id={idPrefix + "picker"}>
+      {/* **무엇이 연결돼 있는지 먼저 말한다**(적대적 리뷰 지적, 2026-07-31). 전엔 "연결 해제"
+          버튼만 있어서 무엇을 해제하는지가 화면 어디에도 없었다 — 트리거가 아이콘이 되면서
+          그 이름을 볼 수 있는 자리가 더 줄었으므로, 해제를 누르기 전에 확인할 곳이 필요하다.
+          목록에 없는 게임이면(다른 관리자가 방금 지웠다) 이름 대신 그 사실을 말한다: 여기서
+          이름을 지어내면 관리자가 없는 게임을 그대로 두고 넘어간다. */}
       {currentGameId !== null && (
-        <button
-          type="button"
-          className="sched-picker__unlink"
-          data-od-id={idPrefix + "unlink"}
-          onClick={() => {
-            onUnlink();
-            onClose();
-          }}
-        >
-          연결 해제
-        </button>
+        <div className="sched-picker__current">
+          <p className="sched-picker__current-name" data-od-id={idPrefix + "current"}>
+            지금 연결: {currentGame?.categoryValue ?? "보드에 없는 게임"}
+          </p>
+          <button
+            type="button"
+            className="sched-picker__unlink"
+            data-od-id={idPrefix + "unlink"}
+            onClick={() => {
+              onUnlink();
+              onClose();
+            }}
+          >
+            연결 해제
+          </button>
+        </div>
       )}
 
       {step === "search" && (

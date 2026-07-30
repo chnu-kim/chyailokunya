@@ -108,6 +108,22 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
     expect(ui.note()).toHaveTextContent("휴방인 날은 항목이 나가지 않습니다");
   });
 
+  it("패널을 연 채 휴방을 켜면 트리거가 '펼쳐짐'을 주장하지 않는다", () => {
+    /* codex 리뷰 P3. 패널은 휴방일 때 언마운트되지만 `openGameSearchKey` 는 그대로 두므로
+       (휴방을 도로 끄면 열어 뒀던 자리가 돌아오게), `aria-expanded` 를 같은 조건으로 안 맞추면
+       "펼쳐졌다고 말하지만 펼쳐진 것이 없는" 잠긴 버튼이 남는다. */
+    const ui = renderEditor();
+
+    fireEvent.click(ui.gameTrigger());
+    expect(ui.gameTrigger()).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(ui.restToggle);
+
+    expect(ui.gameTrigger()).toHaveAttribute("aria-expanded", "false");
+    // 패널 자체도 사라져야 한다 — 속성만 고치고 검색창이 남으면 잠금이 반쪽이다.
+    expect(ui.container.querySelector(".sched-picker")).toBeNull();
+  });
+
   it("휴방을 껐다 켜도 항목은 지워지지 않는다", () => {
     const ui = renderEditor();
 
