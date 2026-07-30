@@ -223,7 +223,12 @@ export function ScheduleEditor({
     () =>
       buildWeekCard({
         weekStartDate,
-        note: draft.note,
+        /* 공지도 **저장될 값**으로 접는다(codex 리뷰 P2 — 아래 entries 와 같은 부류를 여기만
+           빠뜨렸다). 서버 스키마는 공백만인 공지를 `null` 로 접고 나머지는 trim 하며
+           (features/schedule/schema.ts), `isWeekDirty` 도 `.trim()` 으로 비교한다 — 그래서
+           공백만 타이핑하면 **dirty 가 아닌데** 날것을 넘기면 카드에 빈 공지 블록이 생긴다.
+           받아지는 파일엔 없는 그 블록이 화면에만 있는 셈이고, 저장하거나 새로고침하면 사라진다. */
+        note: draft.note.trim() || null,
         /* **저장될 값으로 그린다**(적대적 리뷰 지적, 2026-07-31). `draft.entries` 를 날것으로
            넘기면 "보이는 것 = 받는 것"이 정확히 한 자리에서 깨진다: "+항목 추가"로 만든 빈 제목
            항목은 저장 페이로드에서 버려지는데(`draftEntryInputs`) **`isWeekDirty` 도 그 정규형을

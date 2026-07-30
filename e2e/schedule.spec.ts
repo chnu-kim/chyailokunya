@@ -117,6 +117,14 @@ test("관리자: 미리보기가 타이핑을 따라오고, 미저장이면 다�
   await expect(button).toBeEnabled();
   // 그러니 카드도 그대로여야 한다 — 빈 줄이 새면 여기가 2가 된다.
   await expect(firstDayCard.locator(".week-card__entry")).toHaveCount(1);
+
+  /* **공지도 같은 부류다**(codex 리뷰 P2). 서버 스키마는 공백만인 공지를 `null` 로 접고
+     `isWeekDirty` 도 `.trim()` 으로 비교하므로, 공백만 타이핑하면 dirty 가 아니다 — 그런데
+     카드가 날것을 그리면 화면에만 빈 공지 블록이 생긴다. */
+  await expect(page.locator(".week-card__note")).toHaveCount(0);
+  await page.locator('[data-od-id="schedule-note-input"]').fill("   ");
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+  await expect(page.locator(".week-card__note")).toHaveCount(0);
 });
 
 test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({
