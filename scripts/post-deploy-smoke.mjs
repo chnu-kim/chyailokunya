@@ -132,6 +132,17 @@ async function attemptFetch(url) {
   }
 }
 
+// 페이지가 밝히는 자기 정본 경로. origin 은 버린다(층 4 는 localhost, metadataBase 는 프로덕션).
+function ogUrlPath(body) {
+  const raw = body.match(/property="og:url"\s+content="([^"]+)"/)?.[1];
+  if (!raw) return null;
+  try {
+    return new URL(raw).pathname || "/";
+  } catch {
+    return null;
+  }
+}
+
 async function probe(path, { expectHtml, expectType }, { allowRetry }) {
   const url = `${ORIGIN}${path}`;
 
@@ -156,10 +167,24 @@ async function probe(path, { expectHtml, expectType }, { allowRetry }) {
   if (expectHtml) {
     if (!type.includes("text/html")) return { ok: false, url, reason: `content-type ${type}` };
     /* 이 저장소는 사용자가 가리킬 요소에 `data-od-id` 를 붙이는 규약이 있으니(AGENTS 코드
-       컨벤션) 그게 하나라도 있으면 우리 페이지가 실제로 렌더된 것이다. 페이지마다 다른 마커를
-       고르면 이 스크립트가 화면 구조에 묶인다. */
+       컨벤션) 그게 하나라도 있으면 우리 마크업이 렌더된 것이다. */
     if (!body.includes("data-od-id=")) {
       return { ok: false, url, reason: "우리 마크업이 아니다(data-od-id 없음)" };
+    }
+    /* **그것만으로는 "이 라우트가 맞다"가 안 된다**(코드 리뷰 지적). nav 와 footer 가 모든
+       페이지에서 `data-od-id` 를 emit 하므로, `/games` 가 실수로 `/` 로 리라이트되거나
+       라우트 실패로 공용 레이아웃만 남아도 이 검사는 통과한다 — 스모크가 **엉뚱한 내용을
+       서빙하면서 초록**이 된다.
+
+       라우트별 마커를 손으로 매핑하면 또 손 열거가 되므로, 페이지가 스스로 밝히는 값을 쓴다:
+       `og:url` 은 각 페이지가 자기 정본 URL 을 담는다(실측 — `/` 는 origin, 나머지는 그 경로).
+       origin 은 안 본다 — 층 4 는 localhost 로 도는데 metadataBase 는 프로덕션이라 갈린다. */
+    const canonical = ogUrlPath(body);
+    if (canonical === null) {
+      return { ok: false, url, reason: "og:url 이 없다 — 라우트를 확인할 수 없다" };
+    }
+    if (canonical !== path) {
+      return { ok: false, url, reason: `다른 라우트가 응답했다(og:url ${canonical})` };
     }
   } else if (expectType) {
     if (!type.includes(expectType)) {
@@ -207,6 +232,30 @@ function collectBundles(htmlBodies) {
     expectHtml: false,
     expectType: path.endsWith(".css") ? "text/css" : "javascript",
   }));
+}
+
+/* **og:image 도 페이지가 밝히는 대로 두드린다**(적대적 리뷰 지적). 소셜 크롤러가 자동으로
+   요청하는 URL 이고, **이 저장소가 프로덕션 인시던트를 낸 자리가 정확히 거기다** — 동적
+   og 라우트(`/api/og/schedule`)가 요청당 CPU 한도를 넘겨 isolate 를 죽였다(2026-07-27).
+   지금은 정적 파일이라 고정 대상으로도 커버되지만, 다시 동적 라우트가 되는 날 **이 파싱이
+   있어야 스모크가 자동으로 그 비싼 렌더를 실제로 태운다.** 없으면 그때도 크롤러가 먼저
+   발견한다.
+
+   우리 origin 인 것만 본다 — 층 4 는 localhost 로 도는데 metadataBase 는 프로덕션이라,
+   안 거르면 로컬 게이트가 프로덕션에 요청을 보낸다. */
+function collectOgImages(htmlBodies) {
+  const found = new Set();
+  for (const body of htmlBodies) {
+    for (const [, raw] of body.matchAll(/property="og:image"\s+content="([^"]+)"/g)) {
+      try {
+        const parsed = new URL(raw, ORIGIN);
+        if (parsed.origin === new URL(ORIGIN).origin) found.add(parsed.pathname + parsed.search);
+      } catch {
+        // 파싱 안 되는 값은 그 자체로 이상하지만, 여기서 죽이면 진단이 og 로 쏠린다 — 넘긴다.
+      }
+    }
+  }
+  return [...found].map((path) => ({ path, expectHtml: false }));
 }
 
 /* 번들은 **한 번만, 병렬로, 재시도 없이** 본다. 이건 "그 파일이 배포됐나"라 라운드를 나눠 볼
@@ -265,11 +314,11 @@ async function main() {
      `collectBundles` 가 "참조를 못 찾았다"로 죽는데, 그건 진짜 원인(페이지가 안 뜬다)을
      가리는 오진이다 — 이미 실패가 쌓였으니 그대로 보고한다. */
   if (htmlBodies.length > 0) {
-    const bundles = collectBundles(htmlBodies);
-    console.log(`  번들 ${bundles.length}개 (페이지 응답에서 거둠 — 추가 요청 0)`);
-    for (const result of await probeBundles(bundles)) {
+    const derived = [...collectBundles(htmlBodies), ...collectOgImages(htmlBodies)];
+    console.log(`  파생 자원 ${derived.length}개 (페이지 응답에서 거둠 — 추가 요청 0)`);
+    for (const result of await probeBundles(derived)) {
       if (!result.ok) {
-        console.log(`  [번들] FAIL ${result.url}`);
+        console.log(`  [파생] FAIL ${result.url}`);
         failures.push(`${result.url} — ${result.reason}`);
       }
     }
