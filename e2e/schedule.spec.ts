@@ -99,6 +99,24 @@ test("관리자: 미리보기가 타이핑을 따라오고, 미저장이면 다�
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
   await expect(blocked).toHaveCount(0);
   await expect(button).toBeEnabled();
+
+  /* **카드는 저장될 값만 그린다**(적대적 리뷰 지적). 빈 제목 항목은 저장 페이로드에서 버려지고
+     (`draftEntryInputs`) `isWeekDirty` 도 그 정규형을 보므로 **dirty 가 아니다** — 그래서 그
+     순간 다운로드가 열려 있다. 카드가 날것의 draft 를 그리면 여기서 "보이는 것 = 받는 것"이
+     깨진다: 화면엔 빈 줄이 있는데 받아지는 파일엔 없다.
+
+     **이미 시각이 정해진 날에 더해야 재현된다.** `addEntry` 는 그날 시각이 미정일 때만 기본값을
+     세우는데(core/schedule-editor), 그 경우엔 days 가 바뀌어 dirty 가 되어 버려 구멍이 안
+     열린다 — 첫날은 위에서 이미 시각이 붙었으므로 여기가 그 조건이다(실측으로 확인한 자리). */
+  const firstDayCard = page.locator('[data-od-id^="week-card-day-"]').first();
+  await expect(firstDayCard.locator(".week-card__entry")).toHaveCount(1);
+
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  // 저장될 값이 안 바뀌었으므로 저장 버튼도 다운로드도 그대로다.
+  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+  await expect(button).toBeEnabled();
+  // 그러니 카드도 그대로여야 한다 — 빈 줄이 새면 여기가 2가 된다.
+  await expect(firstDayCard.locator(".week-card__entry")).toHaveCount(1);
 });
 
 test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({

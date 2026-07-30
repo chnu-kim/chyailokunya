@@ -13,6 +13,7 @@ import { FANART_IMAGE_TYPES } from "@/core/fanart";
 import {
   dayOf,
   draftDayInputs,
+  draftEntryInputs,
   draftHasContent,
   entriesForDate,
   isWeekDirty,
@@ -223,7 +224,17 @@ export function ScheduleEditor({
       buildWeekCard({
         weekStartDate,
         note: draft.note,
-        entries: draft.entries,
+        /* **저장될 값으로 그린다**(적대적 리뷰 지적, 2026-07-31). `draft.entries` 를 날것으로
+           넘기면 "보이는 것 = 받는 것"이 정확히 한 자리에서 깨진다: "+항목 추가"로 만든 빈 제목
+           항목은 저장 페이로드에서 버려지는데(`draftEntryInputs`) **`isWeekDirty` 도 그 정규형을
+           보므로 dirty 가 아니다** — 즉 카드엔 빈 줄이 생기고 다운로드는 열려 있어, 받으면 그
+           줄이 없는 파일이 나온다. `days` 를 진작 `draftDayInputs` 로 넘기고 있었으니(바로 아래)
+           항목만 날것이던 셈이다.
+
+           덤으로 제목 앞뒤 공백도 저장과 같게 접힌다 — 그 자체로는 거의 안 보이지만, 카드가
+           읽는 값과 저장이 읽는 값을 **한 함수로** 모아 두면 다음에 정규화가 늘어도 두 곳이
+           안 갈린다. */
+        entries: draftEntryInputs(draft),
         days: draftDayInputs(draft),
         /* 방금 올린 그림도 **바로** 뜬다. 업로드는 이미 R2 에 객체를 만든 뒤라 이 키로 서빙
            경로가 살아 있고, 저장을 안 해도 관리자가 "이 그림이 이 자리에 이렇게 앉는다"를
