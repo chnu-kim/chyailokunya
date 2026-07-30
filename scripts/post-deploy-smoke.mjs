@@ -197,6 +197,102 @@ async function probe(path, { expectHtml, expectType }, { allowRetry }) {
   return { ok: true, url, body };
 }
 
+/* **서버의 "오늘"이 진짜 오늘인지 본다**(2026-07-31 인시던트). `?week=` 없는 `/schedule` 은
+   서버가 KST 로 계산한 이번 주를 그리는데, 배포된 Workers 에서 그 시계가 **에포크 0** 을
+   돌려줘 1969-12-29 주가 나갔다 — 원인은 프로덕션 workerd 의 **네이티브 Temporal** 이고
+   그 `Now` 가 요청 시계에 안 물려 있다(core/calendar.ts 의 todayKST 주석).
+
+   **이 층 말고는 볼 수가 없다.** 유닛은 `today` 를 인자로 받아 고정값을 넣고, 로컬
+   preview(wrangler dev)·vitest workerd 엔 네이티브 Temporal 이 없어 폴리필이 맞는 답을 주며,
+   e2e 는 `next dev`(Node)라 아예 다른 런타임이다 — 셋 다 초록인 채 라이브만 1970 이었다.
+   층 4(로컬 번들 스모크)도 같은 이유로 못 본다.
+
+   기대값은 이 스크립트가 **자기 시계로** 계산한다(Node 는 정상).
+
+   ── **연·월·일까지 본다. 화면의 `M.D – M.D` 라벨로는 부족하다**(GitHub codex 리뷰 P2) ─────
+   그 라벨엔 연도가 없고 주 단위로만 바뀌어서, **다른 해의 같은 달력**이나 **같은 주 안에서
+   며칠 어긋난 시계**(KST 00:00~09:00 을 UTC 로 계산하는 경우가 정확히 그 모양이다)를 통과시킨다.
+   그래서 페이지가 스스로 적는 **ISO 날짜 두 종류**를 읽는다:
+
+   1. **주 이동 링크**(`?week=YYYY-MM-DD`) — 발행 여부와 무관하게 항상 있다. 이전/다음 주가
+      나오므로 그린 주의 월요일을 되짚을 수 있다(연도 포함).
+   2. **오늘 칸**(`data-od-id="schedule-day-YYYY-MM-DD"` + `aria-current="date"`) — 그 주가
+      발행돼 일곱 칸이 그려질 때만 있다. 있으면 **하루 단위**로 잰다.
+
+   2는 없을 수 있으므로(그 주가 미발행이면 빈 상태라 칸이 없다) **칸이 그려졌을 때만** 요구한다 —
+   없는 것을 요구하면 "발행 안 한 주가 있다"는 정상 상태에서 스모크가 빨개지고, 그러면 아무도
+   안 본다(이 파일이 반복해 경계하는 실패다). 1은 항상 도므로 1970 부류는 어느 경우든 걸린다. */
+const CURRENT_WEEK_PATH = "/schedule";
+
+// KST 는 DST 가 없어 고정 +9 — 스크립트는 순수 산술만 하고 존 DB 를 안 쓴다.
+function kstDateIso(epochMs) {
+  return new Date(epochMs + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function kstWeekStartIso(epochMs) {
+  const kst = new Date(epochMs + 9 * 60 * 60 * 1000);
+  const dow = (kst.getUTCDay() + 6) % 7; // 월=0
+  return new Date(kst.getTime() - dow * 86400000).toISOString().slice(0, 10);
+}
+
+function addDaysIso(iso, days) {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}
+
+/* 그 페이지가 그린 주의 월요일. 주 이동 링크의 이전/다음 주에서 되짚는다 — `?week=` 없는 맨
+   `/schedule` 은 "이번주" 링크가 파라미터를 안 달아, 남는 두 값이 정확히 이전·다음 주다. */
+function renderedWeekStart(body) {
+  const weeks = [
+    ...new Set([...body.matchAll(/\/schedule\?week=(\d{4}-\d{2}-\d{2})/g)].map((m) => m[1])),
+  ];
+  if (weeks.length !== 2) return null;
+  const [prev, next] = weeks.sort();
+  const fromPrev = addDaysIso(prev, 7);
+  // 두 링크가 서로를 확인해 준다 — 어긋나면 마크업 가정이 깨진 것이라 읽지 않는다(fail-closed).
+  return fromPrev === addDaysIso(next, -7) ? fromPrev : null;
+}
+
+// 오늘 칩이 붙은 칸의 날짜. 그 주가 미발행이면 칸 자체가 없어 null 이다.
+function renderedTodayDate(body) {
+  const cells = [...body.matchAll(/data-od-id="schedule-day-(\d{4}-\d{2}-\d{2})"([^>]*)/g)];
+  if (cells.length === 0) return { hasCells: false, today: null };
+  const marked = cells.find(([, , rest]) => rest.includes('aria-current="date"'));
+  return { hasCells: true, today: marked ? marked[1] : null };
+}
+
+/* 서버가 그린 주·오늘이 **그 요청이 걸쳐 있던 순간들** 중 하나와 맞는지 본다.
+
+   `startedAt`/`endedAt` 은 이 요청을 보내기 직전·받은 직후에 찍은 시각이다. 보통 그 구간이
+   수백 ms 라 기대값이 하나뿐이고, KST 자정을 사이에 두고 날이 바뀌는 순간에만 둘이 된다.
+
+   **처음엔 "어제도 허용"으로 뒀다가 고쳤다**(같은 리뷰 P2). 무조건 24시간을 빼면 **KST
+   월요일마다 지난 주가 통째로 허용된다** — 서버가 UTC 로 계산하거나 시계가 낡아도 초록이다.
+   자정 오탐을 막으려던 여유가 게이트의 검출력을 그만큼 깎는 셈이라 실제 요청 구간으로만 좁힌다. */
+function checkCurrentWeek(body, startedAt, endedAt) {
+  const shownWeek = renderedWeekStart(body);
+  if (!shownWeek) {
+    return "주 이동 링크에서 그린 주를 못 읽었다 — 마크업이 바뀌었으면 이 정규식도 같이 고친다";
+  }
+  const okWeeks = [...new Set([kstWeekStartIso(startedAt), kstWeekStartIso(endedAt)])];
+  if (!okWeeks.includes(shownWeek)) {
+    return (
+      `서버가 그린 주가 ${shownWeek} 인데 실제 KST 이번 주는 ${okWeeks.join(" 또는 ")} 다 — ` +
+      `서버 시계가 틀렸다(1970 이면 Temporal.Now 회귀를 먼저 의심한다)`
+    );
+  }
+
+  const { hasCells, today } = renderedTodayDate(body);
+  if (!hasCells) return null; // 미발행 주 — 잴 칸이 없다(위 주석의 근거).
+  const okDays = [...new Set([kstDateIso(startedAt), kstDateIso(endedAt)])];
+  if (today === null) {
+    return `일곱 칸이 그려졌는데 오늘(${okDays.join(" 또는 ")}) 칸에 aria-current 가 없다 — 서버의 "오늘"이 이 주 밖이다`;
+  }
+  if (!okDays.includes(today)) {
+    return `서버가 오늘로 표시한 날이 ${today} 인데 실제 KST 오늘은 ${okDays.join(" 또는 ")} 다`;
+  }
+  return null;
+}
+
 /* 각 경로를 **두 번** 두드린다. 1102 는 한 요청이 isolate 를 죽이고 **그 뒤 무관한 요청까지**
    연쇄로 실패하는 모양이라(2026-07-27 실측: favicon.ico 까지 같이 죽었다), 한 번씩만 보면
    첫 요청은 통과하고 두 번째가 죽는 패턴을 놓친다. 정적 자산을 섞는 것도 같은 이유다 — 가벼운
@@ -303,9 +399,20 @@ async function main() {
   for (let round = 1; round <= ROUNDS; round++) {
     for (const target of targets) {
       // 재시도는 라운드 1 에서만 — 라운드 2 의 캐스케이드 감지를 삼키지 않게(위 상수 주석).
+      /* 요청 직전·직후를 찍는다 — 이번 주 검사가 허용할 라벨을 **그 구간으로만** 좁힌다
+         (checkCurrentWeek 주석). 재시도가 끼면 구간이 3초쯤 늘 뿐이라 규칙은 그대로다. */
+      const startedAt = Date.now();
       const result = await probe(target.path, target, { allowRetry: round === 1 });
+      const endedAt = Date.now();
       console.log(`  [${round}/${ROUNDS}] ${result.ok ? "ok  " : "FAIL"} ${result.url}`);
       if (!result.ok) failures.push(`${result.url} — ${result.reason}`);
+      if (result.ok && target.path === CURRENT_WEEK_PATH && result.body) {
+        const weekProblem = checkCurrentWeek(result.body, startedAt, endedAt);
+        console.log(
+          `  [${round}/${ROUNDS}] ${weekProblem ? "FAIL" : "ok  "} ${result.url} (이번 주)`,
+        );
+        if (weekProblem) failures.push(`${result.url} — ${weekProblem}`);
+      }
       if (round === 1 && target.expectHtml && result.body) htmlBodies.push(result.body);
     }
   }
