@@ -617,6 +617,18 @@ test.describe("본문 터치 타깃 — 주간표 다운로드", () => {
         page.locator('[data-od-id="week-card-download-btn"]'),
         "PNG 다운로드",
       );
+      /* 원본 크기로 보기 + 그 창의 닫기(2026-07-31 신설). 이 스펙은 셀렉터를 **손으로** 열거하므로
+         새 조작을 더하면 여기 같이 적어야 검사에 든다(상단 주석의 원칙).
+
+         **확대는 이 폭에서 특히 중요하다** — 560 아래에선 미리보기가 감춰지므로(감축 경로 스펙)
+         카드를 볼 유일한 길이 이 창이다. 그래서 "좁으니 감춘다"가 아니라 남겨 두고 44 를 잰다. */
+      const zoom = page.locator('[data-od-id="week-card-download-zoom"]');
+      await expectTouchTarget(zoom, "원본 크기로 보기");
+      await zoom.click();
+      await expectTouchTarget(page.locator('[data-od-id="week-card-zoom-close"]'), "확대 창 닫기");
+      /* 확대 창은 1200px 카드를 담으므로 **자기 상자 안에서** 가로 스크롤한다 — 문서를 늘리면
+         안 된다(그러면 페이지 전체가 옆으로 밀린다). 열린 채로 그 둘을 갈라 잰다. */
+      expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
     });
   }
 });
@@ -721,8 +733,10 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
    못 읽는다(실측). 그래서 560 아래에서 감춘다 — 카드는 aria-hidden 이고 바로 아래 요일 목록이
    같은 내용을 이미 말하므로 잃는 의미가 0 이다.
 
-   위 두 /schedule 블록과 달리 **발행된 주**가 필요하다(미발행이면 미리보기 자체가 없어 이
-   감축을 잴 수 없다). 그래서 관리자로 직접 하나 만든다 — 다른 스펙이 안 읽는 먼 주를 쓴다
+   **발행된 주가 필요한 이유가 바뀌었다**(2026-07-31). 전엔 "미발행이면 미리보기 자체가 없어서"
+   였는데 이제 카드는 draft 를 그리므로 미발행에도 뜬다 — 그런데 이 스펙은 아래에서 **실제로
+   내려받아 PNG 바이트를 재고**, 다운로드는 여전히 발행 + 저장을 요구한다(그래야 "보이는 것 =
+   받는 것"이 성립한다). 그래서 발행 단계는 남는다. 다른 스펙이 안 읽는 먼 주를 쓴다
    (AGENTS 의 "e2e 스펙은 D1 픽스처 하나를 공유한다").
 
    전환은 경계 ±1px 로 본다: 위 상단 주석대로 320·390 사이엔 브레이크포인트가 없어 그 둘만으론
@@ -735,7 +749,8 @@ test.describe("감축 경로 — 주간표 미리보기", () => {
     await page.goto("/schedule?week=2035-09-03");
     await expectSignedIn(page);
 
-    // 발행해야 미리보기가 선다 — 저장 뒤 칩을 눌러 확인창을 거친다(schedule.spec 의 publishNow).
+    /* 카드 자체는 항목 하나로 서지만(draft), 아래에서 실제로 받으려면 발행 + 저장이 필요하다 —
+       저장 뒤 칩을 눌러 확인창을 거친다(schedule.spec 의 publishNow 와 같은 순서). */
     await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
     await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("좁은 폭 미리보기");
     await page.locator('[data-od-id="schedule-save"]').click();
@@ -777,16 +792,19 @@ test.describe("감축 경로 — 주간표 미리보기", () => {
     expect(buf.readUInt32BE(20)).toBe(1260);
 
     /* 이 미디어쿼리는 읽기 화면과 편집기가 **공유한다** — WeekCardDownload 를 둘 다 그린다.
-       편집기에서 미리보기는 baseline(마지막 저장값)을 보여주는 유일한 창이라 감추는 게 손실로
-       보이지만, 이 폭에선 그 창이 어차피 4.6px 글자라 아무것도 안 알려 준다. "지금 받으면 뭐가
-       나오나"의 답은 원래 그림이 아니라 문장이 맡는다 — 미리보기 **밖**의 stale 힌트다. 그래서
-       여기서 그 둘을 같이 잰다: 미리보기는 감춰지고, 그 문장과 버튼은 남는가(코드 리뷰가 짚은
-       자리라 주장 대신 단언으로 남긴다). 위에서 이미 발행·저장까지 마쳤으므로 제목만 고치면
-       dirty 가 된다. */
+       그림이 감춰지는 이 폭에서 "왜 못 받나"의 답은 문장이 맡는다 — 미리보기 **밖**의 안내다.
+       그래서 여기서 그 둘을 같이 잰다: 미리보기는 감춰지고, 그 문장과 버튼은 남는가(코드
+       리뷰가 짚은 자리라 주장 대신 단언으로 남긴다).
+
+       위에서 발행·저장까지 마쳤으므로 제목만 고치면 미저장이 되어 잠긴다. 문구를 박지 않고
+       존재만 재는 이유: 사유가 늘거나 문구가 다듬어져도 "이유가 화면에 있다"는 계약은 그대로다
+       (문구 자체는 dom 스펙이 사유별로 잰다). */
     await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("좁은 폭 미저장");
-    const staleHint = page.locator('[data-od-id="week-card-download-stale"]');
-    await expect(staleHint).toBeVisible();
+    const blocked = page.locator('[data-od-id="week-card-download-blocked"]');
+    await expect(blocked).toBeVisible();
     await expect(preview).toBeHidden();
+    /* 버튼은 **자리를 지킨다**(감춰지지 않는다). 지금은 미저장이라 잠겨 있고, 그 잠금은 폭이
+       아니라 저장 상태가 정한다 — 좁은 폭에서 사라지는 건 미리보기뿐이라는 게 이 단언의 뜻이다. */
     await expect(button).toBeVisible();
   });
 });

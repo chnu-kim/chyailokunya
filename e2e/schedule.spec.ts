@@ -53,10 +53,15 @@ test("관리자: 편집기로 항목을 저장하고 되읽는다", async ({ pag
   );
 });
 
-/* PNG 다운로드 카드는 baseline(저장된 값)으로 그린다 — 폼에 미저장 변경이 남아 있으면 미리보기가
-   그 변경을 안 보여주는데, 신호가 없으면 "지금 받으면 뭐가 나가지"가 된다(이슈 #109 작업순서 3,
-   적대적 리뷰가 잡은 자리). 이 스펙은 그 신호가 실제로 뜨고 저장하면 걷히는지를 본다. */
-test("관리자: 발행된 주에 미저장 변경이 있으면 다운로드 카드에 힌트가 뜬다", async ({
+/* 미리보기는 **편집 중인 값**을 그리고, 미저장이면 다운로드가 잠긴다(2026-07-31).
+
+   전엔 카드가 baseline(저장된 값)이라 화면과 받아지는 파일이 서로 다를 수 있었고 그 차이를
+   문장으로 경고만 했다. 이제 카드가 draft 를 그리는 대신 **미저장이면 못 받는다** — 그래서
+   "보이는 것 = 받는 것"이 항상 참이다(잠기지 않은 순간의 draft 는 정의상 baseline 과 같다).
+
+   이 스펙은 그 왕복을 통째로 본다: 타이핑이 카드에 즉시 반영되고 · 그 순간 버튼이 잠기고
+   이유가 뜨며 · 저장하면 둘 다 풀린다. */
+test("관리자: 미리보기가 타이핑을 따라오고, 미저장이면 다운로드가 잠긴다", async ({
   page,
   baseURL,
 }) => {
@@ -71,19 +76,29 @@ test("관리자: 발행된 주에 미저장 변경이 있으면 다운로드 카
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
   await publishNow(page);
 
-  // 발행된 채 저장 직후라 카드가 있고, 아직 미저장 변경이 없으니 힌트도 없다.
-  const stale = page.locator('[data-od-id="week-card-download-stale"]');
-  await expect(page.locator('[data-od-id="week-card"]')).toBeVisible();
-  await expect(stale).toHaveCount(0);
+  const card = page.locator('[data-od-id="week-card"]');
+  const blocked = page.locator('[data-od-id="week-card-download-blocked"]');
+  const button = page.locator('[data-od-id="week-card-download-btn"]');
 
-  // 저장 없이 제목만 고치면 힌트가 뜬다.
+  // 발행된 채 저장 직후 — 막힌 이유가 없으니 받을 수 있다.
+  await expect(card).toContainText("e2e 발행 항목");
+  await expect(blocked).toHaveCount(0);
+  await expect(button).toBeEnabled();
+
+  /* 저장 없이 제목만 고치면 **카드가 즉시 따라오고** 버튼이 잠긴다. 카드 내용을 함께 재는 게
+     핵심이다 — 잠금만 보면 카드가 옛 값에 멈춰 있어도 통과한다(고치기 전 동작이 정확히 그랬다). */
   await title.fill("e2e 발행 항목 수정");
-  await expect(stale).toBeVisible();
+  await expect(card).toContainText("e2e 발행 항목 수정");
+  await expect(blocked).toHaveText(
+    "저장하지 않은 변경이 있습니다. 저장하면 이 카드를 받을 수 있습니다.",
+  );
+  await expect(button).toBeDisabled();
 
-  // 다시 저장하면 baseline 이 갈아 끼워져 힌트가 걷힌다.
+  // 다시 저장하면 둘 다 풀린다.
   await page.locator('[data-od-id="schedule-save"]').click();
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
-  await expect(stale).toHaveCount(0);
+  await expect(blocked).toHaveCount(0);
+  await expect(button).toBeEnabled();
 });
 
 test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({
@@ -292,22 +307,38 @@ test("공개 읽기: WeekNav 로 주를 넘겨도(리마운트 없이) 다운로
   await anon.close();
 });
 
-/* 이슈 #109 작업순서 4. card 가 null(미발행)이면 버튼이 비활성이고 이유가 뜬다는 계약
-   (week-card-download.tsx)을 실제 편집기 화면에서 못박는다 — dom 단위 테스트(week-card-download.test.tsx)
-   는 이 분기를 직접 렌더해서 보지만, 여기선 "새로 만든 주가 초안으로 열린다"(결정 13, 위
-   "항목 없는 새 주" 스펙과 같은 전제)는 실제 서버 응답 위에서 본다. */
-test("관리자: 초안 주는 다운로드 버튼이 비활성이고 발행 안내가 뜬다", async ({ page, baseURL }) => {
+/* 이슈 #109 작업순서 4 — **계약이 바뀌었다**(2026-07-31). 전엔 미발행이면 카드를 아예 안
+   그렸고("card 가 null 이면 이른 반환") 그 사실이 곧 "발행된 주만 받을 수 있다"는 안내였다.
+   미리보기가 draft 를 그리게 되면서 편집기의 카드는 **항상 있고**, 못 받는 이유는 값으로
+   따로 전달된다.
+
+   그래서 여기서 새로 재는 것: 미발행 주에서도 **미리보기는 뜨고**(새 주를 짜는 내내가 그
+   상태다 — 안 뜨면 이 창을 옆에 둔 값어치가 없다) 버튼만 잠기며 그 이유가 화면에 있다. */
+test("관리자: 초안 주도 미리보기는 뜨고, 다운로드만 잠긴 채 이유를 말한다", async ({
+  page,
+  baseURL,
+}) => {
   await signIn(page.context(), baseURL!);
   // 픽스처가 안 건드리는 먼 미래 주 — 메타도 항목도 없는 브랜드-뉴 주(=초안).
   await page.goto("/schedule?week=2028-11-06");
   await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
 
+  // **미리보기는 뜬다.** 이 단언이 옛 계약("미발행이면 카드 자체가 없다")을 정확히 뒤집는다.
+  await expect(page.locator('[data-od-id="week-card"]')).toBeVisible();
+
   await expect(page.locator('[data-od-id="week-card-download-btn"]')).toBeDisabled();
-  await expect(page.locator('[data-od-id="week-card-download"]')).toContainText(
+  await expect(page.locator('[data-od-id="week-card-download-blocked"]')).toHaveText(
     "발행된 주만 카드로 내려받을 수 있습니다.",
   );
-  // card 가 null 이면 미리보기 자체를 안 그린다(week-card-download.tsx 의 이른 반환).
-  await expect(page.locator('[data-od-id="week-card"]')).toHaveCount(0);
+
+  /* **사유의 순서를 못박는다.** 이 주는 미발행이면서 동시에 미저장이 될 수 있는데(무언가
+     고치는 순간), 그때 "저장하면 받을 수 있습니다"라고 말하면 거짓이다 — 발행하지 않는 한
+     저장해도 못 받는다. 발행이 먼저다. */
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("초안 항목");
+  await expect(page.locator('[data-od-id="week-card-download-blocked"]')).toHaveText(
+    "발행된 주만 카드로 내려받을 수 있습니다.",
+  );
 });
 
 /* 이슈 #109 작업순서 4. 상태 코드·content-type 만 보던 옛 Satori 라우트와 달리, 클라이언트

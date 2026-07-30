@@ -33,12 +33,27 @@ import type { WeekCardData } from "@/features/schedule/card";
 
 const EMPTY_DAY_MARK = "—";
 
-export function WeekCard({ card, ref }: { card: WeekCardData; ref?: React.Ref<HTMLDivElement> }) {
+/* `data-od-id` 를 끌 수 있다(2026-07-31). 이 카드가 **한 화면에 두 번** 뜨는 자리가 생겼다 —
+   편집기의 확대 dialog 가 같은 카드를 원본 크기로 한 번 더 그린다. od-id 는 사용자가 가리킬
+   요소를 짚는 이름이라(AGENTS) 같은 값이 둘이면 Playwright strict 로케이터가 **무관한 단언에서**
+   깨진다. 확대본은 "같은 것을 크게 본다"일 뿐 새 대상이 아니므로 그쪽이 이름을 내려놓는다.
+
+   지우는 게 아니라 끄는 쪽인 이유: 기본값이 켜짐이라 기존 호출부(미리보기·읽기 화면)가 한 글자도
+   안 바뀌고, 새로 그리는 쪽만 자기가 사본임을 명시한다. */
+export function WeekCard({
+  card,
+  ref,
+  identified = true,
+}: {
+  card: WeekCardData;
+  ref?: React.Ref<HTMLDivElement>;
+  identified?: boolean;
+}) {
   const fanart = card.fanart;
   return (
     <div
       className={fanart ? "week-card week-card--art" : "week-card"}
-      data-od-id="week-card"
+      {...(identified ? { "data-od-id": "week-card" } : {})}
       ref={ref}
     >
       <span className="week-card__tape week-card__tape--left" aria-hidden="true" />
@@ -66,7 +81,7 @@ export function WeekCard({ card, ref }: { card: WeekCardData; ref?: React.Ref<HT
                 <li
                   key={day.date}
                   className="week-card__day"
-                  data-od-id={`week-card-day-${day.date}`}
+                  {...(identified ? { "data-od-id": `week-card-day-${day.date}` } : {})}
                   /* 손으로 붙인 티를 내려고 각도를 인덱스로 흔든다 — 난수를 쓰면 같은 주가 매번
                      다른 PNG 가 되어(캡처 재현성이 사라져) 옛 Satori 주석과 같은 이유로 안 쓴다.
                      **팬아트 모양(7행)에선 안 흔든다**: 700px 폭 띠를 1° 기울이면 양 끝이 6px 씩

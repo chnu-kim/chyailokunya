@@ -19,6 +19,7 @@ import { isAborted } from "@/core/error-message";
 import { createSubmitMachine } from "@/core/submit.machine";
 import type { WeekCardData } from "@/features/schedule/card";
 import { WeekCard } from "./week-card";
+import { WeekCardZoomDialog } from "./week-card-zoom-dialog";
 
 const CARD_WIDTH = 1200;
 
@@ -251,19 +252,33 @@ async function capture(
   a.click();
 }
 
+/* 받을 수 없는 이유. **null 이면 받을 수 있다.**
+
+   전엔 이 자리가 `card === null`(미발행) 하나였고 미저장은 경고 문구로만 알렸다. 미리보기가
+   draft 를 그리게 되면서 편집기의 `card` 는 절대 null 이 아니게 됐고(schedule-editor.tsx),
+   그러면 그 판정이 통째로 닿지 않는 가지가 된다 — **미발행인데 저장은 된 주에서 이유 없이
+   잠긴 버튼**이 남는다(advisor 지적). 그건 이 PR 이 휴방에서 고친 것과 정확히 같은 부류다:
+   가드는 방어선이고 잠금은 표시다. 그래서 사유를 값으로 받아 각각 문장으로 말한다. */
+export type DownloadBlockedReason = "unpublished" | "unsaved";
+
+const BLOCKED_MESSAGE: Record<DownloadBlockedReason, string> = {
+  unpublished: "발행된 주만 카드로 내려받을 수 있습니다.",
+  /* **"지금 받으면 마지막 저장분이 나갑니다"에서 바뀌었다.** 그때는 받을 수 있었고 화면과 파일이
+     다를 뿐이었는데, 이제 그 차이 자체를 없앴다(미저장이면 못 받는다) — 문구도 경고가 아니라
+     "무엇을 하면 풀리는가"를 말한다. */
+  unsaved: "저장하지 않은 변경이 있습니다. 저장하면 이 카드를 받을 수 있습니다.",
+};
+
 export function WeekCardDownload({
   card,
   weekStartDate,
-  stale = false,
+  blockedReason = null,
 }: {
   card: WeekCardData | null;
   weekStartDate: string;
-  /* 편집기에서만 참일 수 있다 — 카드는 baseline(저장된 값)으로 그리는데, 그 편집기 폼엔
-     저장 안 한 변경(dirty)이 남아 있을 수 있다는 뜻이다(schedule-editor.tsx 가 isWeekDirty 를
-     그대로 넘긴다). 신호가 없으면 "왜 폼과 미리보기가 다르지 / 지금 받으면 뭐가 나오지"가
-     된다(팬 제안의 "값 기준이 다르면 화면에도 신호가 없다"와 같은 자리, AGENTS 참고) — 그래서
-     저장을 권하는 힌트를 얹는다. 읽기 화면은 이 prop 을 아예 안 넘긴다(baseline 개념이 없다). */
-  stale?: boolean;
+  /* 편집기만 넘긴다. 읽기 화면은 발행된 주만 렌더하므로(`card` 가 null 이면 미발행) 이 값이
+     필요 없고, 넘기지 않으면 아래에서 `card === null` 이 그대로 "미발행"으로 읽힌다. */
+  blockedReason?: DownloadBlockedReason | null;
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const inFlightRef = useRef<InFlightMap | null>(null);
@@ -303,6 +318,14 @@ export function WeekCardDownload({
   });
   const capturing = state.matches("submitting");
   const error = state.context.error;
+  /* 원본 크기로 보는 창. 미리보기가 열 폭에 맞춰 축소되므로(창 1300 에서 배율 0.633) 글자
+     수준 확인은 여기서 한다. **좁은 폭에서도 남긴다** — 그 폭에선 미리보기가 아예 감춰지므로
+     (아래 CSS) 이 창이 유일한 판독 수단이 된다. */
+  const [zoomed, setZoomed] = useState(false);
+
+  /* 카드가 없으면(읽기 화면의 미발행 주) 그릴 것 자체가 없다 — 그 사정은 곧 "미발행"이다.
+     편집기는 카드를 항상 넘기므로 이 갈래를 안 탄다(`blockedReason` 이 대신 말한다). */
+  const blocked: DownloadBlockedReason | null = card === null ? "unpublished" : blockedReason;
 
   if (!card) {
     return (
@@ -315,7 +338,9 @@ export function WeekCardDownload({
         >
           PNG 다운로드
         </button>
-        <p className="week-card-download__hint">발행된 주만 카드로 내려받을 수 있습니다.</p>
+        <p className="week-card-download__hint" data-od-id="week-card-download-blocked">
+          {BLOCKED_MESSAGE.unpublished}
+        </p>
       </div>
     );
   }
@@ -328,9 +353,11 @@ export function WeekCardDownload({
         </div>
       </div>
 
-      {stale && (
-        <p className="week-card-download__hint" data-od-id="week-card-download-stale">
-          저장하지 않은 변경이 있습니다. 지금 받으면 마지막으로 저장한 내용이 나갑니다.
+      {/* **잠긴 이유는 언제나 화면에 있다.** 버튼만 흐려 두면 "왜 안 눌리지"가 되고, 그건 이
+          PR 이 휴방에서 고친 것과 같은 부류다(가드는 방어선, 잠금은 표시). */}
+      {blocked && (
+        <p className="week-card-download__hint" data-od-id="week-card-download-blocked">
+          {BLOCKED_MESSAGE[blocked]}
         </p>
       )}
 
@@ -340,15 +367,32 @@ export function WeekCardDownload({
         </p>
       )}
 
-      <button
-        className="btn btn--secondary week-card-download__btn"
-        type="button"
-        disabled={capturing}
-        data-od-id="week-card-download-btn"
-        onClick={() => send({ type: "submit", values: { weekStartDate, card } })}
-      >
-        {capturing ? "만드는 중…" : "PNG 다운로드"}
-      </button>
+      {/* 조작 둘은 한 줄에 선다. **확대 버튼은 미리보기 바깥이다** — 미리보기는 `aria-hidden`
+          이라(카드 글자가 본문과 그대로 겹쳐 두 번 낭독된다) 그 안에 인터랙티브를 두면 보조
+          기술에서 닿지 않는 버튼이 된다. */}
+      <div className="week-card-download__acts">
+        <button
+          className="btn btn--secondary week-card-download__btn"
+          type="button"
+          data-od-id="week-card-download-zoom"
+          onClick={() => setZoomed(true)}
+        >
+          원본 크기로 보기
+        </button>
+        <button
+          className="btn btn--secondary week-card-download__btn"
+          type="button"
+          disabled={capturing || blocked !== null}
+          data-od-id="week-card-download-btn"
+          onClick={() => send({ type: "submit", values: { weekStartDate, card } })}
+        >
+          {capturing ? "만드는 중…" : "PNG 다운로드"}
+        </button>
+      </div>
+
+      {zoomed && (
+        <WeekCardZoomDialog card={card} odId="week-card-zoom" onClose={() => setZoomed(false)} />
+      )}
     </div>
   );
 }
