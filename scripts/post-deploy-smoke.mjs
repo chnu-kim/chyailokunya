@@ -53,16 +53,25 @@ function knownPagePaths() {
 
 /* Cloudflare 가 워커 실패를 감쌀 때 쓰는 표식. 상태 코드만 보면 "500 이 났다"까지만 알고,
    그게 우리 코드 예외인지 런타임 한도인지 구분이 안 된다 — 그 차이가 대응을 가른다. */
-const CF_ERROR_MARKERS = [
-  ["1102", "Worker 가 요청당 CPU 한도를 넘겼다(Error 1102) — 무거운 렌더·루프를 의심한다"],
-  ["1101", "Worker 가 예외를 던졌다(Error 1101)"],
-  ["1015", "레이트 리밋(Error 1015)"],
-  ["exceeded its CPU", "Worker 가 CPU 한도를 넘겼다"],
+const CF_ERROR_CODES = [
+  [1102, "Worker 가 요청당 CPU 한도를 넘겼다(Error 1102) — 무거운 렌더·루프를 의심한다"],
+  [1101, "Worker 가 예외를 던졌다(Error 1101)"],
+  [1015, "레이트 리밋(Error 1015)"],
 ];
 
-function cfErrorIn(body) {
-  const hit = CF_ERROR_MARKERS.find(([marker]) => body.includes(marker));
-  return hit ? hit[1] : null;
+/* **본문에서 숫자만 찾으면 안 된다 — 실제로 오탐을 냈다**(2026-07-30, 프로덕션 첫 실행).
+   `body.includes("1101")` 로 검사했더니 **정상(200 · text/javascript) 인 미니파이 JS 청크**가
+   "Worker 가 예외를 던졌다"로 판정됐다. 미니파이된 번들엔 네 자리 숫자가 널려 있다. 좋은 배포를
+   빨갛게 만드는 건 이 스크립트가 가장 피해야 할 실패다 — 그러면 아무도 스모크를 안 본다.
+
+   두 겹으로 좁힌다:
+   1. **에러 상태일 때만** 본다. Cloudflare 의 에러 셸은 200 으로 오지 않는다.
+   2. `Error 1102` 처럼 **낱말과 함께** 본다. 숫자만으로는 어떤 본문에나 걸릴 수 있다. */
+function cfErrorIn(status, body) {
+  if (status < 400) return null;
+  const hit = CF_ERROR_CODES.find(([code]) => new RegExp(`Error\\s*${code}\\b`, "i").test(body));
+  if (hit) return hit[1];
+  return /exceeded its CPU|CPU time limit/i.test(body) ? "Worker 가 CPU 한도를 넘겼다" : null;
 }
 
 /* **요청마다 시한을 둔다.** 없으면 응답이 영영 안 오는 경우 이 스크립트가 매달리고, 그걸
@@ -70,14 +79,16 @@ function cfErrorIn(body) {
    "무슨 일이 있었는지"를 말해 주지 않는다. 스모크가 재는 건 어차피 "즉시 응답하는가"라 5초면
    넉넉하다(정상 응답은 로컬·프로덕션 모두 100ms 대).
 
-   **이 값은 워크플로 스텝 시한과 함께 골라야 한다.** 재시도는 라운드 1 에서만 하므로 최악은
-   `N × (시한 + 대기 + 시한) + N × 시한` 이다. 지금 대상은 9개(페이지 4 + 번들 2 + 자산 2 +
-   tRPC 1)라 9 × 13 + 9 × 5 = **162초**, 스텝 시한 5분(300초)의 절반 근처다. 여러 대상이
-   "죽지는 않았는데 느린" 상태여도 **스크립트가 자기 진단을 먼저 출력하고 끝난다.**
+   **이 값은 워크플로 스텝 시한과 함께 골라야 한다.** 고정 대상은 순차·2라운드이고 재시도는
+   라운드 1 에서만 도므로 최악이 `N × (5+3+5) + N × 5` 다 — 지금 N=7(페이지 4 + tRPC 1 +
+   자산 2)이라 **126초**. 번들은 한 번만·병렬(6)이라 19개면 4배치 × 5초 = **20초**. 합쳐 약
+   146초로 스텝 시한 5분(300초)의 절반이다. 여러 대상이 "죽지는 않았는데 느린" 상태여도
+   **스크립트가 자기 진단을 먼저 출력하고 끝난다.**
 
    처음엔 10초로 뒀다가 최악이 276초가 되어 여유가 24초뿐이었다(리뷰 지적) — 그러면 GitHub 이
-   스텝을 먼저 죽여, 진단을 남기려고 넣은 시한이 도로 무의미해진다. **대상을 늘리거나 이 값을
-   올릴 땐 위 산술을 다시 하고 스텝 시한도 같이 본다.** */
+   스텝을 먼저 죽여, 진단을 남기려고 넣은 시한이 도로 무의미해진다. **고정 대상을 늘리거나 이
+   값을 올릴 땐 위 산술을 다시 하고 스텝 시한도 같이 본다**(번들은 병렬이라 개수가 늘어도
+   완만하게 는다). */
 const PROBE_TIMEOUT_MS = 5_000;
 
 /* **재시도는 하되, (1) Cloudflare 에러 표식이 보이면 안 하고 (2) 첫 라운드에서만 한다.**
@@ -110,7 +121,7 @@ async function fetchOnce(url) {
 // 재시도해도 될 실패인가 — 연결 자체 실패(res 없음)와 CF 표식 없는 5xx 만.
 function isTransient(attempt) {
   if (!attempt.res) return true;
-  return attempt.res.status >= 500 && cfErrorIn(attempt.body) === null;
+  return attempt.res.status >= 500 && cfErrorIn(attempt.res.status, attempt.body) === null;
 }
 
 async function attemptFetch(url) {
@@ -133,7 +144,7 @@ async function probe(path, { expectHtml, expectType }, { allowRetry }) {
   const { res, body } = attempt;
   if (!res) return { ok: false, url, reason: `요청 자체가 실패했다: ${attempt.cause}` };
 
-  const cfError = cfErrorIn(body);
+  const cfError = cfErrorIn(res.status, body);
   if (cfError) return { ok: false, url, reason: `${cfError} (status ${res.status})` };
   if (res.status !== 200) return { ok: false, url, reason: `status ${res.status}` };
 
@@ -157,7 +168,8 @@ async function probe(path, { expectHtml, expectType }, { allowRetry }) {
     // 빈 200 도 막는다 — 자산이 사라지면 프록시가 빈 본문을 200 으로 줄 수 있다.
     if (body.length === 0) return { ok: false, url, reason: "본문이 비어 있다" };
   }
-  return { ok: true, url };
+  // body 를 함께 돌려준다 — 페이지 응답에서 번들 참조를 거둬 추가 요청 없이 검사하려고.
+  return { ok: true, url, body };
 }
 
 /* 각 경로를 **두 번** 두드린다. 1102 는 한 요청이 isolate 를 죽이고 **그 뒤 무관한 요청까지**
@@ -167,37 +179,55 @@ async function probe(path, { expectHtml, expectType }, { allowRetry }) {
 const ROUNDS = 2;
 
 /* **페이지가 200 이어도 앱은 깨져 있을 수 있다**(적대적 리뷰 지적). HTML 은 서버가 그리므로
-   `_next/static` 청크가 통째로 404 여도 이 스크립트의 페이지 프로브는 전부 초록이다 — 그런데
-   방문자에겐 스타일 없는 문서에 인터랙션이 죽은 화면이 보인다. 배포 산출물이 갈리거나 asset
-   업로드가 반쯤 나가면 정확히 그 모양이 된다.
+   `_next/static` 청크가 404 여도 페이지 프로브는 초록이다 — 그런데 방문자에겐 스타일 없는
+   문서에 인터랙션이 죽은 화면이 보인다. 배포 산출물이 갈리거나 asset 업로드가 반쯤 나가면
+   정확히 그 모양이 된다.
 
-   청크 이름엔 해시가 붙어 하드코딩할 수 없으므로 **홈 HTML 이 실제로 참조하는 것**을 뽑는다.
-   못 뽑으면 죽는다 — Next 앱이 CSS·JS 를 하나도 안 싣는 일은 없으니, 못 찾았다면 이 정규식이
-   낡았거나 홈이 우리 페이지가 아니다. 둘 다 "검사 대상 0 으로 통과"보다 낫다. */
-async function discoverBundles() {
-  const { res, body } = await attemptFetch(`${ORIGIN}/`);
-  if (!res || res.status !== 200) {
-    throw new Error(`번들을 찾으려고 연 홈이 정상이 아니다(status ${res?.status ?? "연결 실패"})`);
+   **한두 개만 봐서는 부족하다**(같은 리뷰 2라운드): 페이지마다 참조하는 청크가 다르고
+   (실측 2026-07-30 — `/` 10개 · `/landing` 11 · `/games` 12 · `/schedule` 13, 중복 제거 19),
+   부분 업로드에선 검사한 부트스트랩 청크만 살아 있고 다른 청크가 404 일 수 있다. 그래서
+   **프로브한 모든 페이지 응답에서 전부 거둬 중복을 없앤다.**
+
+   추가 요청은 0 이다 — 라운드 1 의 페이지 프로브가 이미 받아 둔 본문을 그대로 훑는다. */
+const BUNDLE_REF = /["'(](\/_next\/static\/[^"'()\s]+\.(?:js|css))/g;
+
+function collectBundles(htmlBodies) {
+  const found = new Set();
+  for (const body of htmlBodies) {
+    for (const [, path] of body.matchAll(BUNDLE_REF)) found.add(path);
   }
-  const css = body.match(/href="(\/_next\/static\/[^"]+\.css)"/)?.[1];
-  const js = body.match(/src="(\/_next\/static\/[^"]+\.js)"/)?.[1];
-  if (!css || !js) {
+  if (found.size === 0) {
     throw new Error(
-      "홈 HTML 에서 _next/static CSS·JS 참조를 못 찾았다 — 정규식이 낡았거나 우리 페이지가 " +
+      "페이지 HTML 에서 _next/static 참조를 하나도 못 찾았다 — 정규식이 낡았거나 우리 페이지가 " +
         "아니다. 번들 검사를 건너뛰고 통과시키지 않는다.",
     );
   }
-  return [
-    { path: css, expectHtml: false, expectType: "text/css" },
-    { path: js, expectHtml: false, expectType: "javascript" },
-  ];
+  return [...found].map((path) => ({
+    path,
+    expectHtml: false,
+    expectType: path.endsWith(".css") ? "text/css" : "javascript",
+  }));
+}
+
+/* 번들은 **한 번만, 병렬로, 재시도 없이** 본다. 이건 "그 파일이 배포됐나"라 라운드를 나눠 볼
+   이유가 없고(isolate 캐스케이드는 아래 고정 대상들이 맡는다), 수십 개를 순차로 돌리면 위
+   시한 산술이 통째로 깨진다. 동시 요청 수는 묶어 둔다 — 배포 직후 프로덕션에 수십 개를 한꺼번에
+   던지는 건 스모크가 할 일이 아니다. */
+const BUNDLE_CONCURRENCY = 6;
+
+async function probeBundles(bundles) {
+  const results = [];
+  for (let i = 0; i < bundles.length; i += BUNDLE_CONCURRENCY) {
+    const batch = bundles.slice(i, i + BUNDLE_CONCURRENCY);
+    results.push(...(await Promise.all(batch.map((b) => probe(b.path, b, { allowRetry: false })))));
+  }
+  return results;
 }
 
 async function main() {
   const pages = knownPagePaths();
   const targets = [
     ...pages.map((path) => ({ path, expectHtml: true })),
-    ...(await discoverBundles()),
     /* **API 경계도 살아 있어야 한다.** 페이지는 서버 컴포넌트가 D1 을 직접 읽어 그리므로
        tRPC 라우트가 통째로 죽어도 렌더된다 — 그런데 그 순간 게임 검색·저장·제안이 전부
        안 된다. 공개 읽기 하나로 그 경계가 서 있는지만 본다(쓰기는 안 건드린다 — 스모크가
@@ -217,15 +247,31 @@ async function main() {
     { path: "/assets/og-cover.jpg", expectHtml: false, expectType: "image/jpeg" },
   ];
 
-  console.log(`배포 후 스모크 — ${ORIGIN} (${targets.length}개 × ${ROUNDS}회)`);
+  console.log(`배포 후 스모크 — ${ORIGIN} (고정 ${targets.length}개 × ${ROUNDS}회 + 번들)`);
 
   const failures = [];
+  const htmlBodies = [];
   for (let round = 1; round <= ROUNDS; round++) {
     for (const target of targets) {
       // 재시도는 라운드 1 에서만 — 라운드 2 의 캐스케이드 감지를 삼키지 않게(위 상수 주석).
       const result = await probe(target.path, target, { allowRetry: round === 1 });
       console.log(`  [${round}/${ROUNDS}] ${result.ok ? "ok  " : "FAIL"} ${result.url}`);
       if (!result.ok) failures.push(`${result.url} — ${result.reason}`);
+      if (round === 1 && target.expectHtml && result.body) htmlBodies.push(result.body);
+    }
+  }
+
+  /* 번들 검사는 페이지가 하나라도 열렸을 때만 의미가 있다. 전부 실패해 본문이 없으면
+     `collectBundles` 가 "참조를 못 찾았다"로 죽는데, 그건 진짜 원인(페이지가 안 뜬다)을
+     가리는 오진이다 — 이미 실패가 쌓였으니 그대로 보고한다. */
+  if (htmlBodies.length > 0) {
+    const bundles = collectBundles(htmlBodies);
+    console.log(`  번들 ${bundles.length}개 (페이지 응답에서 거둠 — 추가 요청 0)`);
+    for (const result of await probeBundles(bundles)) {
+      if (!result.ok) {
+        console.log(`  [번들] FAIL ${result.url}`);
+        failures.push(`${result.url} — ${result.reason}`);
+      }
     }
   }
 
