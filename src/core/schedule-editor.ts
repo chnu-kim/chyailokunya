@@ -62,13 +62,25 @@ export function dayOf(draft: WeekDraft, date: string): DraftDay {
 }
 
 /* 하루 속성의 부분 갱신. 기본값으로 되돌아간 날은 **키를 지운다** — 남겨 두면 dirty 비교가
-   "{}" 와 "{날짜: 기본값}" 을 다르게 보아, 켰다 끈 휴방이 저장할 것 없는 변경으로 남는다. */
+   "{}" 와 "{날짜: 기본값}" 을 다르게 보아, 켰다 끈 휴방이 저장할 것 없는 변경으로 남는다.
+
+   **휴방을 켜는 전이에서 그날의 빈 제목 항목을 함께 지운다**(이슈 #56 결정 30). 휴방이면
+   입력칸이 잠겨 제목을 채울 길이 없는데, firstBlankTitleEntry 가드는 그 항목을 여전히
+   저장을 막는 사유로 본다 — 오류 문구가 안내하는 "제목을 채우거나"가 막다른 골목이 되어
+   라이브 저장이 통째로 막힌다. **이미 켜져 있던 날(day.rest 가 이미 true)엔 안 건드린다** —
+   지우는 건 "지금 막 잠긴" 항목뿐이고, 그렇지 않으면 같은 날에 rest:true 를 다시 보내는
+   호출마다 반복 삭제를 시도하게 된다(부작용은 없지만 전이의 뜻과 안 맞는다). */
 export function setDay(draft: WeekDraft, date: string, patch: Partial<DraftDay>): WeekDraft {
-  const next = { ...dayOf(draft, date), ...patch };
+  const day = dayOf(draft, date);
+  const next = { ...day, ...patch };
   const days = { ...draft.days };
   if (next.startTime === "" && !next.rest) delete days[date];
   else days[date] = next;
-  return { ...draft, days };
+  const turningRestOn = next.rest && !day.rest;
+  const entries = turningRestOn
+    ? draft.entries.filter((e) => e.scheduledDate !== date || e.title.trim() !== "")
+    : draft.entries;
+  return { ...draft, days, entries };
 }
 
 /* 저장 페이로드의 한 줄. saveWeekInput.entries[] 와 구조 동형이다 — core 가 Zod·features 를
@@ -145,9 +157,17 @@ export function entriesForDate(draft: WeekDraft, date: string): DraftEntry[] {
    이 placeholder 행이 안내 한 줄 없이 화면에서 사라진다. "+항목 추가"로 만든 뒤 제목을 깜빡한
    행이 저장을 누르는 순간 조용히 지워지는 걸 막으려면 draftEntryInputs 보다 **먼저** 봐야 한다.
    처음 걸리는 항목 하나만 돌려준다(한 번에 하나씩 고치게 안내한다 — 여러 개를 한 문장에 나열하면
-   어느 요일 이야기인지 흐려진다). */
+   어느 요일 이야기인지 흐려진다).
+
+   **휴방인 날은 건너뛴다**(이슈 #56 결정 30). setDay 가 휴방을 켜는 순간 그날의 빈 제목 항목을
+   지우므로 정상 경로로는 이 조합이 생기지 않지만, 잠금은 표시이고 가드가 방어선이다 — 둘의
+   조건이 갈리면 조용한 무시가 된다(AGENTS 지뢰). 휴방인 날은 입력칸이 잠겨 있어 제목을 채울
+   길이 없으므로, 그 항목이 저장을 막으면 오류 문구가 안내하는 "제목을 채우거나 삭제"가 막다른
+   골목이 된다. */
 export function firstBlankTitleEntry(draft: WeekDraft): DraftEntry | null {
-  return draft.entries.find((e) => e.title.trim() === "") ?? null;
+  return (
+    draft.entries.find((e) => e.title.trim() === "" && !dayOf(draft, e.scheduledDate).rest) ?? null
+  );
 }
 
 /* 저장 페이로드의 entries. 제목은 trim, 시각 '' 는 null 로 접는다(정규형). 제목이 빈 항목은

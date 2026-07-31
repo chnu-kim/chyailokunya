@@ -94,6 +94,40 @@ describe("하루 속성 — 시각·휴방", () => {
   });
 });
 
+describe("휴방을 켜는 순간 빈 제목 항목을 지운다 — 결정 30(라이브 저장 차단 해소)", () => {
+  it("그날의 제목이 빈 항목만 지운다 — 제목이 채워진 항목은 잠긴 채 보존된다", () => {
+    const d0 = draft({
+      entries: [
+        entry("blank", { title: "  " }), // 공백만 — 지워진다
+        entry("filled", { title: "젤다" }), // 채워짐 — 보존
+      ],
+    });
+    const d1 = setDay(d0, MON, { rest: true });
+    expect(d1.entries.map((e) => e.key)).toEqual(["filled"]);
+  });
+
+  it("다른 날 항목은 안 건드린다", () => {
+    const d0 = draft({ entries: [entry("other", { scheduledDate: WED, title: "" })] });
+    const d1 = setDay(d0, MON, { rest: true });
+    expect(d1.entries.map((e) => e.key)).toEqual(["other"]);
+  });
+
+  it("이미 휴방인 날에 다시 rest:true 를 보내도 멱등이다(전이가 아니라 유지)", () => {
+    const on = setDay(draft(), MON, { rest: true });
+    const onAgain = setDay(on, MON, { rest: true });
+    expect(onAgain.entries).toEqual(on.entries);
+  });
+
+  it("휴방을 끄는 전이는 지우지 않는다 — 지우는 대상은 '켜는' 전이뿐이다", () => {
+    const d0 = draft({ entries: [entry("blank", { title: "" })] });
+    const on = setDay(d0, MON, { rest: true }); // 켜는 전이 — 지워진다
+    expect(on.entries).toHaveLength(0);
+    const off = setDay(on, MON, { rest: false });
+    // 이미 지워졌으니 끄는 전이에서 새로 지울 것도 없다 — 빈 배열 그대로.
+    expect(off.entries).toHaveLength(0);
+  });
+});
+
 describe("항목 전이", () => {
   it("addEntry 는 원본을 안 건드리고 새 배열을 낸다", () => {
     const d0 = draft();
@@ -151,6 +185,24 @@ describe("firstBlankTitleEntry — 저장 전 가드", () => {
       ],
     });
     expect(firstBlankTitleEntry(d)?.key).toBe("b");
+  });
+
+  it("휴방인 날의 빈 제목 항목은 건너뛴다 — 결정 30(잠금은 표시, 가드는 방어선)", () => {
+    /* 정상 경로(setDay 가 휴방을 켜며 빈 항목을 지운다)로는 이 조합이 안 생기지만, 가드는
+       잠금과 독립적으로 같은 규칙을 지켜야 한다(AGENTS 지뢰: 둘의 조건이 갈리면 조용한 무시). */
+    const d = draft({
+      days: { [MON]: { startTime: "", rest: true } },
+      entries: [entry("a", { title: "" })],
+    });
+    expect(firstBlankTitleEntry(d)).toBeNull();
+  });
+
+  it("휴방이 아닌 날의 빈 제목은 여전히 걸린다 — 휴방 하나가 다른 날의 가드까지 풀지 않는다", () => {
+    const d = draft({
+      days: { [MON]: { startTime: "", rest: true } },
+      entries: [entry("rest-day", { title: "" }), entry("wed", { scheduledDate: WED, title: "" })],
+    });
+    expect(firstBlankTitleEntry(d)?.key).toBe("wed");
   });
 });
 
