@@ -214,6 +214,10 @@ export function ScheduleEditor({
   /* 발행·비공개 전환 확인창. null = 닫힘. 버튼은 이걸로 여는 신호만 세우고, 실제 뮤테이션은
      확인을 누른 뒤(PublishConfirmDialog 의 onConfirm)에만 나간다. */
   const [confirmMode, setConfirmMode] = useState<"publish" | "unpublish" | null>(null);
+  /* 팬아트 슬롯 위로 파일을 끌고 있나(결정 36). **머신으로 안 올린다**(ADR-0026 의 판정):
+     혼자 바뀌는 불리언 하나고 비동기가 안 끼며 불가능한 조합도 없다 — 업로드 자체는 이미
+     schedule-save 머신이 쥐고 있고 이 값은 그 위에 얹힌 표시일 뿐이다. */
+  const [dragging, setDragging] = useState(false);
   /* 발행은 항상 baseline(이미 저장된 값)을 대상으로 한다 — WeekCardDownload 가 baseline 으로
      카드를 만드는 것과 같은 원칙(결정 22). revision===null 은 저장된 적 없는 주(레거시 아카이브
      포함)라 발행 자체가 성립하지 않는다 — 머신의 canPublish 가드와 같은 조건을 화면도 들고
@@ -537,46 +541,109 @@ export function ScheduleEditor({
                   팬아트 (선택)
                 </span>
 
-                <div className="sched-fanart__row">
-                  {draft.fanartImageKey && (
-                    /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
-                 비율이 아니다(읽기 화면은 반대로 실제 치수로 예약한다). */
-                    <img
-                      className="sched-fanart__thumb"
-                      src={`/api/fanart/${draft.fanartImageKey}`}
-                      alt="올린 팬아트"
-                      width={96}
-                      height={96}
-                      data-od-id="schedule-fanart-thumb"
-                    />
-                  )}
-                  <div className="sched-fanart__acts">
-                    {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
-                  input 이 받고(sr-only 는 clip 이라 포커스가 살아 있다), 링은 아래 CSS 의
-                  :focus-within 이 label 에 그린다. */}
-                    <label className="btn btn--secondary sched-fanart__pick">
-                      {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
-                      <input
-                        type="file"
-                        className="sr-only"
-                        accept={FANART_ACCEPT}
-                        disabled={fanartLocked}
-                        data-od-id="schedule-fanart-file"
-                        onChange={onPickFanart}
-                      />
-                    </label>
-                    {draft.fanartImageKey && (
-                      <button
-                        type="button"
-                        className="btn btn--secondary sched-fanart__del"
-                        disabled={fanartLocked}
-                        data-od-id="schedule-fanart-remove"
-                        onClick={() => send({ type: "FANART_REMOVED" })}
-                      >
-                        내리기
-                      </button>
+                {/* ── 슬롯 하나가 두 상태다(결정 36, 2026-08-01) ─────────────────────
+                  **한 주에 팬아트는 한 장이다** — `schedule_weeks.fanart_image_key` 가 단일
+                  컬럼이라 목록이 될 수 없다. 그래서 화면에 있는 것도 슬롯 하나이고, 비었을
+                  때와 채워졌을 때가 **서로를 대체한다**(동시에 안 선다).
+
+                  전엔 96×96 썸네일 옆에 `[바꾸기][내리기]` 두 버튼이 섰다. 비었을 때는 버튼
+                  하나만 덩그러니 남아 무엇을 받는 자리인지 모양이 말하지 않았고, 채워지면
+                  조작이 셋(썸네일·바꾸기·내리기)으로 흩어졌다. 이제 **그 자리를 누르거나 새
+                  파일을 떨구면 교체, ✕ 가 제거**라 슬롯 하나에 채우기·갈아끼우기·비우기가 다
+                  모인다.
+
+                  드래그앤드롭은 `onDragOver` 에서 `preventDefault()` 를 해야 `drop` 이 난다
+                  (기본 동작이 "받지 않음"이다). `dragleave` 는 자식 위로 지나갈 때도 나므로
+                  **`relatedTarget` 이 이 상자 안인지**를 보고 걸러낸다 — 안 그러면 아이콘
+                  위를 지나는 순간 강조가 깜빡인다(카운터를 두는 흔한 우회 없이 끝난다). */}
+                <div
+                  className={dragging ? "sched-fanart__slot is-dragging" : "sched-fanart__slot"}
+                  data-od-id="schedule-fanart-slot"
+                  onDragOver={(ev) => {
+                    if (fanartLocked) return;
+                    ev.preventDefault();
+                  }}
+                  onDragEnter={(ev) => {
+                    if (fanartLocked) return;
+                    ev.preventDefault();
+                    setDragging(true);
+                  }}
+                  onDragLeave={(ev) => {
+                    // 창 밖으로 나가면 relatedTarget 이 null 이라 그때도 강조를 끈다.
+                    const to = ev.relatedTarget;
+                    if (to instanceof Node && ev.currentTarget.contains(to)) return;
+                    setDragging(false);
+                  }}
+                  onDrop={(ev) => {
+                    ev.preventDefault();
+                    setDragging(false);
+                    if (fanartLocked) return;
+                    const file = ev.dataTransfer.files?.[0];
+                    if (file) send({ type: "FANART_UPLOAD", file });
+                  }}
+                >
+                  {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
+                    input 이 받고(sr-only 는 clip 이라 포커스가 살아 있다), 링은 CSS 의
+                    :focus-within 이 label 에 그린다. 이 label 이 슬롯을 통째로 덮으므로
+                    "그림 자리를 다시 누르면 교체"가 별도 배선 없이 성립한다. */}
+                  <label className="sched-fanart__pick">
+                    {draft.fanartImageKey ? (
+                      <>
+                        {/* 이름이 그림의 alt 뿐이면 "누르면 바뀐다"를 말할 자리가 없다 —
+                          보이는 글자가 없는 컨트롤이라 sr-only 로 세운다. */}
+                        <span className="sr-only">팬아트 바꾸기</span>
+                        <img
+                          className="sched-fanart__img"
+                          src={`/api/fanart/${draft.fanartImageKey}`}
+                          alt="올린 팬아트"
+                          data-od-id="schedule-fanart-thumb"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <svg className="sched-fanart__plus" aria-hidden="true" viewBox="0 0 24 24">
+                          <path
+                            d="M12 5v14M5 12h14"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                        그림을 끌어 놓거나 눌러서 고릅니다
+                      </>
                     )}
-                  </div>
+                    <input
+                      type="file"
+                      className="sr-only"
+                      accept={FANART_ACCEPT}
+                      disabled={fanartLocked}
+                      data-od-id="schedule-fanart-file"
+                      onChange={onPickFanart}
+                    />
+                  </label>
+
+                  {/* **항상 DOM 에 둔다** — `display:none` 으로 감추면 키보드 포커스가 아예 안
+                    가고 호버가 없는 터치 기기에선 존재하지 않는 것과 같다. 호버·포커스에서
+                    드러나되 **터치 기기에선 늘 보인다**(CSS 의 `(hover: hover)` 가드). */}
+                  {draft.fanartImageKey && (
+                    <button
+                      type="button"
+                      className="sched-fanart__x"
+                      disabled={fanartLocked}
+                      data-od-id="schedule-fanart-remove"
+                      onClick={() => send({ type: "FANART_REMOVED" })}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 16 16">
+                        <path
+                          d="M4 4l8 8M12 4l-8 8"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      <span className="sr-only">팬아트 내리기</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
