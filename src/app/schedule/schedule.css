@@ -505,8 +505,14 @@
   min-height: 64px;
   padding: 10px var(--space-4);
 }
-/* 요약 토글 — 남는 폭 전부를 갖는다. 배경이 이 상자에만 깔리므로 "어디까지가 펼치기인가"가
-   호버에서 그대로 보인다(옛 골격은 줄 전체가 버튼이라 그 경계를 물을 일이 없었다). */
+/* 요약 토글 — **줄의 마지막 자리**이고 남는 폭 전부를 갖는다(개편안 도식, 사용자 확정
+   2026-08-01). 그래서 그 안 오른쪽 끝의 chevron 이 곧 줄의 오른쪽 끝이다 — 아코디언 관례와
+   맞고, 왼쪽에 모인 고정폭 셋(요일·날짜 / 시각 / 휴방)이 7일을 세로로 훑을 때 한 열로 정렬된다.
+   한때 이 버튼이 요일·날짜까지 품고 앞에 섰는데, 그러면 chevron 이 줄 한가운데 서서 어느 쪽에
+   딸린 표시인지가 흐려졌다.
+
+   배경이 이 상자에만 깔리므로 "어디까지가 펼치기인가"가 호버에서 그대로 보인다(옛 골격은 줄
+   전체가 버튼이라 그 경계를 물을 일이 없었다). */
 .sched-day__summary {
   flex: 1 1 0;
   min-width: 0;
@@ -700,18 +706,23 @@
 
    **`flex-basis: 100%` 를 `.sched-day__when` 에 준다 — 줄바꿈 지점을 결정론적으로 못박는 것이
    이 한 줄의 일이다.** 그냥 `flex-wrap: wrap` 만 켜면 flex 가 줄바꿈을 늘어나기 전 크기로
-   계산하므로 토글(basis 0)이 첫 줄에서 자리를 안 차지해 `[요일 시각] / [휴방] / [요약]` 처럼
-   세 줄로 흩어진다(실측 아님 — flex 명세의 line-breaking 정의). 100% 를 주면 `when` 이 항상
-   제 줄을 차지해 `[요약] / [시각 휴방]` 두 줄로 고정된다.
+   계산하므로 토글(basis 0)이 첫 줄에서 자리를 안 차지해 줄이 엉뚱하게 갈린다(flex 명세의
+   line-breaking 정의). 100% 를 주면 `when` 이 항상 제 줄을 차지한다.
 
-   **DOM 순서를 안 건드린다** — `order` 로 시각만 돌리면 탭 순서가 화면과 갈린다(#137 이 곁칸에서
-   감수한 그 불일치를 여기선 안 만든다). 560 은 이 저장소에서 셋이 공유하는 유일한 폭이라
-   새 값을 만들지 않는다(kunya-design §5 의 표). */
+   **`order` 로 시각·휴방을 아랫줄로 내린다 — 알고 받아들인 트레이드오프다**(사용자 확정
+   2026-08-01). 이 폭에서 탭은 `시각 → 휴방 → 토글`인데 화면은 `[요일 요약 ⌄] / [시각 휴방]`
+   이라 토글이 위에 온다. `order` 없이 DOM 순서대로 접으면 첫 줄이 `요일 54 + 시각 128 +
+   휴방 68 + gap` 이라 320px 의 카드 안쪽 폭 238 을 넘어(실측) **세 줄**이 되고, 접힌 하루가
+   116 → 152px 로 늘어 7일이 812 → 1064px 이 된다. 셋 다 같은 하루에 속한 조작이라 의미
+   흐름은 유지되므로 그 값을 안 치른다(#137 이 곁칸에서 감수한 것과 같은 부류의 판단이다).
+
+   560 은 이 저장소에서 셋이 공유하는 유일한 폭이라 새 값을 만들지 않는다(kunya-design §5 의 표). */
 @media (max-width: 560px) {
   .sched-day__head {
     flex-wrap: wrap;
   }
   .sched-day__when {
+    order: 1;
     flex-basis: 100%;
   }
 }
@@ -797,7 +808,7 @@
    목록의 리듬이 항목 수에 따라 흔들린다). */
 .sched-row {
   display: flex;
-  flex-direction: column;
+  align-items: stretch;
   background: var(--surface);
   border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -812,9 +823,14 @@
   border-color: var(--focus);
   box-shadow: 0 0 0 2px var(--focus);
 }
-.sched-row__main {
+/* 가운데 칸 — 제목 입력과 (있으면) 연결 표기를 세로로 쌓는다. 표지·삭제가 `stretch` 로 상자의
+   위아래를 꽉 채우므로 두 줄짜리 항목에서도 세 구역이 세로로 안 어긋난다. */
+.sched-row__body {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
 }
 /* 안쪽 컨트롤은 상자를 안 그린다. 배경도 투명이라 휴방 잠금의 톤(`.sched-day__items--rest`)이
    행 안까지 그대로 비친다. */
@@ -849,7 +865,9 @@
 .sched-row__game-trigger {
   flex: 0 0 auto;
   width: 44px;
-  height: 44px;
+  /* 상자 높이를 따라간다(결정 33) — 연결 표기가 붙어 두 줄이 되면 이 칸도 함께 늘어야 세
+     구역이 세로로 안 어긋난다. 하한 44 는 터치 타깃이라 못 내린다. */
+  min-height: 44px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -866,8 +884,11 @@
    읽기 화면 항목 표지(30×40)와 같은 값이라, 같은 게임이 두 화면에서 같은 모양으로 읽힌다.
    픽셀로 못박지 않는 이유: 테두리 두께가 바뀌면 안쪽 높이가 따라 바뀌는데, 고정값이면 그때
    위아래가 잘린다. */
+/* **높이를 44 로 못박는다**(결정 33). 칸이 상자 높이를 따라 늘어나므로 `height: 100%` 로 두면
+   연결 표기가 붙은 항목에서만 표지가 커져, 같은 게임이 행마다 다른 크기로 선다. */
 .sched-row__game-thumb {
   display: block;
+  height: 44px;
   /* **`width: auto` 를 명시해야 한다.** img 의 `width`/`height` 속성은 presentational hint 라
      author CSS 보다 약하지만, 폭을 CSS 로 아예 안 정하면 그 힌트가 그대로 쓰여 아래
      `aspect-ratio` 가 무시된다 — 실측(2026-07-31) 30×42 = 0.714 로, 3:4 그림이 세로로 늘어난
@@ -906,9 +927,12 @@
    "누구에게 딸린 사실인가"가 자리로 안 읽혔다. 왼쪽 들여쓰기 54 = 표지 칸 44 + 제목 칸의 좌우
    패딩 10 이라 제목 글자와 시작선이 정확히 맞는다. --fg-muted 는 하루 카드 표면 위 라이트
    6.39:1 · 다크 6.69:1. */
+/* 제목 입력 바로 아래 — 같은 칸(`.sched-row__body`) 안이라 좌우 패딩만 입력과 맞추면 글자
+   시작선이 저절로 맞는다(입력의 `.sched-field` 패딩이 10 이다). 표지 폭 44 를 더하던 옛
+   들여쓰기는 이 줄이 상자 바닥에 전폭으로 눕던 시절의 값이라 걷었다. */
 .sched-row__linked {
   margin: 0;
-  padding: 0 10px 8px calc(44px + 10px);
+  padding: 0 10px 8px;
   font-size: var(--text-sm);
   color: var(--fg-muted);
   overflow-wrap: anywhere;
@@ -918,7 +942,8 @@
 .sched-row__del {
   flex: 0 0 auto;
   width: 44px;
-  height: 44px;
+  /* 표지 칸과 같은 이유로 상자 높이를 따라간다(결정 33) — 하한 44 는 터치 타깃이다. */
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -935,6 +960,20 @@
 }
 .sched-row__del:hover:not(:disabled) {
   color: var(--danger);
+}
+/* ── 상자 안 구역을 가르는 실선(개편안 도식, 2026-08-01) ────────────────────────
+   테두리를 전부 걷어 한 상자로 만들었더니 표지·제목·삭제가 한 덩어리로 뭉쳐 "어디까지가 누를
+   수 있는 자리인가"가 흐려졌다. 바깥 테두리(`--border-strong`)보다 훨씬 약한 `--border` 로
+   안쪽만 가르면 위계가 선다 — **바깥은 하나, 안은 셋**이다.
+
+   **이 두 줄은 위 `.sched-row .sched-field { border: none }` 과 `.sched-row__del { border:
+   none }` 보다 뒤에 있어야 한다.** 특정도가 같아 순서가 승자를 정하는데, 앞에 두면 그 두 규칙이
+   덮어 선이 조용히 안 그려진다(실제로 처음 그렇게 놓았다). */
+.sched-row > .sched-row__game-trigger {
+  border-right: 1px solid var(--border);
+}
+.sched-row > .sched-row__del {
+  border-left: 1px solid var(--border);
 }
 /* ── 휴방인 날의 잠긴 항목 덩어리(2026-07-31) ─────────────────────────────────
    점선 테두리를 **평소에도 투명으로 깔아 둔다** — 휴방을 켤 때만 테두리를 만들면 그 순간
@@ -1127,14 +1166,22 @@
 /* 항목 추가 — 44×44 아이콘 버튼(결정 28). 글자 "항목 추가"가 접힌 줄 예산엔 안 맞아 걷었고
    (schedule-editor.tsx 의 sr-only 가 이름을 대신 세운다), 점선 테두리는 남겨 다른 아이콘
    버튼(.sched-row__del 등의 실선)과 "추가"의 종족을 시각으로 가른다. */
+/* **전폭 글자 버튼이다**(개편안 도식, 2026-08-01). 결정 28 이 44×44 아이콘으로 줄인 근거는
+   "글자가 접힌 줄 예산(366px/7일)에 안 맞는다"였는데, 이 버튼은 접힌 줄이 아니라 **펼친 패널
+   안**이라 그 예산과 무관하다 — 높이 44 는 그대로이므로 전폭으로 늘려도 세로 비용이 0 이다.
+   아이콘만 남기면 이름이 sr-only 에만 있어 "무엇을 더하는 자리인가"를 화면이 말하지 않는다
+   (게임 연결 돋보기가 걸렸던 바로 그 문제). 점선은 "여기에 더 생긴다"는 뜻으로 유지한다. */
 .sched-day__add {
-  align-self: flex-start;
-  width: 44px;
-  height: 44px;
-  display: inline-flex;
+  width: 100%;
+  min-height: 44px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  gap: 6px;
+  padding: 0 var(--space-3);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
   cursor: pointer;
   color: var(--fg-muted);
   background: transparent;
