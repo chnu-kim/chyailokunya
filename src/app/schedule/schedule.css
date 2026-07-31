@@ -65,9 +65,16 @@
        `days` 가 아무리 길어져도 곁칸 내부(아래 `.sched__aside`)엔 영향이 없다. */
     grid-template-areas: "days aside";
     gap: 0 var(--space-6);
-    /* `days`·`aside` 가 서로 다른 높이라도 각자 자기 콘텐츠 높이로 위에 붙는다 — 없으면 기본
-       `stretch` 가 짧은 쪽을 긴 쪽 높이까지 늘려 그 안(`.sched__aside`)에 빈 여백이 생긴다. */
-    align-items: start;
+    /* **`align-items` 는 기본값(stretch)을 그대로 둔다 — 일부러 안 건드린다.** 처음엔
+       `align-items: start` 로 각 열을 자기 콘텐츠 높이에 맞춰 세웠는데, 그러면 `.sched__aside`
+       가 미리보기+메타 높이(~700px대)로 짧게 굳어 sticky 미리보기가 `days` 열을 거의 못
+       따라간다(적대적 리뷰 지적). **`stretch`(기본값)를 쓰면 `.sched__aside` 가 `days` 와 같은
+       높이로 늘어나 sticky 가 훨씬 더 오래 붙어 있는다**(실측: 600px 스크롤 시 카드 상단이
+       start 에선 -144px(완전히 사라짐), stretch 에선 -15px(거의 그대로 보임) — 144px 차이).
+       단일 행 grid 라 이 stretch 가 예전(다중 행에서 겪은 트랙 배분) 버그를 안 되살린다는 것도
+       같이 확인했다 — 미리보기-메타 간격은 stretch 로 바꿔도 24px(--space-5) 그대로다(아래
+       `.sched__aside` 가 여전히 flex 로 내부를 쌓기 때문). `.sched__days`(`<ol>`, 테두리 없음)가
+       `.sched__aside` 보다 짧을 때 늘어나도 마지막 카드 아래 안 보이는 여백만 생길 뿐이다. */
   }
   .sched--edit .sched__days {
     grid-area: days;
@@ -79,27 +86,14 @@
   .sched--edit .sched__aside {
     grid-area: aside;
   }
-  /* **`align-items: start`(grid, 위)가 없으면 sticky 가 조용히 안 먹는다.** grid 아이템의 기본
-     `stretch` 는 곁칸을 왼쪽 요일 목록과 같은 높이로 늘리고, 그러면 sticky 가 붙을 스크롤
-     여유가 곁칸 내부에 생겨 버려 미리보기가 카드+메타 조합 전체 높이만큼 떠다니려 한다 —
-     오류도 경고도 없이 "sticky 범위가 이상하다"로만 보인다. 위 grid 규칙으로 이미 걸리지만,
-     이 규칙이 그 값에 딸린 전제라는 걸 여기 적어 둔다(위를 바꾸면 여기가 깨진다).
-
-     `top` 은 nav(sticky, 실측 69px)를 비켜야 카드 윗변이 그 아래로 안 들어간다. **메타는
-     sticky 가 아니다** — 미리보기까지 붙여 두면 짧은 창에서 메타 아래가 잘린다(결정 29).
-     sticky 의 포함 블록은 이제 `.sched__aside`(flex 컨테이너)다 — grid 직계 자식이었을 때와
-     같은 규칙(포함 블록의 콘텐츠 높이만큼만 "떠 있을" 여유가 생긴다)이 flex 에서도 그대로
-     적용된다. **대가**: 곁칸 자체가 미리보기+메타 높이(~700px대)로 짧아졌으니 사진지가 긴
-     요일 목록을 끝까지 따라다니진 않는다 — 이전(main, 메타가 왼쪽 열에 있던 시절)엔 미리보기가
-     요일+메타를 합친 두 행에 걸쳐 있어 그 범위가 훨씬 길었다. 그 범위를 그대로 지키려면
-     `days` 와 다시 같은 트랙을 걸쳐야 하는데, 그러면 바로 위에서 고친 회귀가 재발한다 — 짧아진
-     sticky 범위를 수용하는 쪽을 택했다(어느 리뷰도 이 지점은 지적하지 않았다). */
+  /* `top` 은 nav(sticky, 실측 69px)를 비켜야 카드 윗변이 그 아래로 안 들어간다. **메타는 sticky
+     가 아니다** — 미리보기까지 붙여 두면 짧은 창에서 메타 아래가 잘린다(결정 29). sticky 의
+     포함 블록은 `.sched__aside`(flex 컨테이너)다 — 위에서 stretch 로 늘어난 그 블록의 콘텐츠
+     높이만큼 미리보기가 "떠 있을" 여유를 갖는다(적대적 리뷰가 잡은 회귀의 실제 해법은
+     `align-items` 자리에 있다, 이 규칙이 아니라). */
   .sched--edit .sched__preview {
     position: sticky;
     top: calc(var(--nav-h) + var(--space-4));
-  }
-  .sched--edit .sched__preview .week-card-download {
-    margin-top: 0;
   }
 }
 
@@ -185,6 +179,16 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+}
+/* `.week-card-download` 자신의 margin-top(공지 아래로 띄우던 값)·margin-bottom(요일 목록과
+   가르던 값, 둘 다 읽기 화면·옛 편집기 순서를 위한 값이었다)은 이 곁칸 안에선 둘 다 군더더기다
+   — 위아래 이웃이 이제 페이지 머리글·`.sched__meta` 로 바뀌었고, 그 간격은 전부 `.sched__aside`
+   의 flex gap 이 정본으로 준다(codex review 지적, 2026-07-31). **narrow flow 에도 적용된다** —
+   media 쿼리 안에 두면 1300 미만에서 여전히 48px 위 여백이 남아 카드가 머리글에서 불필요하게
+   떨어진다(실측: aside 상단 197 인데 카드 시작은 245). */
+.sched__preview .week-card-download {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 /* ── 편집기의 주 메타: 공지 · 팬아트 2박스(결정 29, 2026-07-31 개정) ────────────
