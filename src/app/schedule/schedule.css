@@ -13,10 +13,11 @@
   padding: var(--space-7) 0 var(--space-9);
 }
 
-/* ── 편집기의 2열 골격(2026-07-31) ────────────────────────────────────────────
-   영역이 셋이다 — 주 메타(공지·팬아트) · 미리보기 · 요일 목록. 좁은 폭에선 grid 를 아예 안
-   걸어 DOM 순서대로 흐르고(메타 → 미리보기 → 요일, 읽기 화면과 같은 순서), 넓은 폭에서만
-   `grid-template-areas` 로 미리보기를 오른쪽으로 보낸다.
+/* ── 편집기의 2열 골격(결정 24) · 메타 재배치(결정 29, 2026-07-31 개정) ───────────
+   영역이 셋이다 — 요일 목록 · 미리보기 · 주 메타(공지·팬아트). 좁은 폭에선 grid 를 아예 안
+   걸어 DOM 순서대로 흐르고(요일 → 미리보기 → 메타 — 결정 29 가 이 순서로 뒤집었다, 왜인지는
+   schedule-editor.tsx 의 같은 자리 주석), 1300 이상에서만 `grid-template-areas` 로 요일을
+   왼쪽 열 전체에 세우고 미리보기·메타를 오른쪽 열에 위아래로 세운다.
 
    ── **1280px 은 새 브레이크포인트다** ────────────────────────────────────────
    kunya-design §5 의 표(860·760·699·600·560·480·430)엔 이보다 넓은 값이 없다. `home.css` 에
@@ -50,39 +51,50 @@
   .sched--edit .sched__grid {
     display: grid;
     /* 편집 열은 400~460 사이에서만 움직인다 — 그 아래면 항목 행(아이콘 44 + 제목 + 삭제 44)이
-       빡빡하고, 그 위로 넓히면 미리보기가 그만큼 작아진다. 남는 폭은 전부 미리보기가 갖는다. */
+       빡빡하고, 그 위로 넓히면 미리보기가 그만큼 작아진다. 남는 폭은 전부 미리보기·메타가 갖는다. */
     grid-template-columns: minmax(400px, 460px) 1fr;
+    /* **결정 29 개정** — 메타가 요일 옆(왼쪽 열)에서 미리보기 아래(오른쪽 열)로 옮겼다. `days`
+       가 두 행에 걸쳐 있는 건 그대로다(요일 목록 하나가 왼쪽 열 전체를 쓴다는 뜻일 뿐, 실제
+       높이는 그 목록 자신의 콘텐츠가 정한다 — 아래 `align-items: start` 참고). */
     grid-template-areas:
-      "meta preview"
-      "days preview";
-    /* 행 높이: 메타는 자기 내용만, 요일 목록이 나머지를 갖는다. `auto 1fr` 을 안 쓰는 이유 —
-       목록이 길면 1fr 이 그 길이가 되어 결국 같고, 짧으면 억지로 늘어나 카드 사이가 벌어진다. */
+      "days preview"
+      "days meta";
+    /* 행 높이: 미리보기·메타는 각자 내용만, 왼쪽 요일 목록은 그 둘을 합친 높이 안에서 위로
+       붙는다(`align-items: start`). `auto 1fr` 을 안 쓰는 이유 — 목록이 길면 1fr 이 그 길이가
+       되어 결국 같고, 짧으면 억지로 늘어나 카드 사이가 벌어진다. */
     grid-template-rows: auto auto;
-    gap: 0 var(--space-6);
+    /* row-gap 이 0 이 아니게 된 건 이번이 처음이다 — 예전엔 "meta"·"days" 가 같은(왼쪽) 열의
+       위아래 행이라 그 사이 간격을 각 컴포넌트의 margin-bottom 이 직접 정했다. 이제 위아래로
+       쌓이는 건 "preview"·"meta"(오른쪽 열)이고, `days` 는 그 두 행에 걸쳐 있지만
+       `align-items: start` 로 자기 콘텐츠 높이만큼만 차지해 이 gap 을 안 겪는다 — 그래서 여기서
+       gap 을 올려도 왼쪽 요일 목록엔 빈 틈이 안 생긴다. */
+    gap: var(--space-5) var(--space-6);
     align-items: start;
-  }
-  .sched--edit .sched__meta {
-    grid-area: meta;
   }
   .sched--edit .sched__days {
     grid-area: days;
   }
   /* **`align-self: start` 가 없으면 sticky 가 조용히 안 먹는다.** grid 아이템의 기본
-     `align-items: stretch` 는 이 열을 행 전체 높이(= 왼쪽 폼 높이)만큼 늘리고, 그러면 sticky
+     `align-items: stretch` 는 이 열을 행 전체 높이(= 왼쪽 목록 높이)만큼 늘리고, 그러면 sticky
      가 붙을 스크롤 여유가 0 이라 카드가 그냥 같이 흘러간다 — 오류도 경고도 없이 "sticky 가 안
      된다"로만 보인다. 위 `align-items: start` 로 이미 걸리지만, 이 규칙이 그 값에 딸린
      전제라는 걸 여기 적어 둔다(위를 바꾸면 여기가 깨진다).
 
-     `top` 은 nav(sticky, 실측 69px)를 비켜야 카드 윗변이 그 아래로 안 들어간다. */
+     `top` 은 nav(sticky, 실측 69px)를 비켜야 카드 윗변이 그 아래로 안 들어간다. **메타는 sticky
+     가 아니다** — 미리보기까지 붙여 두면 짧은 창에서 메타 아래가 잘린다(결정 29). */
   .sched--edit .sched__preview {
     grid-area: preview;
     position: sticky;
     top: calc(var(--nav-h) + var(--space-4));
     align-self: start;
   }
-  /* 1열에서 미리보기를 공지와 띄우려고 잡아 둔 위 여백이, 2열에선 이 열의 **맨 위**라 카드가
-     혼자 48px 내려앉아 왼쪽 메타와 시작선이 어긋난다. 이 배치에서만 걷는다. */
   .sched--edit .sched__preview .week-card-download {
+    margin-top: 0;
+  }
+  /* 메타 아래 서식(narrow-flow, 아래 base 규칙)이 여기선 필요 없다 — 위 `gap` 이 이미
+     preview→meta 간격을 준다. 그대로 두면 이중으로 붙는다. */
+  .sched--edit .sched__meta {
+    grid-area: meta;
     margin-top: 0;
   }
 }
@@ -161,8 +173,38 @@
   border-radius: var(--radius-sm);
 }
 
-/* 편집기의 공지 입력(라벨 + field). paper 위가 아니라 페이지 배경 위지만, field 자체가
-   --surface 라 테두리 대비가 선다. */
+/* ── 편집기의 주 메타: 공지 · 팬아트 2박스(결정 29, 2026-07-31 개정) ────────────
+   둘 다 미리보기 카드에만 그려지는 값이라 그 카드 바로 아래, 카드의 좌우 배치(공지 왼쪽·그림
+   오른쪽)와 맞춘 2박스로 나란히 세운다. `flex-wrap` 으로 폭이 좁아지면 자연히 위아래로 쌓인다
+   — 이 화면 전용 폭이라 새 브레이크포인트를 안 만든다(kunya-design §5, "감축 경로").
+
+   narrow flow(1300 미만)에선 이 블록이 미리보기 **바로 아래**로 오므로 그 사이 간격은 여기
+   margin-top 이 준다. 1300 이상(grid)에선 grid gap 이 그 역할을 대신하므로 위 media 쿼리가
+   이 값을 0 으로 되돌린다(안 그러면 이중으로 붙는다). */
+.sched__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+}
+/* 두 박스는 `.paper`(--surface + 테두리 + 그림자)를 그대로 쓴다(kunya-design §3, "있는 부품을
+   쓴다") — `.sched-day` 카드가 이미 같은 표면 위에 `.sched-field`(--border-strong)를 얹어
+   대비를 검증해 뒀다(kunya-design §4). `flex-basis 240` 은 이 박스 안 최소 콘텐츠(공지 필드
+   한 줄, 팬아트 썸네일+버튼 한 줄)가 그 아래로 줄면 답답해지는 지점의 실측값이다 — 더 좁아지면
+   위 `flex-wrap` 이 위아래로 내린다. */
+.sched-meta__note-box,
+.sched-fanart {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: var(--space-4);
+}
+.sched-meta__note-box .sched-note {
+  margin-bottom: 0; /* 박스 안 유일한 내용이라 옛 블록-스택 여백이 필요 없다 */
+}
+
+/* 편집기의 공지 입력(라벨 + field). 박스(.paper) 안이라 --surface 위에 다시 --surface 인
+   .sched-field 를 얹지만, field 의 --border-strong 이 더 진해 안쪽 경계가 그대로 선다
+   (.sched-day 와 같은 조합). */
 .sched-note {
   display: block;
   margin-bottom: var(--space-5);
@@ -179,21 +221,22 @@
    **사진지 섬(.polaroid)을 여기선 안 쓴다.** 조작이 들어 있는 블록이라 그 섬의 크림 종이 위에서
    폼 컨트롤의 테두리·포커스 대비가 씻긴다(kunya-design §4 "입력 컨트롤을 섬 안에 두지 마라").
    읽기 화면은 조작이 없어 거기가 폴라로이드다 — 같은 값을 두 화면이 다른 부품으로 그리는 게
-   맞는 자리다. */
-.sched-fanart {
-  margin-bottom: var(--space-5); /* .sched-note 와 같은 리듬 */
-}
+   맞는 자리다. **한 상자다**(결정 29) — 이 div 자체가 위 `.sched-meta__note-box` 짝인 박스라,
+   예전에 여기 있던 block-stack 용 margin-bottom 은 필요 없다(부모 `.sched__meta` 의 gap 이
+   대신한다). */
 .sched-fanart__row {
   display: flex;
   gap: var(--space-3);
-  /* 썸네일(96)과 버튼 스택의 높이를 억지로 맞추지 않는다 — 44×2+8 이 96 과 같아 보이지만 그건
-     우연이고, 어느 쪽 값을 바꾸면 조용히 어긋난다. 위로 정렬해 시작선만 맞춘다. */
-  align-items: flex-start;
+  /* **결정 29 개정 — acts 가 세로 스택에서 가로 줄로 바뀌며 썸네일보다 짧아졌다.** 예전엔
+     "44×2+8=96 이 썸네일과 같아 우연히 맞아떨어진다"며 위로 정렬했는데, 이제 acts 는 한 줄
+     (44px)뿐이라 위 정렬이면 썸네일 옆 허공에 뜬다 — 가운데로 맞춘다. */
+  align-items: center;
   margin-top: 6px; /* .sched-note__label 의 margin-bottom 과 같은 값 */
 }
-/* 96 고정 슬롯 + contain. 그림마다 높이가 달라지면 아래 요일 목록이 통째로 밀린다 — 편집기에서
-   알고 싶은 건 "무엇을 올렸나"이지 정확한 비율이 아니다(읽기 화면은 반대로 실제 치수로 자리를
-   예약한다: 거기선 그림이 주인공이라 비율이 정보다). */
+/* 96 고정 슬롯 + contain. 그림마다 높이가 달라져도 이 박스 안에서만 출렁인다 — 예전엔 "아래
+   요일 목록이 밀린다"가 이 값을 정당화했는데, 메타가 요일 옆에서 미리보기 아래로 옮기며 그
+   우려는 사라졌다(결정 29). 편집기에서 "무엇을 올렸나"만 알면 된다는 원래 이유는 그대로 남는다
+   (읽기 화면은 반대로 실제 치수로 자리를 예약한다: 거기선 그림이 주인공이라 비율이 정보다). */
 .sched-fanart__thumb {
   flex: none;
   width: 96px;
@@ -203,9 +246,14 @@
   border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
 }
+/* **결정 29 개정 — column → row.** 세로로 쌓인 두 버튼이 96×96 썸네일 옆에서 좁은 기둥을 만들어
+   "L자"로 보였다(이슈 코멘트 실측 지적) — 나란히 눕히면 썸네일 옆에 한 줄로 붙어 상자 전체가
+   직사각형에 가까워진다. wrap 은 좁은 박스(위 flex-wrap 이 접은 1열 폭)에서 두 버튼이 겹치지
+   않게 하는 안전망이다. */
 .sched-fanart__acts {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 /* .btn 계열엔 min-height 가 없다 — 패딩만으로 서는 컨트롤은 글자 크기가 바뀌면 44 가 조용히
@@ -245,8 +293,8 @@
 .sched-fanart .sched-err {
   margin-top: var(--space-2);
 }
-/* 표기 칸은 이 블록의 마지막이라 아래 여백은 부모(.sched-fanart)가 준다 — .sched-note 의 기본
-   24px 을 안 지우면 요일 목록과의 간격이 두 번 붙는다. */
+/* 표기 칸은 이 블록의 마지막이라 아래 여백은 박스 자신의 padding 이 준다 — .sched-note 의 기본
+   24px 을 안 지우면 그 padding 과 이중으로 붙는다. */
 .sched-fanart__credit {
   margin-top: var(--space-3);
   margin-bottom: 0;
