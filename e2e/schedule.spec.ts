@@ -677,6 +677,51 @@ async function expectListNotSquashed(page: Page): Promise<void> {
   expect(m.entriesClipped).toBe(false);
 }
 
+/* ── 옛 공지를 내리는 길(적대적 리뷰 2라운드, 2026-08-01) ───────────────────────────
+   공지 입력을 조건 없이 걷었더니 **옛 공지가 갇혔다**: 저장 경로는 그 값을 계속 보존하고 읽기
+   화면·PNG 카드는 계속 그리는데 관리자에겐 고치거나 내릴 길이 없었다. 그래서 `baseline.note` 가
+   비어 있지 않은 주에서만 입력이 뜬다 — 새 공지는 못 만들고 있는 것만 정리한다.
+
+   **두 방향을 함께 잰다.** 뜨는 쪽만 재면 "모든 주에 다시 뜨게" 되돌려도 초록이고(그러면 사용자가
+   걷으라고 한 그 칸이 살아 돌아온다), 안 뜨는 쪽만 재면 갇힘이 그대로다. */
+test("관리자: 공지가 없는 주엔 공지 칸이 아예 없다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+  // 픽스처가 안 건드리는 주 — schedule_weeks 행 자체가 없으니 note 도 없다.
+  await page.goto("/schedule?week=2028-11-06");
+  await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+  await expect(page.locator('[data-od-id="schedule-note-legacy"]')).toHaveCount(0);
+});
+
+test("관리자: 이미 적어 둔 공지는 비우고 저장해 내릴 수 있다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2030-09-02");
+
+  // 칸이 뜨고 저장된 값이 들어 있다.
+  const note = page.locator('[data-od-id="schedule-note-input"]');
+  await expect(note).toHaveValue("내려갈 옛 공지");
+  // 카드에도 그려져 있다 — 이게 "공개된 채 갇혀 있다"의 관찰 가능한 형태다.
+  await expect(page.locator(".week-card__note")).toHaveCount(1);
+
+  await note.fill("");
+  /* **비워도 칸은 남아 있어야 한다.** `draft.note` 로 조건을 걸면 여기서 칸이 사라져 그 편집을
+     저장할 수도 되돌릴 수도 없다 — 자기가 만든 상태에 자기가 갇힌다. baseline 으로 가르는
+     이유가 이것이라, 그 선택을 여기서 못박는다. */
+  await expect(note).toBeVisible();
+
+  const save = page.locator('[data-od-id="schedule-save"]');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toHaveText("저장됨");
+
+  // 내려갔다: 카드에서 사라지고, baseline 이 비었으므로 칸 자체도 접힌다.
+  await expect(page.locator(".week-card__note")).toHaveCount(0);
+  await expect(page.locator('[data-od-id="schedule-note-legacy"]')).toHaveCount(0);
+
+  // 새로고침해도 그대로다 — 서버까지 갔다는 뜻이다(화면 상태만 바뀐 게 아니다).
+  await page.reload();
+  await expect(page.locator('[data-od-id="schedule-note-legacy"]')).toHaveCount(0);
+});
+
 /* 팬아트 **없는** 모양의 긴 공지(2026-08-01). 픽스처가 이 주에 정확히 500자 공지 + 항목 하나를
    발행된 채로 심어 둔다(games.sql) — 이 스펙은 아무것도 안 쓰고 그 상태를 그대로 읽는다.
    저장·발행 단계가 없는 이유가 그것이다: 화면엔 공지를 만들 길이 없고, 만들 필요도 없다.

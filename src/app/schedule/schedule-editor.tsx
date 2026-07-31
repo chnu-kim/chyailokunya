@@ -469,19 +469,53 @@ export function ScheduleEditor({
                 .week-card__main·.week-card__art). 공지를 안 쓰기로 해 입력만 걷었으므로 그
                 좌우 대칭의 근거도 함께 사라졌다 — 이제 상자가 하나뿐이라 대칭시킬 짝이 없다.
 
-                **지운 것은 입력칸 하나뿐이다.** `draft.note`·`NOTE_CHANGED`·`weekToDraft` 의
-                note·`buildWeekCard({note})` 는 전부 그대로다: 그것까지 걷으면 **이미 저장된
-                공지가 있는 주를 저장할 때 그 값이 날아간다**(폼이 안 보내면 전체 교체
-                뮤테이션이 null 로 덮는다). 값을 손대는 길만 없애면 `draft.note` 가 baseline 과
-                영원히 같아 dirty 판정도 안 흔들리고, 과거에 저장된 공지는 카드와 읽기 화면에
-                그대로 남는다. `.sched-note`·`.sched-note__label` CSS 도 남긴다 — 바로 아래
-                팬아트 라벨과 작가 표기가 같은 클래스를 쓴다.
+                **지운 것은 "새 공지를 만드는 길"이다.** `draft.note`·`NOTE_CHANGED`·
+                `weekToDraft` 의 note·`buildWeekCard({note})` 는 전부 그대로다: 그것까지 걷으면
+                **이미 저장된 공지가 있는 주를 저장할 때 그 값이 날아간다**(폼이 안 보내면 전체
+                교체 뮤테이션이 null 로 덮는다). `.sched-note`·`.sched-note__label` CSS 도
+                남긴다 — 바로 아래 팬아트 라벨과 작가 표기가 같은 클래스를 쓴다.
 
                 **`.sched__meta` 래퍼도 함께 걷었다.** 그 겹의 일은 "두 박스를 가로로 나란히
                 세우고 좁아지면 쌓는다"였는데 박스가 하나면 그 일이 통째로 없다 — 남겨 두면
                 아무것도 안 하는 flex 컨테이너가 되고, 다음 사람이 그 안의 `flex-basis 240` 을
                 보고 없는 형제를 찾는다. 팬아트 상자는 이제 `.sched__aside-pin` 의 직접
                 자식이라 미리보기와의 간격을 그 flex gap 이 그대로 준다. */}
+
+              {/* ── 이미 적어 둔 공지가 있는 주에서만 뜬다(적대적 리뷰 2라운드, 2026-08-01) ──
+                처음엔 입력을 조건 없이 걷었다. 그러면 **새 공지가 안 생기는 대신 옛 공지가
+                갇힌다**: 저장 경로는 그 값을 계속 보존하고 읽기 화면·PNG 카드는 계속 그리는데,
+                관리자에겐 고치거나 내릴 길이 하나도 없다. 오타가 있든 철 지난 내용이든 영구히
+                공개된 채로 남는 셈이라, "안 쓰기로 했다"가 "손댈 수 없다"가 돼 버린다.
+
+                `baseline.note`(저장된 값)로 가른다 — `draft.note` 로 가르면 **비우는 순간 칸이
+                사라져** 그 편집을 저장할 수도, 되돌릴 수도 없다(자기가 만든 상태에 자기가
+                갇힌다). baseline 은 저장 전까지 안 변하므로 비운 채로도 칸이 남아 있고, 저장이
+                끝나면 그때 사라진다 — 그게 "다 치웠다"는 신호이기도 하다.
+
+                라벨이 "이번 주 공지 (선택)"이 아닌 이유: 이 칸은 이제 **새로 쓰는 자리가
+                아니다.** 무엇을 하는 자리인지가 이름에 있어야 한다. */}
+              {baseline.note.trim() !== "" && (
+                <div className="paper sched-meta__note-box" data-od-id="schedule-note-legacy">
+                  <label className="sched-note" htmlFor="sched-note-input">
+                    <span className="sched-note__label">이미 적어 둔 공지</span>
+                    <input
+                      id="sched-note-input"
+                      className="sched-field"
+                      type="text"
+                      maxLength={500}
+                      value={draft.note}
+                      data-od-id="schedule-note-input"
+                      onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
+                    />
+                  </label>
+                  {/* 안내라 표기가 아니라 문장이고, 합쇼체다(AGENTS). 지우는 법을 말해 두지
+                      않으면 "비워도 되나"를 확신 못 해 그대로 두게 된다. */}
+                  <p className="sched-note__hint">
+                    비우고 저장하면 이 주의 공지가 내려갑니다. 새 공지는 더 쓰지 않습니다.
+                  </p>
+                </div>
+              )}
+
               {/* 팬아트(ADR-0028) — **한 상자다**: 썸네일·버튼·그린이·형식 힌트가 전부 이 안에
             있다(결정 29 — DOM 은 전부터 한 div 였고, 이번엔 그 div 자체에 테두리를 준다).
             **입력 컨트롤이 있으므로 사진지 섬(.polaroid)을 쓰지 않는다**: 그 섬은 다크에서
