@@ -369,8 +369,8 @@ export function ScheduleEditor({
         </header>
 
         {/* ── 2열 골격(결정 24) · 메타 재배치(결정 29, 2026-07-31 개정) ────────────────
-            영역이 셋이다: 미리보기 · 주 메타(공지·팬아트) · 요일 목록. **DOM 순서는
-            `미리보기 → 메타 → 요일`.**
+            영역이 둘이다: 요일 목록 · 오른쪽 곁칸(`sched__aside` = 미리보기 + 주 메타). **DOM
+            순서는 `곁칸(미리보기 → 메타) → 요일`.**
 
             공지·팬아트·작가표기는 셋 다 미리보기 카드에만 그려지는 값이라, 결정 24 초판처럼
             요일 **위**에서 226px 를 먹는 자리(`메타 → 미리보기 → 요일`)는 그 값이 어디로
@@ -378,63 +378,75 @@ export function ScheduleEditor({
             카드의 실제 배치와 좌우를 맞췄다(카드에서 공지는 하단 왼쪽 글, 그림은 오른쪽이다 —
             week-card.tsx 의 .week-card__main·.week-card__art, 아래 sched__meta 참고).
 
+            **미리보기·메타를 `sched__aside` 로 묶어 단일 grid-area 로 만든다**(2026-07-31,
+            codex review 가 잡은 회귀). 처음엔 메타를 `sched__grid` 의 직접 자식으로 두고 요일과
+            같은 두 행에 걸치게 했는데, 그러면 CSS Grid 트랙 크기 계산이 문제가 된다 — `days`
+            가 두 행에 걸쳐 있어 그 콘텐츠가 미리보기+메타 합친 높이보다 커지면(하루를 펼쳐
+            항목을 여럿 넣거나 게임 검색 패널을 열면 쉽게 그렇게 된다) 그 초과분이 두 행에
+            나뉘어 배분돼 미리보기가 있는 첫 행이 부풀고 메타가 미리보기에서 멀리 밀려난다
+            (실측: 항목 4개 + 검색 패널을 연 상태에서 간격 163.77px). 그래서 미리보기·메타를
+            한 겹 감싸 **단일 grid-area** 로 만들고 그 안에서 `flex-direction: column` 으로
+            둘을 쌓는다 — flex 자식의 배치는 grid 트랙 크기와 무관하므로 요일이 아무리
+            길어져도 메타는 항상 미리보기 바로 아래다.
+
             **narrow flow(1300 미만) 순서는 결정 29 코멘트가 제안한 `요일 → 미리보기 → 메타`가
-            아니라 `미리보기 → 메타 → 요일`이다 — 적대적 리뷰가 잡은 회귀다.** 결정 29 는 "하루
-            카드가 접힘 요약(결정 28)이라 이 순서에서도 미리보기가 첫 화면 안에 든다"고
+            아니라 `미리보기 → 메타 → 요일`이다 — 적대적 리뷰가 잡은 또 다른 회귀다.** 결정 29 는
+            "하루 카드가 접힘 요약(결정 28)이라 이 순서에서도 미리보기가 첫 화면 안에 든다"고
             가정했는데, 그 가정은 **모든 날이 접혀 있을 때만** 참이다. 실제 편집은 최소 하루를
             펼쳐야 하고(결정 28 은 한 번에 하나만 열리게 한다), 펼치는 순간 요일 목록이
             534→681px 로 늘어 미리보기가 첫 화면 밖으로 밀린다(실측: 900px 뷰포트에서 미리보기
             top 779→926px, 접힌 채로도 이미 아슬아슬했다). 이건 결정 24 가 막으려던 바로 그
             증상("한참 내려야 보인다")이 요일 목록이 먼저 나오는 순서에서 그대로 재발한 것이다.
 
-            그래서 미리보기를 요일 목록보다 **앞**에 둔다 — 어떤 날을 펼쳐도 미리보기 위치가
-            안 바뀐다. 메타는 여전히 미리보기 바로 다음이라 결정 29 의 "메타가 카드에 붙어
-            있다"는 목표도 그대로 산다.
+            그래서 곁칸(미리보기+메타)을 요일 목록보다 **앞**에 둔다 — 어떤 날을 펼쳐도 곁칸
+            위치가 안 바뀐다. 곁칸 안에서도 미리보기가 메타보다 앞이라 결정 29 의 "메타가
+            카드에 붙어 있다"는 목표가 그대로 산다.
 
-            1300 이상에서만 `grid-template-areas` 로 요일을 왼쪽 열 전체에, 미리보기·메타를
-            오른쪽 열에 위아래로 세운다 — 그 모드는 area 지정이 DOM 순서와 무관해 이 재배치의
-            영향을 안 받는다. 오른쪽 열 안에서도 DOM 순서(미리보기 → 메타)가 그대로 시각
-            순서라 `order` 가 필요 없다.
+            1300 이상에서만 `grid-template-areas` 로 요일을 왼쪽 열에, 곁칸을 오른쪽 열에
+            세운다 — 그 모드는 area 지정이 DOM 순서와 무관해 이 재배치의 영향을 안 받는다.
+            곁칸 안 DOM 순서(미리보기 → 메타)가 그대로 시각 순서라 `order` 가 필요 없다.
 
-            영역을 셋으로 나눈 이유는 결정 24 그대로다: 폼을 한 덩어리로 묶으면 1열에서 미리보기가
-            그 덩어리 뒤로 밀린다. */}
+            영역을 둘로(예전엔 셋으로) 나눈 이유는 결정 24 그대로다: 폼을 한 덩어리로 묶으면
+            1열에서 미리보기가 그 덩어리 뒤로 밀린다 — 다만 이제 그 "덩어리"엔 미리보기·메타가
+            함께 있고 요일만 별도다. */}
         <div className="sched__grid">
-          {/* 넓은 폭에선 오른쪽 열 위 칸에 sticky 로 붙고, 1300 미만에선 요일 목록보다 **앞**에
-              그대로 흐른다(위 sched__grid 주석 참고) — 어떤 날을 펼쳐도(결정 28) 이 위치가
-              안 바뀐다. */}
-          <div className="sched__preview">
-            <WeekCardDownload
-              card={card}
-              weekStartDate={weekStartDate}
-              /* 사유의 **순서가 뜻을 갖는다** — 발행이 먼저다. 미발행 주는 저장을 아무리 해도
-                 못 받으므로 "저장하면 받을 수 있습니다"가 거짓이 된다. */
-              blockedReason={!baseline.published ? "unpublished" : dirty ? "unsaved" : null}
-            />
-          </div>
-
-          {/* ── 주 메타: 공지 · 팬아트(결정 29, 2026-07-31 개정) ──────────────────────
-              둘 다 미리보기 카드에만 그려지는 값이라 그 카드 바로 다음, 카드의 좌우 배치와 맞춘
-              2박스로 세운다 — 카드에서 공지는 하단 왼쪽 글, 그림은 오른쪽이다(week-card.tsx 의
-              .week-card__main·.week-card__art). 폭이 좁아지면(flex-wrap) 공지 → 팬아트 순으로
-              쌓인다 — 읽기 화면의 공지 → 카드 순서와 같은 방향이다. */}
-          <div className="sched__meta">
-            <div className="paper sched-meta__note-box">
-              <label className="sched-note" htmlFor="sched-note-input">
-                <span className="sched-note__label">이번 주 공지 (선택)</span>
-                <input
-                  id="sched-note-input"
-                  className="sched-field"
-                  type="text"
-                  maxLength={500}
-                  placeholder="예: 이번 주는 젤다 위주로 달립니다"
-                  value={draft.note}
-                  data-od-id="schedule-note-input"
-                  onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
-                />
-              </label>
+          <div className="sched__aside">
+            {/* 넓은 폭에선 오른쪽 열 위 칸에 sticky 로 붙고, 1300 미만에선 요일 목록보다 **앞**에
+                그대로 흐른다(위 sched__grid 주석 참고) — 어떤 날을 펼쳐도(결정 28) 이 위치가
+                안 바뀐다. */}
+            <div className="sched__preview">
+              <WeekCardDownload
+                card={card}
+                weekStartDate={weekStartDate}
+                /* 사유의 **순서가 뜻을 갖는다** — 발행이 먼저다. 미발행 주는 저장을 아무리 해도
+                   못 받으므로 "저장하면 받을 수 있습니다"가 거짓이 된다. */
+                blockedReason={!baseline.published ? "unpublished" : dirty ? "unsaved" : null}
+              />
             </div>
 
-            {/* 팬아트(ADR-0028) — **한 상자다**: 썸네일·버튼·그린이·형식 힌트가 전부 이 안에
+            {/* ── 주 메타: 공지 · 팬아트(결정 29, 2026-07-31 개정) ──────────────────────
+                둘 다 미리보기 카드에만 그려지는 값이라 그 카드 바로 다음, 카드의 좌우 배치와
+                맞춘 2박스로 세운다 — 카드에서 공지는 하단 왼쪽 글, 그림은 오른쪽이다
+                (week-card.tsx 의 .week-card__main·.week-card__art). 폭이 좁아지면(flex-wrap)
+                공지 → 팬아트 순으로 쌓인다 — 읽기 화면의 공지 → 카드 순서와 같은 방향이다. */}
+            <div className="sched__meta">
+              <div className="paper sched-meta__note-box">
+                <label className="sched-note" htmlFor="sched-note-input">
+                  <span className="sched-note__label">이번 주 공지 (선택)</span>
+                  <input
+                    id="sched-note-input"
+                    className="sched-field"
+                    type="text"
+                    maxLength={500}
+                    placeholder="예: 이번 주는 젤다 위주로 달립니다"
+                    value={draft.note}
+                    data-od-id="schedule-note-input"
+                    onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              {/* 팬아트(ADR-0028) — **한 상자다**: 썸네일·버튼·그린이·형식 힌트가 전부 이 안에
             있다(결정 29 — DOM 은 전부터 한 div 였고, 이번엔 그 div 자체에 테두리를 준다).
             **입력 컨트롤이 있으므로 사진지 섬(.polaroid)을 쓰지 않는다**: 그 섬은 다크에서
             라이트 토큰을 국소 재선언한 크림 종이라 폼 컨트롤의 테두리·포커스 대비가 거기서
@@ -445,94 +457,95 @@ export function ScheduleEditor({
 
             미리보기는 **실제 서빙 경로**(/api/fanart/…)로 그린다. objectURL 이 아니라 그걸 쓰면
             "저장하면 팬이 볼 그림" 그대로를 보고, 서빙 라우트까지 이 화면에서 함께 검증된다. */}
-            <div
-              className="paper sched-fanart"
-              role="group"
-              aria-labelledby="sched-fanart-label"
-              data-od-id="schedule-fanart"
-            >
-              <span className="sched-note__label" id="sched-fanart-label">
-                팬아트 (선택)
-              </span>
+              <div
+                className="paper sched-fanart"
+                role="group"
+                aria-labelledby="sched-fanart-label"
+                data-od-id="schedule-fanart"
+              >
+                <span className="sched-note__label" id="sched-fanart-label">
+                  팬아트 (선택)
+                </span>
 
-              <div className="sched-fanart__row">
-                {draft.fanartImageKey && (
-                  /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
+                <div className="sched-fanart__row">
+                  {draft.fanartImageKey && (
+                    /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
                  비율이 아니다(읽기 화면은 반대로 실제 치수로 예약한다). */
-                  <img
-                    className="sched-fanart__thumb"
-                    src={`/api/fanart/${draft.fanartImageKey}`}
-                    alt="올린 팬아트"
-                    width={96}
-                    height={96}
-                    data-od-id="schedule-fanart-thumb"
-                  />
-                )}
-                <div className="sched-fanart__acts">
-                  {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
+                    <img
+                      className="sched-fanart__thumb"
+                      src={`/api/fanart/${draft.fanartImageKey}`}
+                      alt="올린 팬아트"
+                      width={96}
+                      height={96}
+                      data-od-id="schedule-fanart-thumb"
+                    />
+                  )}
+                  <div className="sched-fanart__acts">
+                    {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
                   input 이 받고(sr-only 는 clip 이라 포커스가 살아 있다), 링은 아래 CSS 의
                   :focus-within 이 label 에 그린다. */}
-                  <label className="btn btn--secondary sched-fanart__pick">
-                    {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
-                    <input
-                      type="file"
-                      className="sr-only"
-                      accept={FANART_ACCEPT}
-                      disabled={fanartLocked}
-                      data-od-id="schedule-fanart-file"
-                      onChange={onPickFanart}
-                    />
-                  </label>
-                  {draft.fanartImageKey && (
-                    <button
-                      type="button"
-                      className="btn btn--secondary sched-fanart__del"
-                      disabled={fanartLocked}
-                      data-od-id="schedule-fanart-remove"
-                      onClick={() => send({ type: "FANART_REMOVED" })}
-                    >
-                      내리기
-                    </button>
-                  )}
+                    <label className="btn btn--secondary sched-fanart__pick">
+                      {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
+                      <input
+                        type="file"
+                        className="sr-only"
+                        accept={FANART_ACCEPT}
+                        disabled={fanartLocked}
+                        data-od-id="schedule-fanart-file"
+                        onChange={onPickFanart}
+                      />
+                    </label>
+                    {draft.fanartImageKey && (
+                      <button
+                        type="button"
+                        className="btn btn--secondary sched-fanart__del"
+                        disabled={fanartLocked}
+                        data-od-id="schedule-fanart-remove"
+                        onClick={() => send({ type: "FANART_REMOVED" })}
+                      >
+                        내리기
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
+                {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
               그림은 미리 줄여 올려야 한다. 값 칸이라 문장이 아니라 표기다(AGENTS). */}
-              <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
+                <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
 
-              {uploading && (
-                <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">
-                  올리는 중…
-                </p>
-              )}
-              {fanartError && (
-                <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
-                  {fanartError}
-                </p>
-              )}
+                {uploading && (
+                  <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">
+                    올리는 중…
+                  </p>
+                )}
+                {fanartError && (
+                  <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
+                    {fanartError}
+                  </p>
+                )}
 
-              {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
+                {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
               CHECK 가 둘 다 거절하므로, 화면이 애초에 못 만들게 하는 게 가장 조용한 방어다.
               업로드 중에는 잠근다: 성공하면 표기가 비워지므로(새 그림에 옛 이름을 안 붙인다)
               그 사이 타이핑한 값이 사라져 보인다. */}
-              {draft.fanartImageKey && (
-                <label className="sched-note sched-fanart__credit">
-                  <span className="sched-note__label">작가 표기 (선택)</span>
-                  <input
-                    className="sched-field"
-                    type="text"
-                    maxLength={100}
-                    placeholder="그린 사람"
-                    value={draft.fanartCredit}
-                    disabled={uploading}
-                    data-od-id="schedule-fanart-credit"
-                    onChange={(e) =>
-                      send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })
-                    }
-                  />
-                </label>
-              )}
+                {draft.fanartImageKey && (
+                  <label className="sched-note sched-fanart__credit">
+                    <span className="sched-note__label">작가 표기 (선택)</span>
+                    <input
+                      className="sched-field"
+                      type="text"
+                      maxLength={100}
+                      placeholder="그린 사람"
+                      value={draft.fanartCredit}
+                      disabled={uploading}
+                      data-od-id="schedule-fanart-credit"
+                      onChange={(e) =>
+                        send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })
+                      }
+                    />
+                  </label>
+                )}
+              </div>
             </div>
           </div>
 

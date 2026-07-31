@@ -14,10 +14,12 @@
 }
 
 /* ── 편집기의 2열 골격(결정 24) · 메타 재배치(결정 29, 2026-07-31 개정) ───────────
-   영역이 셋이다 — 요일 목록 · 미리보기 · 주 메타(공지·팬아트). 좁은 폭에선 grid 를 아예 안
-   걸어 DOM 순서대로 흐르고(요일 → 미리보기 → 메타 — 결정 29 가 이 순서로 뒤집었다, 왜인지는
+   영역이 둘이다 — 요일 목록 · 오른쪽 곁칸(`.sched__aside` = 미리보기 + 주 메타). 좁은 폭에선
+   grid 를 아예 안 걸어 DOM 순서대로 흐르고(곁칸 → 요일 — 결정 29 가 이 순서로 뒤집었다, 왜인지는
    schedule-editor.tsx 의 같은 자리 주석), 1300 이상에서만 `grid-template-areas` 로 요일을
-   왼쪽 열 전체에 세우고 미리보기·메타를 오른쪽 열에 위아래로 세운다.
+   왼쪽 열에, 곁칸을 오른쪽 열에 세운다. 곁칸은 `.sched__aside` 하나가 grid-area 를 갖고, 그
+   안에서 미리보기·메타가 `flex-direction: column` 으로 쌓인다(왜 별도 grid-area 가 아니라
+   flex 로 감쌌는지는 아래 @media 블록 주석).
 
    ── **1280px 은 새 브레이크포인트다** ────────────────────────────────────────
    kunya-design §5 의 표(860·760·699·600·560·480·430)엔 이보다 넓은 값이 없다. `home.css` 에
@@ -51,50 +53,52 @@
   .sched--edit .sched__grid {
     display: grid;
     /* 편집 열은 400~460 사이에서만 움직인다 — 그 아래면 항목 행(아이콘 44 + 제목 + 삭제 44)이
-       빡빡하고, 그 위로 넓히면 미리보기가 그만큼 작아진다. 남는 폭은 전부 미리보기·메타가 갖는다. */
+       빡빡하고, 그 위로 넓히면 곁칸이 그만큼 작아진다. 남는 폭은 전부 곁칸이 갖는다. */
     grid-template-columns: minmax(400px, 460px) 1fr;
-    /* **결정 29 개정** — 메타가 요일 옆(왼쪽 열)에서 미리보기 아래(오른쪽 열)로 옮겼다. `days`
-       가 두 행에 걸쳐 있는 건 그대로다(요일 목록 하나가 왼쪽 열 전체를 쓴다는 뜻일 뿐, 실제
-       높이는 그 목록 자신의 콘텐츠가 정한다 — 아래 `align-items: start` 참고). */
-    grid-template-areas:
-      "days preview"
-      "days meta";
-    /* 행 높이: 미리보기·메타는 각자 내용만, 왼쪽 요일 목록은 그 둘을 합친 높이 안에서 위로
-       붙는다(`align-items: start`). `auto 1fr` 을 안 쓰는 이유 — 목록이 길면 1fr 이 그 길이가
-       되어 결국 같고, 짧으면 억지로 늘어나 카드 사이가 벌어진다. */
-    grid-template-rows: auto auto;
-    /* row-gap 이 0 이 아니게 된 건 이번이 처음이다 — 예전엔 "meta"·"days" 가 같은(왼쪽) 열의
-       위아래 행이라 그 사이 간격을 각 컴포넌트의 margin-bottom 이 직접 정했다. 이제 위아래로
-       쌓이는 건 "preview"·"meta"(오른쪽 열)이고, `days` 는 그 두 행에 걸쳐 있지만
-       `align-items: start` 로 자기 콘텐츠 높이만큼만 차지해 이 gap 을 안 겪는다 — 그래서 여기서
-       gap 을 올려도 왼쪽 요일 목록엔 빈 틈이 안 생긴다. */
-    gap: var(--space-5) var(--space-6);
+    /* **단일 행 — 곁칸(미리보기+메타)을 하나의 grid-area 로 묶는다**(2026-07-31, codex review
+       가 잡은 회귀). 처음엔 "days preview" / "days meta" 두 행으로 짜서 메타를 미리보기 아래
+       별도 area 로 뒀는데, `days` 가 두 행에 걸치는 순간 CSS Grid 트랙 크기 계산이 깨진다:
+       `days` 콘텐츠가 미리보기+메타 합친 높이보다 커지면(하루를 펼쳐 항목을 여럿 넣거나 게임
+       검색 패널을 열면 쉽게 그렇게 된다) 그 초과분이 두 행에 나뉘어 배분돼 미리보기가 있는
+       첫 행이 부풀고 메타가 미리보기에서 멀리 밀려난다(실측: 항목 4개 + 검색 패널을 연 상태에서
+       간격 163.77px). 이 grid 를 진짜 단일 행으로 만들면 그 트랙 배분 자체가 없어진다 —
+       `days` 가 아무리 길어져도 곁칸 내부(아래 `.sched__aside`)엔 영향이 없다. */
+    grid-template-areas: "days aside";
+    gap: 0 var(--space-6);
+    /* `days`·`aside` 가 서로 다른 높이라도 각자 자기 콘텐츠 높이로 위에 붙는다 — 없으면 기본
+       `stretch` 가 짧은 쪽을 긴 쪽 높이까지 늘려 그 안(`.sched__aside`)에 빈 여백이 생긴다. */
     align-items: start;
   }
   .sched--edit .sched__days {
     grid-area: days;
   }
-  /* **`align-self: start` 가 없으면 sticky 가 조용히 안 먹는다.** grid 아이템의 기본
-     `align-items: stretch` 는 이 열을 행 전체 높이(= 왼쪽 목록 높이)만큼 늘리고, 그러면 sticky
-     가 붙을 스크롤 여유가 0 이라 카드가 그냥 같이 흘러간다 — 오류도 경고도 없이 "sticky 가 안
-     된다"로만 보인다. 위 `align-items: start` 로 이미 걸리지만, 이 규칙이 그 값에 딸린
-     전제라는 걸 여기 적어 둔다(위를 바꾸면 여기가 깨진다).
+  /* 곁칸 자신은 grid-area 하나일 뿐이고, 그 **안**에서 미리보기·메타를 세로로 쌓는 건 flex 다
+     (기본 규칙, media 쿼리 밖 — narrow flow 에서도 같은 flex 라 간격 값이 갈리지 않는다). flex
+     자식의 배치는 grid 트랙 크기 계산과 완전히 무관하므로 `days` 열이 아무리 길어져도 메타는
+     항상 미리보기 바로 아래다 — 위 `sched__grid` 주석이 잡은 회귀의 실제 해법은 여기 있다. */
+  .sched--edit .sched__aside {
+    grid-area: aside;
+  }
+  /* **`align-items: start`(grid, 위)가 없으면 sticky 가 조용히 안 먹는다.** grid 아이템의 기본
+     `stretch` 는 곁칸을 왼쪽 요일 목록과 같은 높이로 늘리고, 그러면 sticky 가 붙을 스크롤
+     여유가 곁칸 내부에 생겨 버려 미리보기가 카드+메타 조합 전체 높이만큼 떠다니려 한다 —
+     오류도 경고도 없이 "sticky 범위가 이상하다"로만 보인다. 위 grid 규칙으로 이미 걸리지만,
+     이 규칙이 그 값에 딸린 전제라는 걸 여기 적어 둔다(위를 바꾸면 여기가 깨진다).
 
-     `top` 은 nav(sticky, 실측 69px)를 비켜야 카드 윗변이 그 아래로 안 들어간다. **메타는 sticky
-     가 아니다** — 미리보기까지 붙여 두면 짧은 창에서 메타 아래가 잘린다(결정 29). */
+     `top` 은 nav(sticky, 실측 69px)를 비켜야 카드 윗변이 그 아래로 안 들어간다. **메타는
+     sticky 가 아니다** — 미리보기까지 붙여 두면 짧은 창에서 메타 아래가 잘린다(결정 29).
+     sticky 의 포함 블록은 이제 `.sched__aside`(flex 컨테이너)다 — grid 직계 자식이었을 때와
+     같은 규칙(포함 블록의 콘텐츠 높이만큼만 "떠 있을" 여유가 생긴다)이 flex 에서도 그대로
+     적용된다. **대가**: 곁칸 자체가 미리보기+메타 높이(~700px대)로 짧아졌으니 사진지가 긴
+     요일 목록을 끝까지 따라다니진 않는다 — 이전(main, 메타가 왼쪽 열에 있던 시절)엔 미리보기가
+     요일+메타를 합친 두 행에 걸쳐 있어 그 범위가 훨씬 길었다. 그 범위를 그대로 지키려면
+     `days` 와 다시 같은 트랙을 걸쳐야 하는데, 그러면 바로 위에서 고친 회귀가 재발한다 — 짧아진
+     sticky 범위를 수용하는 쪽을 택했다(어느 리뷰도 이 지점은 지적하지 않았다). */
   .sched--edit .sched__preview {
-    grid-area: preview;
     position: sticky;
     top: calc(var(--nav-h) + var(--space-4));
-    align-self: start;
   }
   .sched--edit .sched__preview .week-card-download {
-    margin-top: 0;
-  }
-  /* 메타 아래 서식(narrow-flow, 아래 base 규칙)이 여기선 필요 없다 — 위 `gap` 이 이미
-     preview→meta 간격을 준다. 그대로 두면 이중으로 붙는다. */
-  .sched--edit .sched__meta {
-    grid-area: meta;
     margin-top: 0;
   }
 }
@@ -173,19 +177,25 @@
   border-radius: var(--radius-sm);
 }
 
+/* ── 편집기 오른쪽 곁칸: 미리보기 + 주 메타(결정 29 개정, 2026-07-31 회귀 수정) ─────
+   `.sched__aside` 가 미리보기·메타를 `flex-direction: column` 으로 쌓는다 — narrow flow
+   (1300 미만)·wide grid(1300 이상) 양쪽에서 이 규칙 하나만 적용돼 간격이 갈리지 않는다(위
+   sched__grid 의 @media 주석 참고 — 왜 메타를 별도 grid-area 가 아니라 이 flex 로 감쌌는지). */
+.sched__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
 /* ── 편집기의 주 메타: 공지 · 팬아트 2박스(결정 29, 2026-07-31 개정) ────────────
    둘 다 미리보기 카드에만 그려지는 값이라 그 카드 바로 아래, 카드의 좌우 배치(공지 왼쪽·그림
    오른쪽)와 맞춘 2박스로 나란히 세운다. `flex-wrap` 으로 폭이 좁아지면 자연히 위아래로 쌓인다
-   — 이 화면 전용 폭이라 새 브레이크포인트를 안 만든다(kunya-design §5, "감축 경로").
-
-   narrow flow(1300 미만)에선 이 블록이 미리보기 **바로 아래**로 오므로 그 사이 간격은 여기
-   margin-top 이 준다. 1300 이상(grid)에선 grid gap 이 그 역할을 대신하므로 위 media 쿼리가
-   이 값을 0 으로 되돌린다(안 그러면 이중으로 붙는다). */
+   — 이 화면 전용 폭이라 새 브레이크포인트를 안 만든다(kunya-design §5, "감축 경로"). 미리보기와의
+   간격은 부모 `.sched__aside` 의 flex gap 이 준다 — 이 자신엔 더 안 붙인다. */
 .sched__meta {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
-  margin-top: var(--space-6);
 }
 /* 두 박스는 `.paper`(--surface + 테두리 + 그림자)를 그대로 쓴다(kunya-design §3, "있는 부품을
    쓴다") — `.sched-day` 카드가 이미 같은 표면 위에 `.sched-field`(--border-strong)를 얹어
