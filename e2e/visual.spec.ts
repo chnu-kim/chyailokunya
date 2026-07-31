@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openDay } from "./schedule-helpers";
 import { expectSignedIn, signIn } from "./session";
 
 /* 시각 스냅샷 베이스라인 — 3페이지 × 라이트/다크. 이 사이트는 prefers-color-scheme 가 아니라
@@ -184,7 +185,14 @@ for (const theme of ["light", "dark"] as const) {
    안에 절대 안 들어가게 한다 — 간헐 실패를 설계로 없앤다.
 
    상태를 손으로 만든다(공지 · 항목 둘 · 휴방 하나): 빈 주를 찍으면 이번 개편이 바꾼 것들이
-   그림에 거의 안 나온다 — 항목 행도 잠금도 카드 내용도 전부 "무언가 들어 있을 때" 생긴다. */
+   그림에 거의 안 나온다 — 항목 행도 잠금도 카드 내용도 전부 "무언가 들어 있을 때" 생긴다.
+
+   **이 베이스라인이 담는 아코디언 상태(결정 28, 2026-07-31 후속) — 재생성 전에 꼭 읽는다:**
+   한 번에 하나만 펼쳐지므로 월·화·수를 순서대로 열어 각자 항목을 채우면 앞서 연 날은 자동으로
+   접힌다. **마지막에 연 수요일(index 2)만 펼쳐진 채로 찍힌다** — 휴방 잠금(점선 + 흐림 + 안내)이
+   패널 안에만 있어 접히면 그 디테일이 그림에서 사라지기 때문이다. 월·화는 접힌 요약 줄에 채운
+   제목이 그대로 보인다(결정 28 이 지키는 "요약도 draft 를 그린다" 계약). 이 스펙을 손보다 순서를
+   바꾸면 어느 날이 펼쳐진 채 굽히는지도 같이 바뀐다 — `e2e:visual:update` 전에 이 문단부터 고친다. */
 for (const theme of ["light", "dark"] as const) {
   test(`시각: 주간 일정 편집기 · ${theme}`, async ({ page, baseURL }) => {
     await page.addInitScript((t) => {
@@ -207,14 +215,20 @@ for (const theme of ["light", "dark"] as const) {
     await page.locator('[data-od-id="schedule-note-input"]').fill("이번 주는 건축 위주로 갑니다");
     const add = page.locator('[data-od-id^="schedule-day-add-"]');
     const titles = page.locator('[data-od-id^="schedule-entry-title-"]');
+    // 한 번에 하나만 열리므로(결정 28) 날마다 openDay 로 편 뒤 그 안의 유일한 add·title 을
+    // .first() 로 잡는다 — 열려 있는 패널이 하나뿐이라 인덱스(nth)가 필요 없어졌다.
+    await openDay(page, 0);
     await add.first().click();
     await titles.first().fill("마인크래프트 — 건축 계속");
-    await add.nth(1).click();
-    await titles.nth(1).fill("저챗");
-    // 휴방 잠금(점선 + 흐림 + 안내)이 그림에 들도록 항목이 있는 날을 쉬게 한다.
-    await add.nth(2).click();
-    await titles.nth(2).fill("이 항목은 안 나갑니다");
-    await page.locator('[data-od-id^="schedule-day-rest-"]').nth(2).check();
+    await openDay(page, 1);
+    await add.first().click();
+    await titles.first().fill("저챗");
+    // 휴방 잠금(점선 + 흐림 + 안내)이 그림에 들도록 항목이 있는 날을 쉬게 하고, 이 날을 편
+    // 채로 찍는다(위 파일 상단 주석 참고).
+    await openDay(page, 2);
+    await add.first().click();
+    await titles.first().fill("이 항목은 안 나갑니다");
+    await page.locator('[data-od-id^="schedule-day-rest-"]').first().check();
 
     /* 카드가 입력을 실제로 따라왔는지 보고 찍는다 — 안 기다리면 옛 상태가 구워져, 이 장이
        지키려는 계약("미리보기가 편집 중인 값을 그린다")을 정작 스냅샷이 안 담는다. */

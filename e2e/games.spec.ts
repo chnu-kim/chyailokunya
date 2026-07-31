@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openDay } from "./schedule-helpers";
 import { expectSignedIn, signIn } from "./session";
 
 /* 게임 보드는 D1 에서 서버가 읽어 렌더한다(Phase 3). 데이터는 globalSetup 이 심은 결정적
@@ -201,6 +202,8 @@ test("관리자: 여러 날 편성 게임도 저장이 통과한다", async ({ p
 
   await page.goto("/schedule?week=2026-02-16");
   await expectSignedIn(page);
+  // 결정 28 — 조작은 전부 펼친 패널 안이다. 먼저 그 날을 편다.
+  await openDay(page, "2026-02-17");
   await page.locator('[data-od-id="schedule-day-add-2026-02-17"]').click();
   const day = page.locator('[data-od-id="schedule-day-2026-02-17"]');
   await day.locator('[data-od-id^="schedule-entry-title-"]').fill("엘든 링 1일차");
@@ -230,6 +233,7 @@ test("관리자: 여러 날 편성 게임도 저장이 통과한다", async ({ p
   /* 그리고 일정은 그대로다 — 저장이 날짜를 지우거나 옮기면 안 된다. 서버가 거절하지 않고
      통과했다면 여기 항목이 사라지거나 다른 날로 옮겨 간다. */
   await page.goto("/schedule?week=2026-02-16");
+  await openDay(page, "2026-02-17");
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveValue("엘든 링 1일차");
 });
 

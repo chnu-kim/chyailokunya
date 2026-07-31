@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { expect, test, type APIRequestContext, type Browser } from "@playwright/test";
+import { openDay } from "./schedule-helpers";
 import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
 /* 팬아트 업로드·서빙 라우트(ADR-0028). 파일 바이트가 오가는 경계라 tRPC 단위 테스트가 못 닿는다
@@ -187,7 +188,8 @@ test("관리자가 올린 그림을 저장·발행하면 팬이 그걸 본다", 
   await page.goto(`/schedule?week=${FANART_WEEK}`);
   await expectSignedIn(page);
 
-  // 빈 주는 발행할 수 없다(결정 22) — 항목을 하나 만들어 둔다.
+  // 빈 주는 발행할 수 없다(결정 22) — 항목을 하나 만들어 둔다. 결정 28 이후 조작은 패널 안이다.
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("팬아트 주");
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import type { WeekView } from "@/features/schedule/service";
 import { ScheduleEditor } from "./schedule-editor";
 
@@ -12,7 +12,10 @@ import { ScheduleEditor } from "./schedule-editor";
 
    그래서 **제목이 게임명을 대신 말하지 못할 때만** 행 아래에 연결을 적는다. 이 스펙은 그 두
    갈래를 모두 잰다 — 한쪽만 재면 "항상 적는다"로 바뀌어도(아이콘화로 얻은 자리를 도로 내주는
-   변경) 초록이다. */
+   변경) 초록이다.
+
+   **하루 칸 아코디언(결정 28, 2026-07-31 후속)** — 항목 행이 패널 안으로 내려가 접힌 상태에선
+   DOM 에 없다. `renderWith` 가 렌더 직후 그 날의 요약 줄을 눌러 펼친다. */
 
 vi.mock("@/features/trpc/client", () => ({
   trpc: {
@@ -63,6 +66,10 @@ function renderWith(title: string) {
       currentWeek={WEEK_START}
       today={OTHER_WEEK}
     />,
+  );
+  // 접힌 요약 줄부터 연다(결정 28) — 항목 행은 패널 안이라 열기 전엔 DOM 에 없다.
+  fireEvent.click(
+    container.querySelector<HTMLButtonElement>(`[data-od-id="schedule-day-toggle-${WEEK_START}"]`)!,
   );
   return {
     linked: container.querySelector('[data-od-id="schedule-entry-linked-db-1"]'),
