@@ -120,6 +120,25 @@ describe("scheduleSaveMachine — 편집 이벤트(순수 전이의 얇은 배�
     actor.send({ type: "ENTRY_REMOVED", key: "a" });
     expect(actor.getSnapshot().context.draft.entries.map((e) => e.key)).toEqual(["b"]);
   });
+
+  /* 결정 30 — DAY_PATCHED 는 setDay 를 그대로 배선한 것이라, 휴방을 켜는 전이에서 그날의
+     빈 제목 항목이 지워지는 것도 머신 레벨에서 관찰돼야 한다(schedule-editor.test.ts 가
+     순수 함수 레벨을 이미 못박았다 — 여기는 그 배선이 새지 않는지를 본다). */
+  it("DAY_PATCHED 로 휴방을 켜면 그날의 빈 제목 항목이 지워진다", () => {
+    const seeded = draft({
+      entries: [
+        makeDraftEntry("blank", "2027-01-04"), // 제목 기본값 "" — 빈 항목
+        { ...makeDraftEntry("filled", "2027-01-05"), title: "젤다" },
+      ],
+    });
+    const actor = start({
+      run: async () => ({ draft: draft(), revision: null }),
+      initialDraft: seeded,
+    });
+    actor.send({ type: "DAY_PATCHED", date: "2027-01-04", patch: { rest: true } });
+    const entries = actor.getSnapshot().context.draft.entries;
+    expect(entries.map((e) => e.key)).toEqual(["filled"]);
+  });
 });
 
 describe("scheduleSaveMachine — SAVE 계약", () => {
@@ -145,6 +164,30 @@ describe("scheduleSaveMachine — SAVE 계약", () => {
     expect(calls).toBe(0);
     expect(actor.getSnapshot().context.error).toContain("월요일");
     expect(actor.getSnapshot().context.error).toContain("제목이 없습니다");
+  });
+
+  /* 결정 30 — 이 테스트가 고치는 라이브 결함이다. 예전엔 빈 줄이 있는 날을 휴방으로 켜도
+     firstBlankTitleEntry 가 여전히 그 항목을 걸어 SAVE 를 막았고, 오류 문구가 안내하는
+     "제목을 채우거나"는 휴방이라 입력칸이 잠겨 있어 막다른 골목이었다(AGENTS "잠금은 빠져나갈
+     길을 하나는 남긴다"). */
+  it("빈 줄이 있는 날을 휴방으로 켜면 저장이 더는 막히지 않는다(라이브 저장 차단 해소)", async () => {
+    let calls = 0;
+    const seeded = draft({
+      entries: [makeDraftEntry("a", "2027-01-04")], // 월요일 — 제목 기본값 "" (빈 항목)
+    });
+    const actor = start({
+      run: async () => {
+        calls += 1;
+        return { draft: draft(), revision: 1 };
+      },
+      initialDraft: seeded,
+    });
+    actor.send({ type: "DAY_PATCHED", date: "2027-01-04", patch: { rest: true } });
+    actor.send({ type: "SAVE" });
+    expect(actor.getSnapshot().value).toBe("saving"); // ready 에 안 머문다 — 가드에 안 걸린다
+    await waitFor(actor, (s) => s.matches("ready") && s.context.revision === 1);
+    expect(calls).toBe(1);
+    expect(actor.getSnapshot().context.error).toBe("");
   });
 
   it("제목을 채우면 다시 SAVE 가 정상 진행된다", async () => {

@@ -717,6 +717,43 @@ test("관리자: 제목이 빈 항목이 있으면 저장이 막히고 요일을
   await expect(save).toHaveText("저장됨");
 });
 
+/* 결정 30(이슈 #56) — 라이브 저장 차단 해소. 결정 27 은 휴방인 날에도 삭제만은 열어 뒀지만
+   ("빈 제목이 저장을 막는 막다른 골목을 막는다"), 저장이 막히는 사실 자체는 그대로였다 — 오류
+   문구가 안내하는 "제목을 채우거나"는 휴방이라 입력칸이 잠겨 있어 실행할 수 없는 길이었다.
+   이제 휴방을 켜는 순간 그날의 빈 제목 항목이 **자동으로** 지워져, 사람이 따로 삭제하지 않아도
+   저장이 막히지 않는다. */
+test("관리자: 빈 항목이 있는 날을 휴방으로 켜면 그 항목이 지워지고 저장이 막히지 않는다(결정 30)", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 읽는 먼 미래 주 — 2035-03-05 는 월요일.
+  await page.goto("/schedule?week=2035-03-05");
+
+  const dateId = "2035-03-05";
+  await page.locator(`[data-od-id="schedule-day-add-${dateId}"]`).click();
+  const title = page.locator('[data-od-id^="schedule-entry-title-"]').first();
+  await expect(title).toHaveValue(""); // 빈 제목 그대로 둔다 — 정리 대상을 만든다.
+
+  await page.locator(`[data-od-id="schedule-day-rest-${dateId}"]`).check();
+
+  // 자동으로 지워진다 — 사람이 따로 삭제 버튼을 누를 필요가 없다.
+  await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveCount(0);
+
+  const save = page.locator('[data-od-id="schedule-save"]');
+  await expect(save).toBeEnabled(); // 휴방 전환 자체가 저장할 값이라 dirty 다.
+  await save.click();
+  // 예전엔 여기서 firstBlankTitleEntry 가드에 걸려 ready 에 그대로 머물렀다(요일을 짚은
+  // 오류가 떴다) — 이제 항목이 이미 지워졌으므로 서버까지 나가 성공한다.
+  await expect(save).toHaveText("저장됨");
+  await expect(page.locator('[data-od-id="schedule-save-error"]')).toHaveCount(0);
+
+  // 되읽기: 새로고침해도 휴방만 남고 빈 항목은 되살아나지 않는다.
+  await page.reload();
+  await expect(page.locator(`[data-od-id="schedule-day-rest-${dateId}"]`)).toBeChecked();
+  await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveCount(0);
+});
+
 /* 게임 인라인 검색·추가(이슈 #56 결정 11·19, 2026-07-28 구현). 로컬 매치(보드에 이미 있는
    게임)와 치지직 신규 추가 두 경로를 모두 본다. 치지직 검색은 가로챈다(games-composer.spec.ts
    와 같은 근거 — .dev.vars.e2e 엔 치지직 자격증명이 없다). */

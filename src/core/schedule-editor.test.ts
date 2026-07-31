@@ -94,6 +94,50 @@ describe("하루 속성 — 시각·휴방", () => {
   });
 });
 
+describe("휴방을 켜는 순간 빈 항목을 지운다 — 결정 30(라이브 저장 차단 해소)", () => {
+  it("제목도 게임도 없는 자리표시자만 지운다 — 제목이 채워진 항목은 잠긴 채 보존된다", () => {
+    const d0 = draft({
+      entries: [
+        entry("blank", { title: "  " }), // 공백만, 게임도 없음 — 지워진다
+        entry("filled", { title: "젤다" }), // 채워짐 — 보존
+      ],
+    });
+    const d1 = setDay(d0, MON, { rest: true });
+    expect(d1.entries.map((e) => e.key)).toEqual(["filled"]);
+  });
+
+  /* codex adversarial-review 지적(2026-07-31) — 초판은 title 만 보고 지웠는데, 제목 입력이
+     title 필드만 patch 하므로(schedule-editor.tsx) 게임을 연결한 뒤 제목만 지우는 조합이
+     실제로 가능하다. 그 항목까지 지우면 게임 연결이 화면 신호 없이 사라진다 — "빈 항목"은
+     제목이 아니라 **내용**(제목 또는 게임)이 없는가로 판단해야 한다. */
+  it("제목은 비었어도 게임이 연결된 항목은 지우지 않는다 — 게임 연결도 내용이다", () => {
+    const d0 = draft({ entries: [entry("linked", { title: "", gameId: 7 })] });
+    const d1 = setDay(d0, MON, { rest: true });
+    expect(d1.entries.map((e) => e.key)).toEqual(["linked"]);
+  });
+
+  it("다른 날 항목은 안 건드린다", () => {
+    const d0 = draft({ entries: [entry("other", { scheduledDate: WED, title: "" })] });
+    const d1 = setDay(d0, MON, { rest: true });
+    expect(d1.entries.map((e) => e.key)).toEqual(["other"]);
+  });
+
+  it("이미 휴방인 날에 다시 rest:true 를 보내도 멱등이다(전이가 아니라 유지)", () => {
+    const on = setDay(draft(), MON, { rest: true });
+    const onAgain = setDay(on, MON, { rest: true });
+    expect(onAgain.entries).toEqual(on.entries);
+  });
+
+  it("휴방을 끄는 전이는 지우지 않는다 — 지우는 대상은 '켜는' 전이뿐이다", () => {
+    const d0 = draft({ entries: [entry("blank", { title: "" })] });
+    const on = setDay(d0, MON, { rest: true }); // 켜는 전이 — 지워진다
+    expect(on.entries).toHaveLength(0);
+    const off = setDay(on, MON, { rest: false });
+    // 이미 지워졌으니 끄는 전이에서 새로 지울 것도 없다 — 빈 배열 그대로.
+    expect(off.entries).toHaveLength(0);
+  });
+});
+
 describe("항목 전이", () => {
   it("addEntry 는 원본을 안 건드리고 새 배열을 낸다", () => {
     const d0 = draft();
@@ -151,6 +195,20 @@ describe("firstBlankTitleEntry — 저장 전 가드", () => {
       ],
     });
     expect(firstBlankTitleEntry(d)?.key).toBe("b");
+  });
+
+  /* 결정 30 — 휴방인 날도 이 가드를 안 건너뛴다(초판은 건너뛰게 했다가 codex adversarial-review
+     지적으로 되돌렸다). setDay 가 "아직 아무것도 아닌" 자리표시자는 휴방을 켜는 순간 이미
+     지우므로, 정상 경로로 휴방인 날에 남는 빈 제목 항목은 **게임은 연결됐지만 제목만 지운**
+     항목뿐이다 — 그 항목을 가드가 안 잡으면 draftEntryInputs 가 title 만 보고 걸러내 게임
+     연결이 화면 신호 없이 사라진다. 휴방이어도 삭제는 결정 27 부터 열려 있으므로, 가드가
+     막아도 막다른 골목이 아니라 "지워야 한다"는 정확한 안내다. */
+  it("휴방인 날도 안 건너뛴다 — 게임은 연결됐지만 제목만 지운 항목은 계속 걸린다", () => {
+    const d = draft({
+      days: { [MON]: { startTime: "", rest: true } },
+      entries: [entry("linked", { title: "", gameId: 7 })],
+    });
+    expect(firstBlankTitleEntry(d)?.key).toBe("linked");
   });
 });
 
