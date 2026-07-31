@@ -731,6 +731,8 @@ test("관리자: 빈 항목이 있는 날을 휴방으로 켜면 그 항목이 �
   await page.goto("/schedule?week=2035-03-05");
 
   const dateId = "2035-03-05";
+  // 결정 28 이후 조작은 전부 패널 안이다(openDay).
+  await openDay(page, dateId);
   await page.locator(`[data-od-id="schedule-day-add-${dateId}"]`).click();
   const title = page.locator('[data-od-id^="schedule-entry-title-"]').first();
   await expect(title).toHaveValue(""); // 빈 제목 그대로 둔다 — 정리 대상을 만든다.
@@ -748,8 +750,10 @@ test("관리자: 빈 항목이 있는 날을 휴방으로 켜면 그 항목이 �
   await expect(save).toHaveText("저장됨");
   await expect(page.locator('[data-od-id="schedule-save-error"]')).toHaveCount(0);
 
-  // 되읽기: 새로고침해도 휴방만 남고 빈 항목은 되살아나지 않는다.
+  // 되읽기: 새로고침해도 휴방만 남고 빈 항목은 되살아나지 않는다. 새로고침은 아코디언도
+  // 접힌 채로 되돌리므로 다시 편다.
   await page.reload();
+  await openDay(page, dateId);
   await expect(page.locator(`[data-od-id="schedule-day-rest-${dateId}"]`)).toBeChecked();
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveCount(0);
 });
