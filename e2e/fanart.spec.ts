@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { expect, test, type APIRequestContext, type Browser } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type Locator } from "@playwright/test";
 import { openDay } from "./schedule-helpers";
 import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
@@ -264,6 +265,239 @@ test("관리자가 올린 그림을 저장·발행하면 팬이 그걸 본다", 
   expect(docHeight).toBeLessThan(4000);
 
   await fanContext.close();
+  await admin.close();
+});
+
+/* ── 슬롯 하나, 두 상태(결정 36, 2026-08-01) ────────────────────────────────────
+   화면 계약이라 라우트 테스트가 아니라 브라우저로 본다. 세 가지를 잰다:
+
+   1. **두 상태가 서로를 대체한다** — 빈 드롭존과 그림이 동시에 안 선다. 슬롯 자체는 그대로다.
+   2. **✕ 는 항상 DOM 에 있고 호버·키보드 포커스에서 드러난다.** `display:none` 으로 감추면
+      키보드 포커스가 아예 안 가고 호버 없는 기기엔 없는 것과 같다 — 그 경계를 opacity 로
+      재야 "감춘 것"과 "지운 것"이 갈린다.
+   3. **파일을 떨구면 업로드가 난다.** `onDragOver` 의 `preventDefault()` 를 빠뜨리면 브라우저
+      기본값이 "받지 않음"이라 drop 이 아예 안 나는데, 화면엔 아무 신호가 없다.
+
+   다른 스펙이 안 읽는 먼 주를 쓰고 **저장하지 않는다** — 업로드는 R2 에만 닿고 이 주의 D1
+   행은 안 만든다(공유 픽스처를 안 건드린다). */
+const SLOT_WEEK = "2039-02-07";
+
+/* `dragover` 가 취소됐나 — `dispatchEvent` 는 `preventDefault()` 가 불렸으면 false 를 돌려준다.
+   함수를 돌려주는 이유는 `expect.poll` 이 매번 다시 부르게 하기 위해서다(하이드레이션 대기). */
+const dragoverPrevented = (slot: Locator) => () =>
+  slot.evaluate(
+    (el) => !el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true })),
+  );
+
+test("관리자: 팬아트 슬롯이 빈 드롭존 ↔ 그림 + ✕ 로 갈아탄다", async ({ browser, baseURL }) => {
+  const admin = await contextAs(browser, baseURL!);
+  const page = await admin.newPage();
+  await page.goto(`/schedule?week=${SLOT_WEEK}`);
+  await expectSignedIn(page);
+
+  const slot = page.locator('[data-od-id="schedule-fanart-slot"]');
+  const thumb = page.locator('[data-od-id="schedule-fanart-thumb"]');
+  const x = page.locator('[data-od-id="schedule-fanart-remove"]');
+  const emptyText = slot.getByText("그림을 끌어 놓거나 눌러서 고릅니다");
+
+  // 빈 상태 — 드롭존 문구가 있고 그림·✕ 는 **아예 없다**(감춘 게 아니라 없다).
+  await expect(emptyText).toBeVisible();
+  await expect(thumb).toHaveCount(0);
+  await expect(x).toHaveCount(0);
+  const emptyBox = (await slot.boundingBox())!;
+
+  await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(FANART_PNG);
+  await expect(thumb).toBeVisible();
+  // 채워지면 드롭존 문구가 사라진다 — 둘이 동시에 서면 "슬롯 하나"가 거짓이 된다.
+  await expect(emptyText).toHaveCount(0);
+  // 그런데 슬롯의 자리는 그대로다 — 그래야 아래 힌트·표기 칸이 안 튄다.
+  const filledBox = (await slot.boundingBox())!;
+  expect(filledBox.width).toBe(emptyBox.width);
+  expect(filledBox.height).toBe(emptyBox.height);
+
+  /* ✕ 는 DOM 에 **있고**(count 1) 평소엔 안 보인다. `toBeHidden()` 은 opacity 를 안 보므로
+     (Playwright 의 visible 판정에 opacity 는 안 든다) computed style 을 직접 읽는다. */
+  await expect(x).toHaveCount(1);
+  const opacity = () => x.evaluate((el) => getComputedStyle(el).opacity);
+  await expect.poll(opacity, { message: "평소엔 안 보인다" }).toBe("0");
+  await slot.hover();
+  await expect.poll(opacity, { message: "호버에서 드러난다" }).toBe("1");
+
+  // 키보드로도 닿는다 — 호버가 없는 사람에게 이게 유일한 길이다.
+  await page.mouse.move(0, 0);
+  await expect.poll(opacity).toBe("0");
+  await x.focus();
+  await expect.poll(opacity, { message: "포커스에서 드러난다" }).toBe("1");
+
+  // 내리면 빈 드롭존으로 되돌아온다.
+  await x.click();
+  await expect(thumb).toHaveCount(0);
+  await expect(emptyText).toBeVisible();
+
+  await admin.close();
+});
+
+test("관리자: 슬롯에 파일을 떨구면 업로드가 난다", async ({ browser, baseURL }) => {
+  const admin = await contextAs(browser, baseURL!);
+  const page = await admin.newPage();
+  await page.goto(`/schedule?week=${SLOT_WEEK}`);
+  await expectSignedIn(page);
+
+  const slot = page.locator('[data-od-id="schedule-fanart-slot"]');
+
+  /* **`dragover` 를 취소하는지부터 잰다.** 브라우저 기본값이 "받지 않음"이라 `preventDefault()`
+     를 빠뜨리면 진짜 드래그에선 `drop` 이 아예 안 나는데 화면엔 아무 신호가 없다.
+
+     그런데 아래 `dispatchEvent` 로는 그걸 못 잡는다 — 합성 이벤트는 브라우저 기본 동작을 안
+     타서 `dragover` 를 취소하든 말든 `drop` 핸들러가 그대로 불린다(실측: `preventDefault()`
+     를 지워도 이 스펙이 초록이었다). 그래서 **취소 자체를 값으로 읽는다**: `dispatchEvent` 는
+     `preventDefault()` 가 불렸으면 false 를 돌려준다. */
+  /* **`expect.poll` 로 재시도한다 — 하이드레이션 경합 때문이다.** 서버가 그린 마크업엔 아직
+     핸들러가 안 붙어 있어, 붙기 전에 쏘면 아무도 안 받아 `dispatchEvent` 가 true(안 취소됨)를
+     돌려준다. 로컬은 dev 서버가 더워 늘 늦지 않았고 **CI 에서만 빨갛게 났다** — 앱 결함이
+     아니라 시점 문제라 단언을 낮추지 않고 기다린다. */
+  await expect
+    .poll(dragoverPrevented(slot), { message: "dragover 를 취소해야 진짜 드래그에서 drop 이 난다" })
+    .toBe(true);
+
+  /* **자식 위를 지나는 `dragleave` 로는 강조가 안 꺼진다.** `dragleave` 는 안쪽 요소로 옮겨
+     갈 때도 나므로, 거르지 않으면 드롭존 안의 아이콘 위를 지나는 순간 강조가 깜빡인다.
+     `relatedTarget` 이 이 상자 안인지로 가른다.
+
+     **이건 dom 단위가 구조적으로 못 본다** — happy-dom 의 합성 드래그 이벤트는 `relatedTarget`
+     을 안 실어(실측: 핸들러가 받는 값이 `undefined`) 판정이 늘 "떠났다"로 접힌다. 진짜
+     Chromium 이 필요한 자리라 여기 둔다. */
+  /* **한 번의 `evaluate` 안에서 클래스를 읽으면 안 된다** — React 의 리렌더는 마이크로태스크라
+     dispatch 직후엔 옛 className 이 잡힌다(실측: 켜졌는데도 `entered: false`). 왕복을 나누고
+     프레임을 한 번 넘긴 뒤에 읽는다. */
+  const settle = () =>
+    page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const cls = () => slot.getAttribute("class");
+  const fire = (type: string, childTarget: boolean) =>
+    slot.evaluate(
+      (el, [t, kid]) =>
+        el.dispatchEvent(
+          new DragEvent(t as string, {
+            bubbles: true,
+            cancelable: true,
+            relatedTarget: kid ? el.querySelector(".sched-fanart__pick") : null,
+          }),
+        ),
+      [type, childTarget] as const,
+    );
+
+  await fire("dragenter", false);
+  await settle();
+  expect(await cls(), "드래그가 들어오면 강조가 켜진다").toContain("is-dragging");
+
+  await fire("dragleave", true);
+  await settle();
+  expect(await cls(), "자식 위를 지나는 dragleave 로는 안 꺼진다").toContain("is-dragging");
+
+  await fire("dragleave", false);
+  await settle();
+  expect(await cls(), "상자를 떠나면 꺼진다").not.toContain("is-dragging");
+
+  /* 그다음 실제 드롭 경로 — `DataTransfer` 를 페이지 안에서 만들고 바이트로 `File` 을 채운 뒤
+     `drop` 이벤트에 실어 보낸다. `setInputFiles` 는 input 을 직접 채우므로 이 경로를 통째로
+     안 탄다. */
+  const bytes = [...readFileSync(FANART_PNG)];
+  const dt = await page.evaluateHandle((data) => {
+    const t = new DataTransfer();
+    t.items.add(new File([new Uint8Array(data)], "dropped.png", { type: "image/png" }));
+    return t;
+  }, bytes);
+
+  await slot.dispatchEvent("dragenter", { dataTransfer: dt });
+  await slot.dispatchEvent("drop", { dataTransfer: dt });
+
+  const thumb = page.locator('[data-od-id="schedule-fanart-thumb"]');
+  await expect(thumb).toBeVisible();
+  await expect(thumb).toHaveAttribute("src", /^\/api\/fanart\/[0-9a-f-]{36}\.png$/);
+
+  await admin.close();
+});
+
+/* **잠긴 동안에도 `dragover` 를 취소한다**(codex 두 채널이 독립적으로 잡은 결함, 2026-08-01).
+
+   `fanartLocked` 일 때 취소를 건너뛰면 브라우저 기본 동작이 살아나 **떨군 파일로 탭이 이동하고
+   저장 안 된 편집이 통째로 날아간다** — 저장·업로드 중이 정확히 그 순간이다. 잠금이 뜻하는
+   것은 "업로드를 안 낸다"이지 "브라우저에 넘긴다"가 아니다.
+
+   **dom 단위의 잠금 테스트로는 이 축이 안 잡힌다** — 거기선 `drop` 을 직접 쏘므로 "dragover 를
+   취소해야 drop 이 온다"는 브라우저 전제 자체를 안 탄다(리뷰 지적). 그래서 진짜 잠금 상태를
+   만들어 여기서 잰다: 업로드 응답을 붙잡아 `uploading` 에 머물게 한 뒤 취소 여부를 읽는다. */
+test("관리자: 업로드 중에도 드롭 기본 동작을 막는다 — 안 막으면 편집이 날아간다", async ({
+  browser,
+  baseURL,
+}) => {
+  const admin = await contextAs(browser, baseURL!);
+  const page = await admin.newPage();
+
+  // 업로드를 응답 없이 붙잡아 둔다 — 그동안 편집기는 `uploading` 이다.
+  let release: (() => void) | null = null;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/api/fanart", async (route) => {
+    await held;
+    await route.abort();
+  });
+
+  await page.goto(`/schedule?week=${SLOT_WEEK}`);
+  await expectSignedIn(page);
+  await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(FANART_PNG);
+  // 잠긴 것을 먼저 못박는다 — 안 잠겼으면 아래가 무엇을 재는지 알 수 없다.
+  await expect(page.locator('[data-od-id="schedule-fanart-file"]')).toBeDisabled();
+
+  const slot = page.locator('[data-od-id="schedule-fanart-slot"]');
+  await expect
+    .poll(dragoverPrevented(slot), {
+      message: "잠긴 동안에도 취소해야 브라우저가 파일로 이동하지 않는다",
+    })
+    .toBe(true);
+
+  release!();
+  await admin.close();
+});
+
+/* 잠긴 ✕ 는 **드러나되 흐리다**(codex 리뷰 P3, 2026-08-01). 노출 규칙(`opacity: 1`)이 파일
+   뒤쪽이라 그냥 두면 `:disabled { opacity: .45 }` 를 덮어, 업로드 중에 호버하면 못 누르는
+   ✕ 가 멀쩡해 보인다 — "가드는 방어선이고 잠금은 표시다"(AGENTS)의 표시 쪽이 거기서 깨진다.
+
+   그림이 **이미 있는 채로** 잠겨야 재진다: 한 번 정상 업로드해 ✕ 를 띄운 뒤, 두 번째 업로드를
+   붙잡아 `uploading` 에 머물게 한다. */
+test("관리자: 업로드 중 ✕ 는 드러나되 흐리다 — 못 누르는 것이 보여야 한다", async ({
+  browser,
+  baseURL,
+}) => {
+  const admin = await contextAs(browser, baseURL!);
+  const page = await admin.newPage();
+  await page.goto(`/schedule?week=${SLOT_WEEK}`);
+  await expectSignedIn(page);
+
+  const file = page.locator('[data-od-id="schedule-fanart-file"]');
+  const slot = page.locator('[data-od-id="schedule-fanart-slot"]');
+  const x = page.locator('[data-od-id="schedule-fanart-remove"]');
+  const opacity = () => x.evaluate((el) => getComputedStyle(el).opacity);
+
+  await file.setInputFiles(FANART_PNG);
+  await expect(x).toBeVisible();
+  await slot.hover();
+  await expect.poll(opacity, { message: "평소엔 또렷하다" }).toBe("1");
+
+  // 두 번째 업로드를 붙잡아 잠근다 — 그림은 그대로 있고 ✕ 만 잠긴다.
+  let release: (() => void) | null = null;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/api/fanart", async (route) => {
+    await held;
+    await route.abort();
+  });
+  await file.setInputFiles(FANART_PNG);
+  await expect(x).toBeDisabled();
+
+  await slot.hover();
+  await expect.poll(opacity, { message: "잠기면 흐리게 드러난다" }).toBe("0.45");
+
+  release!();
   await admin.close();
 });
 

@@ -296,49 +296,64 @@
    맞는 자리다. **한 상자다**(결정 29) — 이 div 자체가 위 `.sched-meta__note-box` 짝인 박스라,
    예전에 여기 있던 block-stack 용 margin-bottom 은 필요 없다(부모 `.sched__meta` 의 gap 이
    대신한다). */
-.sched-fanart__row {
-  display: flex;
-  gap: var(--space-3);
-  /* **결정 29 개정 — acts 가 세로 스택에서 가로 줄로 바뀌며 썸네일보다 짧아졌다.** 예전엔
-     "44×2+8=96 이 썸네일과 같아 우연히 맞아떨어진다"며 위로 정렬했는데, 이제 acts 는 한 줄
-     (44px)뿐이라 위 정렬이면 썸네일 옆 허공에 뜬다 — 가운데로 맞춘다. */
-  align-items: center;
+/* ── 슬롯 하나, 두 상태(결정 36, 2026-08-01) ──────────────────────────────────
+   **자리가 안 흔들린다.** 비었을 때(점선 드롭존)와 채워졌을 때(그림 + ✕)가 같은 상자를 쓰므로
+   그림을 올리고 내려도 아래 힌트·표기 칸이 안 튄다 — 옛 골격은 96 썸네일이 생겼다 없어지며
+   그만큼 밀렸다.
+
+   **280×160 은 유도값이다.** 폭은 빈 상태 문구("그림을 끌어 놓거나 눌러서 고릅니다", 14px
+   한글 18자 ≈ 250px)가 한 줄에 서는 하한에서 왔다 — 그 아래로 내리면 문구가 접혀 드롭존이
+   두 줄이 된다. 높이는 3:4 세로 그림이 contain 으로 120×160 이 되는 값이라 옛 96×96 보다 크게
+   보인다. `max-width` 를 두는 이유: 1열 폭(1072px)에서 전폭 점선 상자는 "한 장"이라는 사실과
+   어긋나게 크다. */
+.sched-fanart__slot {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  height: 160px;
   margin-top: 6px; /* .sched-note__label 의 margin-bottom 과 같은 값 */
 }
-/* 96 고정 슬롯 + contain. 그림마다 높이가 달라져도 이 박스 안에서만 출렁인다 — 예전엔 "아래
-   요일 목록이 밀린다"가 이 값을 정당화했는데, 메타가 요일 옆에서 미리보기 아래로 옮기며 그
-   우려는 사라졌다(결정 29). 편집기에서 "무엇을 올렸나"만 알면 된다는 원래 이유는 그대로 남는다
-   (읽기 화면은 반대로 실제 치수로 자리를 예약한다: 거기선 그림이 주인공이라 비율이 정보다). */
-.sched-fanart__thumb {
-  flex: none;
-  width: 96px;
-  height: 96px;
-  object-fit: contain;
-  background: var(--surface);
-  border: 1.5px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-}
-/* **결정 29 개정 — column → row.** 세로로 쌓인 두 버튼이 96×96 썸네일 옆에서 좁은 기둥을 만들어
-   "L자"로 보였다(이슈 코멘트 실측 지적) — 나란히 눕히면 썸네일 옆에 한 줄로 붙어 상자 전체가
-   직사각형에 가까워진다. wrap 은 좁은 박스(위 flex-wrap 이 접은 1열 폭)에서 두 버튼이 겹치지
-   않게 하는 안전망이다. */
-.sched-fanart__acts {
+/* label 이 슬롯을 통째로 덮는다 — 그래야 "그림 자리를 다시 누르면 교체"가 별도 배선 없이
+   성립한다. ✕ 는 그 위에 절대배치로 얹혀(아래) 이 label 의 클릭을 가로챈다. */
+.sched-fanart__pick {
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-/* .btn 계열엔 min-height 가 없다 — 패딩만으로 서는 컨트롤은 글자 크기가 바뀌면 44 가 조용히
-   깨진다(kunya-design §5). 하한을 명시하고, label 을 버튼으로 쓰므로 가운데 정렬도 여기서 준다. */
-.sched-fanart__pick,
-.sched-fanart__del {
-  min-height: 44px;
-  display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-}
-.sched-fanart__pick {
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  padding: var(--space-3);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
   cursor: pointer;
+  background: var(--surface);
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+/* 그림이 들어오면 점선이 실선이 된다 — 점선은 "여기에 생긴다"는 뜻이라 이미 찬 자리엔 안 맞다. */
+.sched-fanart__pick:has(.sched-fanart__img) {
+  padding: 0;
+  border-style: solid;
+  overflow: hidden;
+}
+.sched-fanart__plus {
+  width: 24px;
+  height: 24px;
+  color: var(--fg);
+}
+/* contain 이라 어떤 비율이든 잘리지 않는다 — 편집기에서 알고 싶은 건 "무엇을 올렸나"이지
+   정확한 치수가 아니다(읽기 화면은 반대로 실제 치수로 자리를 예약한다: 거기선 그림이
+   주인공이라 비율이 정보다). */
+.sched-fanart__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.sched-fanart__pick:hover {
+  border-color: var(--focus);
+  color: var(--fg);
 }
 /* 파일 input 은 .sr-only 라 포커스 링을 제 자리에 못 그린다(1px 상자로 clip 돼 있다) — 링을
    보이는 부품(label)으로 옮긴다. 레시피는 .sched-field:focus 와 같은 값이다. */
@@ -347,12 +362,77 @@
   border-color: var(--focus);
   box-shadow: 0 0 0 2px var(--focus);
 }
-/* **label 에는 :disabled 가 안 붙는다** — 안의 input 이 잠겨도 `.btn:disabled` 가 안 걸려,
-   내리기 버튼만 흐려지고 바꾸기는 멀쩡해 보인다(같은 순간 둘 다 안 눌리는데). 그 파일의
-   :disabled 처리와 같은 값을 여기서 준다. */
+/* 파일을 끌고 들어온 동안 — 포커스와 같은 강조를 쓴다(둘이 동시에 뜰 일이 없고, 새 색을
+   만들 근거도 없다). */
+.sched-fanart__slot.is-dragging .sched-fanart__pick {
+  border-color: var(--focus);
+  background: var(--surface-2);
+  color: var(--fg);
+}
+/* **label 에는 :disabled 가 안 붙는다** — 안의 input 이 잠겨도 흐림이 안 걸려, ✕ 만 흐려지고
+   이쪽은 멀쩡해 보인다(같은 순간 둘 다 안 눌리는데). `:has()` 로 같은 처리를 준다. */
 .sched-fanart__pick:has(input:disabled) {
   opacity: 0.45;
   cursor: not-allowed;
+}
+/* ✕ — 그림 우측 상단. **항상 DOM 에 있고** 호버·포커스에서 드러난다(schedule-editor.tsx 의
+   같은 자리 주석). 44×44 는 드러난 뒤의 크기라 터치 하한을 그대로 지킨다. */
+.sched-fanart__x {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  cursor: pointer;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 1.5px solid var(--border-strong);
+  border-radius: 999px;
+}
+.sched-fanart__x svg {
+  width: 16px;
+  height: 16px;
+}
+.sched-fanart__x:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.sched-fanart__x:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.sched-fanart__x:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* **호버가 있는 기기에서만 감춘다.** `(hover: none)` 인 터치 기기에선 드러낼 방법이 없으므로
+   늘 보인다 — 감추기를 무조건 걸면 폰에서 그림을 내릴 길이 통째로 사라진다(그림 자리를 누르면
+   교체라 그쪽으로도 못 간다). `opacity` 로만 감추는 이유: `display:none` 이면 키보드 포커스가
+   아예 안 가고, 그때는 `:focus-within` 으로 드러낼 기회조차 없다. */
+@media (hover: hover) {
+  .sched-fanart__x {
+    opacity: 0;
+  }
+  .sched-fanart__slot:hover .sched-fanart__x,
+  .sched-fanart__slot:focus-within .sched-fanart__x {
+    opacity: 1;
+  }
+  /* **잠긴 동안엔 드러나되 흐린 채로**(codex 리뷰 P3). 위 `:disabled { opacity: .45 }` 는 이
+     블록보다 **앞**이라 그냥 두면 노출 규칙이 덮어, 업로드·저장 중에 호버하면 못 누르는 ✕ 가
+     멀쩡해 보인다 — "가드는 방어선이고 잠금은 표시다"(AGENTS)의 표시 쪽이 거기서 깨진다.
+     감추지 않고 흐리게 드러내는 이유: 아예 안 보이면 "왜 안 눌리나"를 물을 대상조차 없다. */
+  .sched-fanart__slot:hover .sched-fanart__x:disabled,
+  .sched-fanart__slot:focus-within .sched-fanart__x:disabled {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sched-fanart__x {
+    transition: opacity 120ms ease;
+  }
 }
 /* .sched-note__label 과 같은 조합(--text-sm + --fg-muted)이라 대비가 이미 검증된 자리다. */
 .sched-fanart__hint,
