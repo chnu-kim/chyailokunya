@@ -446,6 +446,60 @@ test("관리자: 카드를 원본 크기로 열고 닫는다", async ({ page, ba
   await expect(page.locator('[data-od-id="week-card"]')).toHaveCount(1);
 });
 
+/* 항목 상자의 표지 크기 계약(결정 33, codex 두 채널이 잡은 결함, 2026-08-01).
+
+   상자가 **가로 셋**(표지 44 · 가운데 칸 · 삭제 44)이고 바깥 둘은 `align-items: stretch` 로
+   상자 높이를 따라간다 — 연결 표기가 붙으면 행이 두 줄이 되므로 그 칸도 늘어난다. 그런데
+   표지 그림 자체는 **늘면 안 된다**: 늘어나면 같은 게임이 "제목을 게임명과 다르게 썼다"는
+   이유만으로 다른 크기로 서서, 이 개편이 세우려는 "행마다 같은 골격"이 정확히 거기서 깨진다.
+
+   **시각 베이스라인은 이걸 못 본다** — 그 스냅샷의 항목엔 연결된 게임이 없어 표지 자리가
+   돋보기이고, 두 줄짜리 행이 아예 안 나온다. 그래서 한 화면 안에 **두 줄 행과 한 줄 행을
+   나란히** 만들어 두 표지의 높이가 같은지 직접 잰다.
+
+   저장하지 않으므로 공유 픽스처를 안 건드린다(아래 흐림 스펙과 같은 사정). */
+test("관리자: 연결 표기가 붙어 행이 두 줄이 돼도 표지 크기는 그대로다", async ({
+  page,
+  baseURL,
+}) => {
+  await signIn(page.context(), baseURL!);
+  // 다른 스펙이 안 쓰는 먼 주. 저장하지 않으므로 상태도 안 남는다.
+  const week = "2038-06-07";
+  await page.goto(`/schedule?week=${week}`);
+  await openDay(page, 0);
+
+  /* 두 항목 다 "엘든 링"에 연결하되 제목을 다르게 준다 — 첫째는 게임명과 달라 연결 표기가
+     붙어 두 줄이 되고, 둘째는 같아서 한 줄이다(그 판정은 `linkedName !== title.trim()`). */
+  for (const [i, title] of [
+    [0, "저챗하다 게임"],
+    [1, "엘든 링"],
+  ] as const) {
+    await page.locator(`[data-od-id="schedule-day-add-${week}"]`).click();
+    await page.locator('[data-od-id^="schedule-entry-title-"]').nth(i).fill(title);
+    await page.locator('[data-od-id^="schedule-entry-game-trigger-"]').nth(i).click();
+    await page.locator(".sched-picker input.sched-field").first().fill("엘든");
+    await page.locator(".sched-picker__local button").first().click();
+  }
+
+  const rows = page.locator(".sched-row");
+  await expect(rows).toHaveCount(2);
+  // 전제: 첫째만 두 줄이다 — 이게 안 서면 아래 비교가 "둘 다 한 줄"을 재는 셈이라 이빨이 없다.
+  await expect(rows.nth(0).locator(".sched-row__linked")).toHaveCount(1);
+  await expect(rows.nth(1).locator(".sched-row__linked")).toHaveCount(0);
+  const box = async (i: number, sel: string) => (await rows.nth(i).locator(sel).boundingBox())!;
+  const tallTrigger = await box(0, ".sched-row__game-trigger");
+  const shortTrigger = await box(1, ".sched-row__game-trigger");
+  expect(tallTrigger.height, "두 줄 행의 표지 칸은 상자 높이를 따라 늘어난다").toBeGreaterThan(
+    shortTrigger.height,
+  );
+
+  // 그런데 그림은 같은 크기다 — 늘어난 만큼은 칸 안의 가운데 정렬이 흡수한다.
+  const tallThumb = await box(0, ".sched-row__game-thumb");
+  const shortThumb = await box(1, ".sched-row__game-thumb");
+  expect(tallThumb.height, "표지 높이").toBe(shortThumb.height);
+  expect(tallThumb.width, "표지 폭").toBe(shortThumb.width);
+});
+
 /* 휴방 잠금의 흐림 계약(codex 리뷰 P2 둘, 2026-07-31).
 
    `opacity` 는 조상과 자손이 **곱해지고**, 조상에 걸면 합성 그룹이 생겨 **자손이 되돌릴 수
