@@ -568,7 +568,11 @@ export function ScheduleEditor({
                   // 잠겨 있어도 취소는 한다 — 위 블록 주석의 마지막 문단이 근거다.
                   onDragOver={(ev) => {
                     ev.preventDefault();
-                    if (fanartLocked) ev.dataTransfer.dropEffect = "none";
+                    /* **`dataTransfer` 가 null 일 수 있다.** 합성 `DragEvent` 는 그걸 안 싣고
+                       (우리 e2e 가 정확히 그렇게 쏜다) 그때 이 줄이 TypeError 로 죽는다 —
+                       그러면 같은 핸들러의 뒷일이 통째로 안 돌고 콘솔만 더러워진다. CI 에서
+                       처음 드러났다(로컬은 잠기지 않은 경로만 타서 이 줄에 안 닿았다). */
+                    if (fanartLocked && ev.dataTransfer) ev.dataTransfer.dropEffect = "none";
                   }}
                   onDragEnter={(ev) => {
                     ev.preventDefault();
@@ -585,7 +589,8 @@ export function ScheduleEditor({
                     ev.preventDefault();
                     setDragging(false);
                     if (fanartLocked) return;
-                    const file = ev.dataTransfer.files?.[0];
+                    // 위 dragover 와 같은 이유로 `dataTransfer` 가 null 일 수 있다.
+                    const file = ev.dataTransfer?.files?.[0];
                     if (file) send({ type: "FANART_UPLOAD", file });
                   }}
                 >

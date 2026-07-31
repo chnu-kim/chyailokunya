@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { expect, test, type APIRequestContext, type Browser } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type Locator } from "@playwright/test";
 import { openDay } from "./schedule-helpers";
 import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
@@ -282,6 +282,13 @@ test("관리자가 올린 그림을 저장·발행하면 팬이 그걸 본다", 
    행은 안 만든다(공유 픽스처를 안 건드린다). */
 const SLOT_WEEK = "2039-02-07";
 
+/* `dragover` 가 취소됐나 — `dispatchEvent` 는 `preventDefault()` 가 불렸으면 false 를 돌려준다.
+   함수를 돌려주는 이유는 `expect.poll` 이 매번 다시 부르게 하기 위해서다(하이드레이션 대기). */
+const dragoverPrevented = (slot: Locator) => () =>
+  slot.evaluate(
+    (el) => !el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true })),
+  );
+
 test("관리자: 팬아트 슬롯이 빈 드롭존 ↔ 그림 + ✕ 로 갈아탄다", async ({ browser, baseURL }) => {
   const admin = await contextAs(browser, baseURL!);
   const page = await admin.newPage();
@@ -345,10 +352,13 @@ test("관리자: 슬롯에 파일을 떨구면 업로드가 난다", async ({ br
      타서 `dragover` 를 취소하든 말든 `drop` 핸들러가 그대로 불린다(실측: `preventDefault()`
      를 지워도 이 스펙이 초록이었다). 그래서 **취소 자체를 값으로 읽는다**: `dispatchEvent` 는
      `preventDefault()` 가 불렸으면 false 를 돌려준다. */
-  const prevented = await slot.evaluate(
-    (el) => !el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true })),
-  );
-  expect(prevented, "dragover 를 취소해야 진짜 드래그에서 drop 이 난다").toBe(true);
+  /* **`expect.poll` 로 재시도한다 — 하이드레이션 경합 때문이다.** 서버가 그린 마크업엔 아직
+     핸들러가 안 붙어 있어, 붙기 전에 쏘면 아무도 안 받아 `dispatchEvent` 가 true(안 취소됨)를
+     돌려준다. 로컬은 dev 서버가 더워 늘 늦지 않았고 **CI 에서만 빨갛게 났다** — 앱 결함이
+     아니라 시점 문제라 단언을 낮추지 않고 기다린다. */
+  await expect
+    .poll(dragoverPrevented(slot), { message: "dragover 를 취소해야 진짜 드래그에서 drop 이 난다" })
+    .toBe(true);
 
   /* **자식 위를 지나는 `dragleave` 로는 강조가 안 꺼진다.** `dragleave` 는 안쪽 요소로 옮겨
      갈 때도 나므로, 거르지 않으면 드롭존 안의 아이콘 위를 지나는 순간 강조가 깜빡인다.
@@ -439,10 +449,11 @@ test("관리자: 업로드 중에도 드롭 기본 동작을 막는다 — 안 �
   await expect(page.locator('[data-od-id="schedule-fanart-file"]')).toBeDisabled();
 
   const slot = page.locator('[data-od-id="schedule-fanart-slot"]');
-  const prevented = await slot.evaluate(
-    (el) => !el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true })),
-  );
-  expect(prevented, "잠긴 동안에도 취소해야 브라우저가 파일로 이동하지 않는다").toBe(true);
+  await expect
+    .poll(dragoverPrevented(slot), {
+      message: "잠긴 동안에도 취소해야 브라우저가 파일로 이동하지 않는다",
+    })
+    .toBe(true);
 
   release!();
   await admin.close();
