@@ -448,6 +448,48 @@ test("관리자: 업로드 중에도 드롭 기본 동작을 막는다 — 안 �
   await admin.close();
 });
 
+/* 잠긴 ✕ 는 **드러나되 흐리다**(codex 리뷰 P3, 2026-08-01). 노출 규칙(`opacity: 1`)이 파일
+   뒤쪽이라 그냥 두면 `:disabled { opacity: .45 }` 를 덮어, 업로드 중에 호버하면 못 누르는
+   ✕ 가 멀쩡해 보인다 — "가드는 방어선이고 잠금은 표시다"(AGENTS)의 표시 쪽이 거기서 깨진다.
+
+   그림이 **이미 있는 채로** 잠겨야 재진다: 한 번 정상 업로드해 ✕ 를 띄운 뒤, 두 번째 업로드를
+   붙잡아 `uploading` 에 머물게 한다. */
+test("관리자: 업로드 중 ✕ 는 드러나되 흐리다 — 못 누르는 것이 보여야 한다", async ({
+  browser,
+  baseURL,
+}) => {
+  const admin = await contextAs(browser, baseURL!);
+  const page = await admin.newPage();
+  await page.goto(`/schedule?week=${SLOT_WEEK}`);
+  await expectSignedIn(page);
+
+  const file = page.locator('[data-od-id="schedule-fanart-file"]');
+  const slot = page.locator('[data-od-id="schedule-fanart-slot"]');
+  const x = page.locator('[data-od-id="schedule-fanart-remove"]');
+  const opacity = () => x.evaluate((el) => getComputedStyle(el).opacity);
+
+  await file.setInputFiles(FANART_PNG);
+  await expect(x).toBeVisible();
+  await slot.hover();
+  await expect.poll(opacity, { message: "평소엔 또렷하다" }).toBe("1");
+
+  // 두 번째 업로드를 붙잡아 잠근다 — 그림은 그대로 있고 ✕ 만 잠긴다.
+  let release: (() => void) | null = null;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/api/fanart", async (route) => {
+    await held;
+    await route.abort();
+  });
+  await file.setInputFiles(FANART_PNG);
+  await expect(x).toBeDisabled();
+
+  await slot.hover();
+  await expect.poll(opacity, { message: "잠기면 흐리게 드러난다" }).toBe("0.45");
+
+  release!();
+  await admin.close();
+});
+
 test("서빙: 키 형식이 아니거나 없는 객체는 404", async ({ request }) => {
   // 경로 순회. 키 검증이 이 한 자리에서 막으므로 R2 를 두드리지도 않는다.
   expect((await request.get("/api/fanart/..%2F..%2Fpackage.json")).status()).toBe(404);

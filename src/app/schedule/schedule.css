@@ -420,6 +420,14 @@
   .sched-fanart__slot:focus-within .sched-fanart__x {
     opacity: 1;
   }
+  /* **잠긴 동안엔 드러나되 흐린 채로**(codex 리뷰 P3). 위 `:disabled { opacity: .45 }` 는 이
+     블록보다 **앞**이라 그냥 두면 노출 규칙이 덮어, 업로드·저장 중에 호버하면 못 누르는 ✕ 가
+     멀쩡해 보인다 — "가드는 방어선이고 잠금은 표시다"(AGENTS)의 표시 쪽이 거기서 깨진다.
+     감추지 않고 흐리게 드러내는 이유: 아예 안 보이면 "왜 안 눌리나"를 물을 대상조차 없다. */
+  .sched-fanart__slot:hover .sched-fanart__x:disabled,
+  .sched-fanart__slot:focus-within .sched-fanart__x:disabled {
+    opacity: 0.45;
+  }
 }
 @media (prefers-reduced-motion: no-preference) {
   .sched-fanart__x {
