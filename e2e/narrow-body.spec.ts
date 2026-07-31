@@ -776,6 +776,116 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
   }
 });
 
+/* ── 하루 머리 줄의 탭 순서(결정 32, 2026-08-01) ─────────────────────────────────
+   **알고 받아들인 불일치를 못박는 스펙이다** — 고치는 게 아니라 *지금 이렇다*를 고정한다.
+
+   머리 줄 DOM 은 `요일·날짜 → 시각 → 휴방 → 요약 토글` 이다. 넓은 폭은 그 순서가 곧 화면
+   순서라 탭이 왼쪽에서 오른쪽으로 곧게 간다. **560 이하에서만** `.sched-day__when` 이
+   `order: 1` 로 아랫줄로 내려가, 화면은 `[요일 요약 ⌄] / [시각 휴방]` 인데 탭은 여전히
+   `시각 → 휴방 → 토글` 이다.
+
+   **왜 그 값을 치르는가**(사용자 결정, 세 안을 실제 배치로 비교한 뒤): `order` 없이 DOM
+   순서대로 접으면 첫 줄이 `요일 54 + 시각 128 + 휴방 68 + gap` 이라 320px 의 카드 안쪽 폭
+   238 을 넘어 **세 줄**이 되고, 접힌 하루가 116 → 152px 로 늘어 7일이 812 → 1064px 이 된다.
+   반대로 DOM 을 `요약 → 시각·휴방` 으로 두면 불일치가 **넓은 폭으로 옮겨갈 뿐**인데, 탭으로
+   화면을 도는 사람은 데스크톱에 몰려 있으므로 그쪽을 어긋나게 두는 편이 더 나쁘다
+   (적대적 리뷰가 정확히 그 맞바꾸기를 제안했고, 이 근거로 기각했다 — 2026-08-01).
+
+   **그래서 두 가지를 함께 잰다:** 넓은 폭에선 탭 순서 = 화면 순서라는 것, 좁은 폭에선
+   그 예외가 *정확히 이 모양*이라는 것. 뒤엣것이 있어야 나중에 누가 이 자리를 건드렸을 때
+   "알고 둔 예외"가 조용히 다른 모양으로 번지지 않는다. */
+test.describe("하루 머리 줄 — 탭 순서", () => {
+  const WEEK = "2038-08-02";
+  const CONTROLS = [
+    `[data-od-id="schedule-day-time-${WEEK}"]`,
+    `[data-od-id="schedule-day-rest-${WEEK}"]`,
+    `[data-od-id="schedule-day-toggle-${WEEK}"]`,
+  ] as const;
+
+  /* 시각 입력에서 시작해 Tab 으로 실제 포커스가 닿는 순서를 거둔다 — 계산이 아니라 브라우저가
+     정하는 값이라 이 방식이 아니면 못 잰다.
+
+     **고정 횟수로 누르면 안 된다.** `type="time"` 은 시/분/오전오후 세그먼트를 각각 탭 정지점으로
+     갖고 그 셋이 전부 같은 요소(같은 `data-od-id`)라, 한 번씩만 누르면 세 번 다 시각 입력에
+     머문다(실측: `[시각, 시각, 시각]`). 그래서 **od-id 가 바뀔 때까지** 누른다. */
+  async function tabOrder(page: Page): Promise<string[]> {
+    const idOf = () =>
+      page.evaluate(() => document.activeElement?.getAttribute("data-od-id") ?? "");
+    await page.locator(CONTROLS[0]).focus();
+    const seen = [await idOf()];
+    for (let i = 0; i < 20 && seen.length < CONTROLS.length; i++) {
+      await page.keyboard.press("Tab");
+      const next = await idOf();
+      if (next && next !== seen[seen.length - 1]) seen.push(next);
+    }
+    return seen;
+  }
+
+  /* 화면 순서 = 위 줄부터, 같은 줄이면 왼쪽부터. **중심점으로 비교하고 허용 오차를 넉넉히
+     둔다** — 휴방 체크박스는 44 높이 라벨 안에서 세로 중앙이라 위 모서리가 형제보다 10px 넘게
+     내려와 있다. 그 차이를 줄이 바뀐 것으로 읽으면 한 줄짜리 머리 줄도 두 줄로 잡힌다(실측:
+     1440 에서 `[시각, 토글, 휴방]` 이 나왔다). 실제 줄 간격은 52px 대라 20px 로 충분히 갈린다. */
+  async function visualOrder(page: Page): Promise<string[]> {
+    const boxes = await Promise.all(
+      CONTROLS.map(async (sel) => {
+        const box = (await page.locator(sel).boundingBox())!;
+        return {
+          id: (await page.locator(sel).getAttribute("data-od-id"))!,
+          cy: box.y + box.height / 2,
+          cx: box.x + box.width / 2,
+        };
+      }),
+    );
+    return boxes
+      .sort((a, b) => (Math.abs(a.cy - b.cy) > 20 ? a.cy - b.cy : a.cx - b.cx))
+      .map((b) => b.id);
+  }
+
+  test("1440px: 탭 순서가 화면 순서와 같다", async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page.context(), baseURL!);
+    await page.goto(`/schedule?week=${WEEK}`);
+    await expectSignedIn(page);
+    await page.evaluate(() => document.fonts.ready);
+
+    // 한 줄이라는 전제부터 못박는다 — 두 줄이면 아래 비교가 다른 것을 재게 된다.
+    const head = (await page
+      .locator(`[data-od-id="schedule-day-${WEEK}"] .sched-day__head`)
+      .boundingBox())!;
+    expect(head.height, "머리 줄 높이(한 줄)").toBeLessThan(80);
+    expect(await tabOrder(page)).toEqual(await visualOrder(page));
+  });
+
+  test("320px: 시각·휴방이 아랫줄로 내려가고 탭은 그 둘을 먼저 짚는다 — 알고 둔 예외", async ({
+    page,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await signIn(page.context(), baseURL!);
+    await page.goto(`/schedule?week=${WEEK}`);
+    await expectSignedIn(page);
+    await page.evaluate(() => document.fonts.ready);
+
+    const head = (await page
+      .locator(`[data-od-id="schedule-day-${WEEK}"] .sched-day__head`)
+      .boundingBox())!;
+    expect(head.height, "머리 줄 높이(두 줄)").toBeGreaterThan(80);
+
+    // 화면은 토글이 먼저다(윗줄).
+    expect(await visualOrder(page)).toEqual([
+      `schedule-day-toggle-${WEEK}`,
+      `schedule-day-time-${WEEK}`,
+      `schedule-day-rest-${WEEK}`,
+    ]);
+    // 탭은 DOM 순서 그대로 — 이게 그 예외다.
+    expect(await tabOrder(page)).toEqual([
+      `schedule-day-time-${WEEK}`,
+      `schedule-day-rest-${WEEK}`,
+      `schedule-day-toggle-${WEEK}`,
+    ]);
+  });
+});
+
 /* 주간표 카드의 감축 경로(2026-07-29 · **결정 35 로 뒤집힘 2026-08-01**).
 
    ── 무엇이 바뀌었나 ────────────────────────────────────────────────────────────
