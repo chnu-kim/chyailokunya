@@ -134,6 +134,154 @@ test("관리자: 미리보기가 타이핑을 따라오고, 미저장이면 다�
   await expect(page.locator(".week-card__note")).toHaveCount(0);
 });
 
+/* #56 결정 29 회귀(적대적 리뷰 지적, 2026-07-31). narrow flow(1300 미만)는 DOM 순서 그대로
+   흐르는데, 결정 29 초판은 그 순서를 `요일 → 미리보기 → 메타`로 뒤집으며 "하루 카드가 접힘
+   요약(결정 28)이라 이 순서에서도 미리보기가 첫 화면 안에 든다"고 가정했다. 그 가정은 **모든
+   날이 접혀 있을 때만** 참이다 — 실제 편집은 최소 하루를 펼쳐야 하고, 펼치는 순간 요일 목록
+   높이가 늘어 미리보기가 밀린다(결정 24 가 막으려던 "한참 내려야 보인다"의 재발). 그래서
+   순서를 `미리보기 → 메타 → 요일`로 고쳤다 — 이 스펙은 그 고침을 못박는다: 되돌리면(요일이
+   먼저 오면) 하루를 펼치는 순간 미리보기 위치가 밀려 이 단언이 빨개진다. */
+test("관리자: 1열 폭에서 하루를 펼쳐도 미리보기 위치가 안 바뀐다(#56 결정 29 회귀)", async ({
+  page,
+  baseURL,
+}) => {
+  // 1300 미만이라 grid 가 안 걸리고 DOM 순서 그대로 흐른다 — 이 스펙의 전제.
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2031-06-09");
+  await expectSignedIn(page);
+
+  const preview = page.locator('[data-od-id="week-card-download"]');
+  const topOf = () => preview.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+
+  const before = await topOf();
+  await openDay(page, 0);
+  await expect(page.locator('[data-od-id^="schedule-day-panel-"]')).toBeVisible();
+  const after = await topOf();
+  expect(after).toBeCloseTo(before, 0);
+});
+
+/* codex review 지적(2026-07-31). 미리보기·메타를 각각 별도 grid-area(같은 오른쪽 열의 두 행)로
+   두고 요일 목록이 그 두 행에 걸치게 했더니, 요일 콘텐츠가 미리보기+메타 합친 높이보다 커지는
+   순간(하루를 펼쳐 항목을 여럿 넣거나 게임 검색 패널을 열면 쉽게 그렇게 된다) CSS Grid 의 트랙
+   크기 배분이 깨져 메타가 미리보기에서 멀리 밀려났다(실측: 간격 163.77px). `.sched__aside` 로
+   미리보기·메타를 감싸 단일 grid-area + 내부 flex 로 바꿔 고쳤다 — 이 스펙은 그 고침을
+   못박는다. */
+test("관리자: 2열에서 하루를 크게 확장해도 미리보기-메타 간격이 안 벌어진다(#56 결정 29 회귀)", async ({
+  page,
+  baseURL,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1600 });
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2032-03-08");
+  await expectSignedIn(page);
+
+  const gapOf = async () => {
+    const preview = (await page.locator(".sched__preview").boundingBox())!;
+    const meta = (await page.locator(".sched__meta").boundingBox())!;
+    return meta.y - (preview.y + preview.height);
+  };
+
+  const before = await gapOf();
+  await openDay(page, 0);
+  for (let i = 0; i < 4; i++) {
+    await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  }
+  const titles = page.locator('[data-od-id^="schedule-entry-title-"]');
+  for (let i = 0; i < 4; i++) {
+    await titles.nth(i).fill(`항목 ${i}`);
+  }
+  await page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first().click();
+
+  const after = await gapOf();
+  expect(after).toBeCloseTo(before, 0);
+});
+
+/* 적대적 리뷰 지적(2026-07-31). 위 회귀를 고치며 미리보기·메타를 `.sched__aside` 로 감쌌는데,
+   그 곁칸이 미리보기+메타 높이로만 자기 자신을 재기로 했다면(`align-items: start`) sticky 의
+   포함 블록도 그만큼만 짧아져 요일 목록이 긴 세션에서 미리보기가 거의 못 붙어 있는다. 그래서
+   `align-items` 를 기본값(stretch)으로 되돌려 곁칸이 요일 목록과 같은 높이로 늘어나게 했다.
+
+   **4라운드 개정(2026-08-01)**: sticky 를 건 요소가 `.sched__preview` 단독에서
+   `.sched__aside-pin`(미리보기+메타 결합)으로 바뀌며 sticky 의 이동 여유(slack)가 줄었다 —
+   포함 블록(`.sched__aside`, 805px)은 그대로인데 sticky 요소 자신의 자연 높이가 메타만큼
+   (~163px) 늘어 여유가 261px→98px 로 좁아졌다(왜 결합했는지는 아래 두 번째 테스트 주석). 그
+   결과 "완전히 붙어 있는" 구간이 120~190px 스크롤로 좁아졌다(실측, 210부터 풀리기 시작).
+   이 스펙은 그 좁아진 구간 **안**에서 여전히 미리보기가 nav 아래에 붙어 있는 것으로 결합 전
+   고침(align-items: stretch)이 안 죽었음을 못박는다 — "완전히 안 풀린다"는 이제 이 스펙의
+   주장이 아니다(그건 아래 겹침 방지 테스트가 대신 본다). */
+test("관리자: 2열에서 요일 목록이 길어져도 미리보기가 스크롤을 따라 붙어 있는다(#56 결정 29 회귀)", async ({
+  page,
+  baseURL,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2034-07-10");
+  await expectSignedIn(page);
+
+  // 요일 목록을 충분히 길게 만든다 — 여러 날에 항목을 채운다.
+  for (const idx of [0, 1, 2]) {
+    await openDay(page, idx);
+    for (let i = 0; i < 3; i++) {
+      await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+    }
+    const titles = page.locator('[data-od-id^="schedule-entry-title-"]');
+    for (let i = 0; i < 3; i++) {
+      await titles.nth(i).fill(`항목 ${idx}-${i}`);
+    }
+  }
+
+  /* 150px — 실측으로 보정한 값이다(요일 목록 837px 인 이 픽스처에서 120~190 은 sticky 가
+     nav 아래(85.5px)에 그대로 붙고 210 부터 풀려나기 시작한다, 재보정 2026-08-01). daysHeight
+     비례가 아니라 고정값을 쓰는 이유: 비례식은 풀려나는 경계에 걸려 근소한 렌더 차이로 간헐
+     실패한다(이 저장소가 이미 두 번 겪은 자리 — 위 커밋 이력 참고). 150 은 확인된 평탄 구간
+     (120~190) 의 중앙이라 양쪽으로 30px 이상씩 여유가 있다. */
+  await page.mouse.wheel(0, 150);
+  await page.waitForTimeout(200);
+
+  // sticky top 은 calc(--nav-h + --space-4) ≈ 85.5px. 그 근처에 붙어 있어야 "sticky 가 거의 못
+  // 붙어 있는다"는 회귀가 재발하지 않는다(align-items: start 였던 전 구현은 이 시점에 -144px 로
+  // 화면 밖에 있었다).
+  const previewTop = (await page.locator(".sched__preview").boundingBox())!.y;
+  expect(previewTop).toBeGreaterThan(50);
+  expect(previewTop).toBeLessThan(120);
+});
+
+/* 적대적 리뷰 4라운드 지적(2026-08-01). 미리보기만 sticky 였을 때는 메타가 그냥 normal flow
+   형제라 스크롤을 계속 따라 올라가, 미리보기가 nav 아래 고정된 채로 있는 동안 메타가 그 밑을
+   지나쳐 위쪽 절반이 카드 뒤로 가려졌다(실측: 스크롤 200~800px 거의 전 구간 겹침). 미리보기·
+   메타를 `.sched__aside-pin` 한 겹으로 묶어 함께 sticky 시키면 서로 지나칠 길이 없어진다 — 이
+   스펙은 스크롤 전 구간(50~1000px)에서 메타 상단이 미리보기 하단보다 위로 올라오지 않는 것으로
+   그 고침을 못박는다. */
+test("관리자: 2열에서 스크롤해도 메타가 미리보기 아래로 가려지지 않는다(#56 결정 29 회귀)", async ({
+  page,
+  baseURL,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2034-07-10");
+  await expectSignedIn(page);
+
+  for (const idx of [0, 1, 2]) {
+    await openDay(page, idx);
+    for (let i = 0; i < 3; i++) {
+      await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+    }
+    const titles = page.locator('[data-od-id^="schedule-entry-title-"]');
+    for (let i = 0; i < 3; i++) {
+      await titles.nth(i).fill(`항목 ${idx}-${i}`);
+    }
+  }
+
+  for (const amt of [50, 100, 150, 200, 250, 300, 400, 500, 600, 800, 1000]) {
+    await page.mouse.wheel(0, amt - (await page.evaluate(() => window.scrollY)));
+    await page.waitForTimeout(100);
+    const previewBox = (await page.locator(".sched__preview").boundingBox())!;
+    const metaBox = (await page.locator(".sched__meta").boundingBox())!;
+    expect(metaBox.y, `scroll=${amt}`).toBeGreaterThanOrEqual(previewBox.y + previewBox.height);
+  }
+});
+
 test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({
   page,
   baseURL,
