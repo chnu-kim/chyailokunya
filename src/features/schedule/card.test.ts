@@ -53,6 +53,12 @@ describe("buildWeekCard", () => {
   it("공지는 그대로 넘긴다(null 도 그대로)", () => {
     expect(buildWeekCard(week({ note: "공지" })).note).toBe("공지");
     expect(buildWeekCard(week({ note: null })).note).toBeNull();
+    /* **공백만인 공지는 접힌다**(2026-08-01). 서버 스키마가 그렇게 접고 `isWeekDirty` 도 같은
+       정규형을 보므로, 안 접으면 공백만 타이핑한 순간 **dirty 가 아닌데 카드에만 빈 공지 블록이
+       생긴다** — "보이는 것 = 받는 것"이 정확히 거기서 깨진다. 편집기가 밖에서 접던 것을 조립부로
+       옮겨 왔다(공지 입력을 걷으며 e2e 가 그 값을 만들 길이 없어졌다). 앞뒤 공백도 같이 접는다. */
+    expect(buildWeekCard(week({ note: "   " })).note).toBeNull();
+    expect(buildWeekCard(week({ note: "  공지  " })).note).toBe("공지");
   });
 
   it("항목 없는 날은 빈 배열 · overflow 0", () => {

@@ -108,10 +108,18 @@ export function buildWeekCard(source: WeekCardSource): WeekCardData {
   const dayByDate = new Map(source.days.map((d) => [d.scheduledDate, d]));
   return {
     rangeLabel: `${formatMD(days[0]!)} – ${formatMD(days[6]!)}`,
-    note: source.note,
-    /* 표기는 **여기서 정규화한다** — 읽기 화면(WeekView)은 `null` 을, 편집기(WeekDraft)는 `""` 를
-       주므로 그대로 넘기면 편집기 미리보기에만 빈 figcaption 이 생겨 사진지 아래가 벌어진다.
-       두 화면이 같은 값을 다른 기준으로 얻는 자리라, 기준을 카드 조립부 한 곳에 둔다. */
+    /* 공지도 **여기서 정규화한다**(2026-08-01). 아래 표기와 같은 부류인데 이것만 밖에 있었다 —
+       편집기가 `draft.note.trim() || null` 로 접어서 넘겼다. 서버 스키마가 공백만인 공지를
+       `null` 로 접고 `isWeekDirty` 도 `.trim()` 으로 비교하므로, 날것을 넘기면 공백만 타이핑한
+       순간 **dirty 가 아닌데 카드에만 빈 공지 블록이 생긴다**("보이는 것 = 받는 것"이 깨진다).
+
+       옮긴 이유는 그 계약을 **잴 자리가 없어져서다.** 공지 입력을 걷으면서(결정 35 짝) 화면에서
+       그 값을 만들 길이 사라져 e2e 가 못 잰다 — 조립부에 있으면 card.test.ts 가 buildWeekCard 를
+       직접 불러 본다. 정규화가 호출자마다 흩어져 있으면 호출자 하나가 빠뜨려도 조용하다. */
+    note: source.note?.trim() || null,
+    /* 표기도 같다 — 읽기 화면(WeekView)은 `null` 을, 편집기(WeekDraft)는 `""` 를 주므로 그대로
+       넘기면 편집기 미리보기에만 빈 figcaption 이 생겨 사진지 아래가 벌어진다. 두 화면이 같은
+       값을 다른 기준으로 얻는 자리라, 기준을 카드 조립부 한 곳에 둔다. */
     fanart: source.fanartImageKey
       ? {
           imageKey: source.fanartImageKey,

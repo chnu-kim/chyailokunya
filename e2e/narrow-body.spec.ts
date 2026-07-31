@@ -596,18 +596,20 @@ test.describe("본문 터치 타깃 — 팬 제안", () => {
   }
 });
 
-/* 주간표 PNG 다운로드 버튼의 44 하한(이슈 #109 작업순서 3). `.btn` 계열엔 min-height 가 없어
-   (위 두 자리와 같은 함정) `.week-card-download__btn` 이 직접 못박았는데, 그 값이 실제로 서는지
-   여기서 잰다. 픽스처엔 발행된 주가 없어(schedule.spec.ts 의 "픽스처엔 발행된 주가 없어" 주석)
-   버튼은 항상 비활성이다 — `disabled` 는 opacity 만 깎지 레이아웃은 안 바꾸므로(`.btn:disabled`,
-   chrome.css) 이 상태로도 크기 계약은 그대로 검증된다. 활성 상태의 클릭·PNG 검증은 작업순서 4
-   (이슈 #109 본문)의 몫이다. */
+/* 주간표 카드 조작의 44 하한(이슈 #109 작업순서 3 · 결정 35 로 개정 2026-08-01).
+
+   **편집기에서 다운로드가 아이콘이 됐다** — 글자 버튼이던 시절엔 `.btn` 계열에 min-height 가
+   없는 함정(위 두 자리와 같다)을 `.week-card-download__btn` 이 직접 못박았고, 이제는
+   `.week-card-download__icon` 이 고정 44×44 로 선다. 아이콘 버튼은 글자 크기가 하한을 좌우하지
+   않으므로 그 함정 자체가 없어졌지만, **좁은 폭에서 아이콘이 카드 위에서 카드 밖으로 자리를
+   옮기므로**(schedule.css 의 560 미디어쿼리) 그 이동 뒤에도 44 가 서는지는 여기서만 볼 수 있다.
+
+   이 스펙이 여는 주(2029-02-05)는 픽스처가 안 건드리는 초안이라 버튼이 항상 비활성이다 —
+   `disabled` 는 opacity 만 깎지 레이아웃은 안 바꾸므로 이 상태로도 크기 계약은 그대로 검증된다.
+   (픽스처가 발행해 둔 주가 둘 생겼지만 여기서 안 읽는다 — games.sql 의 긴 공지 회귀용이다.) */
 test.describe("본문 터치 타깃 — 주간표 다운로드", () => {
   for (const width of NARROW) {
-    test(`${width}px /schedule: PNG 다운로드 버튼이 44 하한을 지킨다`, async ({
-      page,
-      baseURL,
-    }) => {
+    test(`${width}px /schedule: 카드 조작이 44 하한을 지킨다`, async ({ page, baseURL }) => {
       await page.setViewportSize({ width, height: 800 });
       await signIn(page.context(), baseURL!);
       // 다른 스펙이 안 읽는 먼 미래 주 — 초안이라 버튼은 비활성이지만 크기 계약은 같다.
@@ -616,15 +618,18 @@ test.describe("본문 터치 타깃 — 주간표 다운로드", () => {
       await page.evaluate(() => document.fonts.ready);
       await expectTouchTarget(
         page.locator('[data-od-id="week-card-download-btn"]'),
-        "PNG 다운로드",
+        "PNG 다운로드 아이콘",
       );
-      /* 원본 크기로 보기 + 그 창의 닫기(2026-07-31 신설). 이 스펙은 셀렉터를 **손으로** 열거하므로
-         새 조작을 더하면 여기 같이 적어야 검사에 든다(상단 주석의 원칙).
+      /* **확대는 이제 미리보기 카드 자신이다**(결정 35 — 텍스트 버튼을 걷고 그림에 넘겼다).
+         카드는 44 를 한참 넘으므로 크기가 걱정인 자리는 아니지만, **눌리는지**는 그렇지 않다:
+         절대배치한 다운로드 아이콘이 카드 위에 얹혀 있어 히트 영역이 겹치고, 이 폭에서는
+         그 아이콘이 카드 밖으로 내려간다. `expectTouchTarget` 은 `click()` 으로 판정하므로
+         "덮여서 못 누른다"를 그대로 잡는다.
 
-         **확대는 이 폭에서 특히 중요하다** — 560 아래에선 미리보기가 감춰지므로(감축 경로 스펙)
-         카드를 볼 유일한 길이 이 창이다. 그래서 "좁으니 감춘다"가 아니라 남겨 두고 44 를 잰다. */
+         이 스펙은 셀렉터를 **손으로** 열거하므로 새 조작을 더하면 여기 같이 적어야 검사에 든다
+         (상단 주석의 원칙). */
       const zoom = page.locator('[data-od-id="week-card-download-zoom"]');
-      await expectTouchTarget(zoom, "원본 크기로 보기");
+      await expectTouchTarget(zoom, "카드 확대(미리보기)");
       await zoom.click();
       await expectTouchTarget(page.locator('[data-od-id="week-card-zoom-close"]'), "확대 창 닫기");
       /* 확대 창은 1200px 카드를 담으므로 **자기 상자 안에서** 가로 스크롤한다 — 문서를 늘리면
@@ -761,23 +766,33 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
   }
 });
 
-/* 주간표 미리보기의 감축 경로(2026-07-29). 미리보기는 1200px 원본을 컨테이너 폭에 맞춰 축소해
-   보여주는데, 390px 에선 배율이 0.285 라 요일 34px→9.7px · 항목 제목 16px→4.6px 로 글자를 전혀
-   못 읽는다(실측). 그래서 560 아래에서 감춘다 — 카드는 aria-hidden 이고 바로 아래 요일 목록이
-   같은 내용을 이미 말하므로 잃는 의미가 0 이다.
+/* 주간표 카드의 감축 경로(2026-07-29 · **결정 35 로 뒤집힘 2026-08-01**).
 
-   **발행된 주가 필요한 이유가 바뀌었다**(2026-07-31). 전엔 "미발행이면 미리보기 자체가 없어서"
-   였는데 이제 카드는 draft 를 그리므로 미발행에도 뜬다 — 그런데 이 스펙은 아래에서 **실제로
-   내려받아 PNG 바이트를 재고**, 다운로드는 여전히 발행 + 저장을 요구한다(그래야 "보이는 것 =
-   받는 것"이 성립한다). 그래서 발행 단계는 남는다. 다른 스펙이 안 읽는 먼 주를 쓴다
-   (AGENTS 의 "e2e 스펙은 D1 픽스처 하나를 공유한다").
+   ── 무엇이 바뀌었나 ────────────────────────────────────────────────────────────
+   전엔 560 아래에서 **미리보기를 통째로 감췄다**. 근거는 "390px 에선 배율이 0.285 라 요일
+   34px→9.7px · 항목 제목 16px→4.6px 로 글자를 전혀 못 읽는다"였고 **그 실측은 지금도 참이다.**
+   바뀐 것은 그 상자의 일이다: 확대가 텍스트 버튼에서 **카드 클릭**으로 옮겨 가면서 미리보기는
+   판독 수단이 아니라 확대의 **진입점**이 됐다 — 감추면 좁은 폭에서 확대에 닿을 길이 통째로
+   사라진다. 옛 규칙이 성립했던 건 그때 확대 버튼이 미리보기 **밖**에 따로 있어서다.
 
-   전환은 경계 ±1px 로 본다: 위 상단 주석대로 320·390 사이엔 브레이크포인트가 없어 그 둘만으론
-   "감축이 실제로 일어나는지"를 증명하지 못한다. 버튼은 양쪽 폭에서 다 남아야 한다 — 캡처는
-   화면 밖 복제본을 찍으므로(week-card-download.tsx 의 snapshotCard) 미리보기가 안 보여도
-   다운로드 자체는 된다. */
-test.describe("감축 경로 — 주간표 미리보기", () => {
-  test("560 아래에서 미리보기가 감춰지고 다운로드 버튼은 남는다", async ({ page, baseURL }) => {
+   대신 이 폭에서 감축되는 것은 **다운로드 아이콘의 자리**다. 44×44 는 터치 하한이라 못 줄이는데
+   카드는 여기서 340×178 까지 작아져, 카드 위에 얹으면 아이콘이 우측 상단의 주 범위 표기를
+   그대로 가린다(1600px 에선 같은 44 가 아무것도 안 가린다 — 실측). 그래서 아이콘만 카드 밖으로
+   내려온다(schedule.css 의 560 미디어쿼리).
+
+   ── 그래서 이 스펙이 재는 것 ───────────────────────────────────────────────────
+   경계 ±1px 로 **아이콘이 카드 위에 얹혔나 / 카드 아래로 내려갔나**를 가른다. 위 상단 주석대로
+   320·390 사이엔 브레이크포인트가 없어 그 둘만으론 감축이 실제로 일어나는지를 증명하지 못한다.
+   미리보기는 **모든 폭에서 보여야 한다** — 그게 이번에 뒤집은 계약이라 여기서 못박는다.
+
+   발행 단계가 남는 이유: 아래에서 **실제로 내려받아 PNG 바이트를 재는데** 다운로드는 발행 +
+   저장을 요구한다(그래야 "보이는 것 = 받는 것"이 성립한다). 다른 스펙이 안 읽는 먼 주를 쓴다
+   (AGENTS 의 "e2e 스펙은 D1 픽스처 하나를 공유한다"). */
+test.describe("감축 경로 — 주간표 카드 조작", () => {
+  test("560 아래에서도 미리보기는 남고 다운로드 아이콘만 카드 밖으로 내려온다", async ({
+    page,
+    baseURL,
+  }) => {
     await signIn(page.context(), baseURL!);
     await page.goto("/schedule?week=2035-09-03");
     await expectSignedIn(page);
@@ -797,24 +812,35 @@ test.describe("감축 경로 — 주간표 미리보기", () => {
     const preview = page.locator(".week-card-download__preview");
     const button = page.locator('[data-od-id="week-card-download-btn"]');
 
+    /* 아이콘이 카드 **위에 얹혀 있나**. 절대배치일 땐 카드 상자 안(윗변 기준)에 들고,
+       static 으로 내려오면 카드 아랫변보다 아래에 선다 — 그 한 줄이 이 감축의 전부다. */
+    const iconOverlapsCard = async () => {
+      const card = (await preview.boundingBox())!;
+      const icon = (await button.boundingBox())!;
+      return icon.y < card.y + card.height;
+    };
+
     await page.setViewportSize({ width: 561, height: 800 });
     await expect(preview).toBeVisible();
+    expect(await iconOverlapsCard()).toBe(true);
 
     await page.setViewportSize({ width: 560, height: 800 });
-    await expect(preview).toBeHidden();
+    // **미리보기는 남는다** — 이 단언이 옛 계약(560 아래에서 감춘다)을 정확히 뒤집는다.
+    await expect(preview).toBeVisible();
     await expect(button).toBeVisible();
+    expect(await iconOverlapsCard()).toBe(false);
 
     await page.setViewportSize({ width: 320, height: 800 });
-    await expect(preview).toBeHidden();
+    await expect(preview).toBeVisible();
     await expect(button).toBeVisible();
+    expect(await iconOverlapsCard()).toBe(false);
     expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
 
-    /* **여기가 이 스펙의 핵심이다.** 미리보기를 감춘 조상이 display:none 이면 그 안의
-       `.week-card` 도 레이아웃이 없다 — 캡처가 원본 노드를 그대로 찍는 구현이었다면 좁은 폭에서
-       다운로드가 통째로 깨진다. 실제로는 클릭 시점에 노드를 복제해 body 직속으로 붙여 찍으므로
-       (week-card-download.tsx 의 snapshotCard) 그 복제본엔 이 미디어쿼리가 안 걸린다. 버튼이
-       보이는 것만 재고 넘어가면 그 사실이 주장으로만 남으니, 320px 에서 진짜 바이트를 받아
-       PNG 시그니처와 1200×630 의 2배 치수까지 확인한다(schedule.spec 의 PNG 검증과 같은 방식). */
+    /* 320px 에서 진짜 바이트를 받아 PNG 시그니처와 1200×630 의 2배 치수까지 확인한다
+       (schedule.spec 의 PNG 검증과 같은 방식). 캡처는 클릭 시점에 노드를 복제해 body 직속으로
+       붙여 찍으므로(week-card-download.tsx 의 snapshotCard) 미리보기가 이 폭에서 어떤 크기로
+       보이든 결과물은 항상 원본 치수다 — 버튼이 보이는 것만 재고 넘어가면 그 사실이 주장으로만
+       남는다. */
     const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
     const file = await download.path();
     expect(file).not.toBeNull();
@@ -826,20 +852,19 @@ test.describe("감축 경로 — 주간표 미리보기", () => {
     expect(buf.readUInt32BE(16)).toBe(2400);
     expect(buf.readUInt32BE(20)).toBe(1260);
 
-    /* 이 미디어쿼리는 읽기 화면과 편집기가 **공유한다** — WeekCardDownload 를 둘 다 그린다.
-       그림이 감춰지는 이 폭에서 "왜 못 받나"의 답은 문장이 맡는다 — 미리보기 **밖**의 안내다.
-       그래서 여기서 그 둘을 같이 잰다: 미리보기는 감춰지고, 그 문장과 버튼은 남는가(코드
-       리뷰가 짚은 자리라 주장 대신 단언으로 남긴다).
+    /* 미저장으로 잠겼을 때 **이 폭에서도 이유가 화면에 있는가.** 위에서 발행·저장까지 마쳤으므로
+       제목만 고치면 미저장이 되어 잠긴다. 문구를 박지 않고 존재만 재는 이유: 사유가 늘거나 문구가
+       다듬어져도 "이유가 화면에 있다"는 계약은 그대로다(문구 자체는 dom 스펙이 사유별로 잰다).
 
-       위에서 발행·저장까지 마쳤으므로 제목만 고치면 미저장이 되어 잠긴다. 문구를 박지 않고
-       존재만 재는 이유: 사유가 늘거나 문구가 다듬어져도 "이유가 화면에 있다"는 계약은 그대로다
-       (문구 자체는 dom 스펙이 사유별로 잰다). */
+       **미발행 사유는 여기서 안 뜬다** — 그건 화면 문장을 안 내고 버튼 이름이 진다(결정 35).
+       미저장만 문장을 내므로 이 자리에서 재는 것이 정확히 그 하나다. */
     await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("좁은 폭 미저장");
     const blocked = page.locator('[data-od-id="week-card-download-blocked"]');
     await expect(blocked).toBeVisible();
-    await expect(preview).toBeHidden();
-    /* 버튼은 **자리를 지킨다**(감춰지지 않는다). 지금은 미저장이라 잠겨 있고, 그 잠금은 폭이
-       아니라 저장 상태가 정한다 — 좁은 폭에서 사라지는 건 미리보기뿐이라는 게 이 단언의 뜻이다. */
+    /* 잠긴 것과 감춰지는 것은 다르다 — 미리보기도 아이콘도 자리를 지킨다. 잠금은 폭이 아니라
+       저장 상태가 정하고, 폭이 정하는 것은 아이콘의 **자리**뿐이라는 게 이 세 단언의 뜻이다. */
+    await expect(preview).toBeVisible();
     await expect(button).toBeVisible();
+    expect(await iconOverlapsCard()).toBe(false);
   });
 });

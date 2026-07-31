@@ -85,12 +85,15 @@ afterEach(() => {
 });
 
 describe("WeekCardDownload", () => {
-  it("카드가 없으면(미발행) 버튼을 잠그고 이유를 알린다", () => {
-    render(<WeekCardDownload card={null} weekStartDate="2026-07-20" />);
-    expect(screen.getByTestId("week-card-download-btn")).toBeDisabled();
-    expect(screen.getByText("발행된 주만 카드로 내려받을 수 있습니다.")).toBeInTheDocument();
-    // 미발행이면 캡처할 카드 자체가 없다 — 미리보기도 안 그린다.
-    expect(screen.queryByTestId("week-card")).not.toBeInTheDocument();
+  /* **카드가 없으면 아무것도 안 그린다**(결정 35, 2026-08-01).
+
+     전엔 잠긴 버튼 + "발행된 주만 카드로 내려받을 수 있습니다."를 그렸다. 그 문장이 걷히면
+     이 가지에 남는 건 아무 설명 없이 흐려진 버튼 하나뿐이라 화면에 있는 것이 정보가 0 이다.
+     이 갈래로 오는 유일한 호출자인 읽기 화면은 `week` 가 있을 때만 이 컴포넌트를 그리므로
+     실전에서 안 닿고, 닿더라도 그 화면의 "아직이야…" 빈 상태가 같은 사실을 말한다. */
+  it("카드가 없으면 아무것도 안 그린다", () => {
+    const { container } = render(<WeekCardDownload card={null} weekStartDate="2026-07-20" />);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("카드가 있고 막힌 이유가 없으면 미리보기를 그리고 버튼이 활성이다", () => {
@@ -101,22 +104,68 @@ describe("WeekCardDownload", () => {
     expect(screen.queryByTestId("week-card-download-blocked")).not.toBeInTheDocument();
   });
 
-  /* **잠긴 이유는 언제나 화면에 있다**(2026-07-31). 미리보기가 draft 를 그리게 되면서 편집기의
-     `card` 는 절대 null 이 아니게 됐고, 그러면 "발행된 주만…" 안내가 들어 있던 `!card` 가지가
-     통째로 안 닿는다 — 미발행인데 저장은 된 주에서 **이유 없이 잠긴 버튼**이 남는다. 그래서
-     사유를 값으로 받고, 각 값이 자기 문장과 함께 잠그는지를 잰다. */
-  it.each([
-    ["unpublished", "발행된 주만 카드로 내려받을 수 있습니다."],
-    ["unsaved", "저장하지 않은 변경이 있습니다. 저장하면 이 카드를 받을 수 있습니다."],
-  ] as const)("%s 이면 버튼을 잠그고 그 이유를 말한다", (reason, message) => {
-    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" blockedReason={reason} />);
+  /* **잠긴 이유는 언제나 화면 어딘가에 있다.** 다만 2026-08-01(결정 35)부터 "어디"가 사유마다
+     갈린다 — 그게 이 두 테스트가 갈린 이유다.
 
-    expect(screen.getByTestId("week-card-download-blocked")).toHaveTextContent(message);
-    /* **잠근다**(전엔 안 잠갔다). 미저장이어도 받을 수 있고 문구로만 경고하던 시절엔 화면과
-       파일이 서로 다를 수 있었다 — 이제 잠그므로 "보이는 것 = 받는 것"이 항상 참이다. */
+     둘 다 잠근다(전엔 미저장을 안 잠갔다). 미저장이어도 받을 수 있고 문구로만 경고하던
+     시절엔 화면과 파일이 서로 다를 수 있었다 — 이제 잠그므로 "보이는 것 = 받는 것"이 항상 참이다.
+     그리고 둘 다 카드는 그대로 그린다: 못 받는 것과 못 보는 것은 다른 사실이다. */
+  it("unsaved 는 화면 문장으로 이유를 말한다 — 여기서만 말할 수 있는 인과다", () => {
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" blockedReason="unsaved" />);
+
+    expect(screen.getByTestId("week-card-download-blocked")).toHaveTextContent(
+      "저장하지 않은 변경이 있습니다. 저장하면 이 카드를 받을 수 있습니다.",
+    );
     expect(screen.getByTestId("week-card-download-btn")).toBeDisabled();
-    // 카드는 그대로 그린다 — 못 받는 것과 못 보는 것은 다른 사실이다.
     expect(screen.getByTestId("week-card")).toBeInTheDocument();
+  });
+
+  /* **unpublished 는 화면 문장을 안 낸다** — 같은 화면 저장·발행 바의 칩("비공개")이 이미 그
+     사실을 상시로 말하므로 카드 옆에서 한 번 더 말하면 같은 사실이 한 화면에 둘이다.
+     대신 **버튼 이름이 사유를 진다**: 아이콘만 남은 편집기 변형에서 잠긴 이유를 전할 유일한
+     통로라, 이게 없으면 "왜 안 눌리지"가 된다. `title` 은 hover 전용이라 이름을 대신 못 한다. */
+  it.each(["editor", "reader"] as const)(
+    "%s: unpublished 는 화면 문장 대신 버튼 이름으로 이유를 진다",
+    (variant) => {
+      render(
+        <WeekCardDownload
+          card={CARD}
+          weekStartDate="2026-07-20"
+          blockedReason="unpublished"
+          variant={variant}
+        />,
+      );
+
+      expect(screen.queryByTestId("week-card-download-blocked")).not.toBeInTheDocument();
+      const btn = screen.getByTestId("week-card-download-btn");
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAccessibleName("PNG 다운로드 — 발행된 주만 받을 수 있습니다");
+      expect(screen.getByTestId("week-card")).toBeInTheDocument();
+    },
+  );
+
+  /* ── variant: 같은 부품이 두 화면에서 다른 모양이다(결정 35) ─────────────────────
+     관리자는 매주 오는 사람이라 아이콘으로 자리를 아끼고, 팬은 한 번 오고 마는 사람이라
+     "받을 수 있다"가 글자로 발견돼야 한다. **확대(카드 클릭)는 이 축과 무관하게 공유한다** —
+     그걸 함께 재지 않으면 variant 를 넣으며 한쪽 확대를 떨어뜨려도 초록으로 남는다. */
+  it("editor 변형은 다운로드가 아이콘이다 — 글자를 안 쓴다", () => {
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" variant="editor" />);
+
+    const btn = screen.getByTestId("week-card-download-btn");
+    expect(btn).toHaveTextContent("");
+    expect(btn).toHaveAccessibleName("PNG 다운로드");
+    expect(btn.querySelector("svg")).toBeInTheDocument();
+    // 확대는 두 변형 공통이다.
+    expect(screen.getByTestId("week-card-download-zoom")).toBeEnabled();
+  });
+
+  it("reader 변형(기본)은 다운로드가 글자 버튼이다", () => {
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" />);
+
+    const btn = screen.getByTestId("week-card-download-btn");
+    expect(btn).toHaveTextContent("PNG 다운로드");
+    expect(btn.querySelector("svg")).not.toBeInTheDocument();
+    expect(screen.getByTestId("week-card-download-zoom")).toBeEnabled();
   });
 
   /* 확대 창(2026-07-31). **카드가 둘이 되는 유일한 자리**라 두 가지를 함께 잰다:
@@ -252,6 +301,28 @@ describe("WeekCardDownload", () => {
     );
     expect(screen.getByTestId("week-card-download-btn")).toBeEnabled();
     expect(capturedAnchor).toBeNull();
+  });
+
+  /* **아이콘엔 "만드는 중…"을 실을 글자 자리가 없다**(결정 35, 2026-08-01). 글자 버튼은 자기
+     라벨로 그 상태를 말했는데(`{capturing ? "만드는 중…" : …}`) 아이콘으로 줄이면 그 통로가
+     통째로 사라진다 — 캡처는 초 단위라 신호가 없으면 관리자는 눌리지 않았다고 읽는다.
+     이 저장소가 팬 제안에서 이미 밟은 자리다("보드를 안 바꾸는 쓰기는 성공 신호가 하나도 없다").
+
+     칩과 접근명을 **함께** 잰다: 칩만 재면 시각 사용자만 덮이고, 이름만 재면 화면이 조용해도
+     초록이다. */
+  it("editor 변형은 캡처 중임을 칩과 버튼 이름 둘 다로 말한다", async () => {
+    vi.mocked(toPng).mockImplementation(() => new Promise(() => {}));
+    render(<WeekCardDownload card={CARD} weekStartDate="2026-07-20" variant="editor" />);
+    expect(screen.queryByTestId("week-card-download-busy")).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("week-card-download-btn"));
+    });
+
+    expect(screen.getByTestId("week-card-download-busy")).toHaveTextContent("만드는 중…");
+    expect(screen.getByTestId("week-card-download-btn")).toHaveAccessibleName(
+      "PNG 카드를 만드는 중",
+    );
   });
 
   it("첫 캡처가 아직 도는 동안 시간 초과로 재시도해도 toPng 을 새로 부르지 않는다", async () => {

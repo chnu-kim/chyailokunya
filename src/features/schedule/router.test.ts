@@ -500,6 +500,50 @@ describe("일정 라우터", () => {
     expect(after.entries.map((e) => e.title)).toEqual(["젤다"]); // 항목도 그대로
   });
 
+  /* **옛 공지를 내리는 저장**(#56 결정 35 짝, 적대적 리뷰 2·3라운드 2026-08-01).
+
+     편집기에서 공지 입력을 걷으며 새 공지는 못 만들게 됐지만, 이미 저장된 공지는 화면·카드에
+     계속 나오므로 **내릴 길**이 필요했다 — 그래서 그 값이 있는 주에서만 정리용 칸이 뜬다
+     (schedule-editor.tsx). 이 테스트는 그 칸이 하는 일의 서버 쪽 절반이다: 빈 문자열을 보내면
+     공지가 실제로 `null` 이 되는가.
+
+     **이 계약이 왜 여기 있나.** 처음엔 e2e 가 저장까지 태웠는데 재시도에 취약했다 — 픽스처를
+     실행 시작에 한 번만 심는데 이 스펙만 **미리 심어 둔 값을 소비**해서, 저장 뒤 무엇이든
+     흔들리면 재시도가 이미 비워진 주를 열어 첫 단언에서 죽는다(다른 쓰기 스펙은 빈 주에서
+     만들어 내므로 다시 만들면 그만이다). 이 층은 테스트마다 테이블을 비우므로(setupFiles)
+     같은 계약을 몇 번 돌려도 같은 자리에서 시작한다. */
+  it("빈 공지로 덮으면 옛 공지가 내려간다 — 편집기의 정리용 칸이 하는 일", async () => {
+    const authed = createCaller(makeCtx({ authorities: admin }));
+    const before = await saveWeekAsEditor(authed, {
+      weekStartDate: MON,
+      note: "내려갈 옛 공지",
+      published: true,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "저챗", gameId: null }],
+    });
+    expect(before.note).toBe("내려갈 옛 공지");
+
+    /* 화면이 보내는 그대로 **빈 문자열**이다 — `null` 이 아니다. 입력을 비우면 `draft.note` 가
+       `""` 가 되고 그 값이 스키마를 지나며 접힌다. `null` 로만 테스트하면 화면이 실제로 태우는
+       경로를 안 보는 셈이다. */
+    const cleared = await authed.schedule.saveWeek({
+      weekStartDate: MON,
+      revision: before.revision,
+      note: "",
+      published: true,
+      days: [],
+      entries: [{ scheduledDate: "2026-07-20", title: "저챗", gameId: null }],
+    });
+
+    expect(cleared.note).toBeNull();
+    // 되읽어도 그대로다 — 응답만 맞고 DB 가 안 바뀌는 경우를 가른다.
+    expect((await authed.schedule.getWeek({ weekStartDate: MON })).note).toBeNull();
+    /* **공지만 내려간다.** 발행도 항목도 그대로여야 관리자가 "공지 하나 지우려다 그 주를 통째로
+       내리는" 일이 없다 — 정리용 칸의 안내가 약속하는 범위가 정확히 이것이다. */
+    expect(cleared.publishedAt).not.toBeNull();
+    expect(cleared.entries.map((e) => e.title)).toEqual(["저챗"]);
+  });
+
   it("stale revision 으로 저장하면 CONFLICT — 남의 항목을 덮어쓰지 않는다", async () => {
     const caller = createCaller(makeCtx({ authorities: admin }));
     // 관리자 A 가 주를 연다(이 시점의 revision 을 손에 쥔다).

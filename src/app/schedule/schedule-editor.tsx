@@ -248,12 +248,10 @@ export function ScheduleEditor({
     () =>
       buildWeekCard({
         weekStartDate,
-        /* 공지도 **저장될 값**으로 접는다(codex 리뷰 P2 — 아래 entries 와 같은 부류를 여기만
-           빠뜨렸다). 서버 스키마는 공백만인 공지를 `null` 로 접고 나머지는 trim 하며
-           (features/schedule/schema.ts), `isWeekDirty` 도 `.trim()` 으로 비교한다 — 그래서
-           공백만 타이핑하면 **dirty 가 아닌데** 날것을 넘기면 카드에 빈 공지 블록이 생긴다.
-           받아지는 파일엔 없는 그 블록이 화면에만 있는 셈이고, 저장하거나 새로고침하면 사라진다. */
-        note: draft.note.trim() || null,
+        /* 공지는 **날것 그대로 넘긴다** — 접는 일은 `buildWeekCard` 가 한다(2026-08-01에 옮겼다,
+           그 파일의 같은 자리 주석에 근거). 한때 여기서 `draft.note.trim() || null` 로 접었는데,
+           팬아트 표기(같은 부류)는 진작 조립부에서 접고 있었으므로 기준이 두 자리로 갈려 있었다. */
+        note: draft.note,
         /* **저장될 값으로 그린다**(적대적 리뷰 지적, 2026-07-31). `draft.entries` 를 날것으로
            넘기면 "보이는 것 = 받는 것"이 정확히 한 자리에서 깨진다: "+항목 추가"로 만든 빈 제목
            항목은 저장 페이로드에서 버려지는데(`draftEntryInputs`) **`isWeekDirty` 도 그 정규형을
@@ -372,11 +370,11 @@ export function ScheduleEditor({
             영역이 둘이다: 요일 목록 · 오른쪽 곁칸(`sched__aside` = 미리보기 + 주 메타). **DOM
             순서는 `곁칸(미리보기 → 메타) → 요일`.**
 
-            공지·팬아트·작가표기는 셋 다 미리보기 카드에만 그려지는 값이라, 결정 24 초판처럼
-            요일 **위**에서 226px 를 먹는 자리(`메타 → 미리보기 → 요일`)는 그 값이 어디로
-            가는지 보여주는 미리보기와 반대편이라 어색했다 — 결정 29 가 미리보기 아래로 옮기고
-            카드의 실제 배치와 좌우를 맞췄다(카드에서 공지는 하단 왼쪽 글, 그림은 오른쪽이다 —
-            week-card.tsx 의 .week-card__main·.week-card__art, 아래 sched__meta 참고).
+            팬아트·작가표기는 미리보기 카드에만 그려지는 값이라, 결정 24 초판처럼 요일 **위**
+            에서 226px 를 먹는 자리(`메타 → 미리보기 → 요일`)는 그 값이 어디로 가는지 보여주는
+            미리보기와 반대편이라 어색했다 — 결정 29 가 미리보기 아래로 옮겼다. (그때는 공지
+            입력이 함께 있어 카드의 좌우 배치까지 흉내 냈는데, 공지가 걷히며 그 대칭은
+            없어졌다 — 아래 팬아트 상자 주석.)
 
             **미리보기·메타를 `sched__aside` 로 묶어 단일 grid-area 로 만든다**(2026-07-31,
             codex review 가 잡은 회귀). 처음엔 메타를 `sched__grid` 의 직접 자식으로 두고 요일과
@@ -389,7 +387,7 @@ export function ScheduleEditor({
             둘을 쌓는다 — flex 자식의 배치는 grid 트랙 크기와 무관하므로 요일이 아무리
             길어져도 메타는 항상 미리보기 바로 아래다.
 
-            **narrow flow(1300 미만) 순서는 결정 29 코멘트가 제안한 `요일 → 미리보기 → 메타`가
+            **narrow flow(1440 미만) 순서는 결정 29 코멘트가 제안한 `요일 → 미리보기 → 메타`가
             아니라 `미리보기 → 메타 → 요일`이다 — 적대적 리뷰가 잡은 또 다른 회귀다.** 결정 29 는
             "하루 카드가 접힘 요약(결정 28)이라 이 순서에서도 미리보기가 첫 화면 안에 든다"고
             가정했는데, 그 가정은 **모든 날이 접혀 있을 때만** 참이다. 실제 편집은 최소 하루를
@@ -402,7 +400,7 @@ export function ScheduleEditor({
             위치가 안 바뀐다. 곁칸 안에서도 미리보기가 메타보다 앞이라 결정 29 의 "메타가
             카드에 붙어 있다"는 목표가 그대로 산다.
 
-            1300 이상에서만 `grid-template-areas` 로 요일을 왼쪽 열에, 곁칸을 오른쪽 열에
+            1440 이상에서만 `grid-template-areas` 로 요일을 왼쪽 열에, 곁칸을 오른쪽 열에
             세운다 — 그 모드는 area 지정이 DOM 순서와 무관해 이 재배치의 영향을 안 받는다.
             곁칸 안 DOM 순서(미리보기 → 메타)가 그대로 시각 순서라 `order` 가 필요 없다.
 
@@ -410,7 +408,7 @@ export function ScheduleEditor({
             1열에서 미리보기가 그 덩어리 뒤로 밀린다 — 다만 이제 그 "덩어리"엔 미리보기·메타가
             함께 있고 요일만 별도다.
 
-            **알고 받아들인 트레이드오프 — 1300 이상에서 탭 순서가 시각 순서(왼쪽 요일 → 오른쪽
+            **알고 받아들인 트레이드오프 — 1440 이상에서 탭 순서가 시각 순서(왼쪽 요일 → 오른쪽
             곁칸)와 다르다(곁칸 → 요일).** 적대적 리뷰가 이 자리를 세 라운드 연속으로 지적했다
             (2026-07-31~08-01). DOM 순서 하나가 두 폭 모두를 섬겨야 하는데 라운드마다 요구가
             서로 배타적이다 — narrow flow 회귀(위 문단)는 "곁칸을 요일보다 앞에" 를 요구하고,
@@ -446,7 +444,7 @@ export function ScheduleEditor({
                 가 세운 "작은 sticky 요소를 큰 포함 블록 안에" 패턴이고, 이 겹이 없으면 그 패턴이
                 깨진다. */}
             <div className="sched__aside-pin">
-              {/* 넓은 폭에선 오른쪽 열 위 칸에 sticky 로 붙고, 1300 미만에선 요일 목록보다 **앞**에
+              {/* 넓은 폭에선 오른쪽 열 위 칸에 sticky 로 붙고, 1440 미만에선 요일 목록보다 **앞**에
                   그대로 흐른다(위 sched__grid 주석 참고) — 어떤 날을 펼쳐도(결정 28) 이 위치가
                   안 바뀐다. 미리보기·메타가 이 안쪽 겹에서 함께 sticky 로 붙어야(아래 sched__grid
                   주석의 겹침 회귀 참고) 메타가 스크롤 중 미리보기 밑으로 들어가지 않는다. */}
@@ -454,35 +452,71 @@ export function ScheduleEditor({
                 <WeekCardDownload
                   card={card}
                   weekStartDate={weekStartDate}
+                  /* 관리자 화면이라 다운로드가 아이콘이다(결정 35) — 팬이 보는 읽기 화면은
+                     글자를 남긴다(그 근거는 week-card-download.tsx 의 variant 주석). */
+                  variant="editor"
                   /* 사유의 **순서가 뜻을 갖는다** — 발행이 먼저다. 미발행 주는 저장을 아무리 해도
                    못 받으므로 "저장하면 받을 수 있습니다"가 거짓이 된다. */
                   blockedReason={!baseline.published ? "unpublished" : dirty ? "unsaved" : null}
                 />
               </div>
 
-              {/* ── 주 메타: 공지 · 팬아트(결정 29, 2026-07-31 개정) ──────────────────────
-                둘 다 미리보기 카드에만 그려지는 값이라 그 카드 바로 다음, 카드의 좌우 배치와
-                맞춘 2박스로 세운다 — 카드에서 공지는 하단 왼쪽 글, 그림은 오른쪽이다
-                (week-card.tsx 의 .week-card__main·.week-card__art). 폭이 좁아지면(flex-wrap)
-                공지 → 팬아트 순으로 쌓인다 — 읽기 화면의 공지 → 카드 순서와 같은 방향이다. */}
-              <div className="sched__meta">
-                <div className="paper sched-meta__note-box">
+              {/* ── 주 메타: 팬아트(결정 29 · 공지 입력 제거 2026-08-01) ──────────────────
+                미리보기 카드에만 그려지는 값이라 그 카드 바로 다음에 선다.
+
+                **한때 여기 공지 입력이 함께 있었고 두 박스가 카드의 좌우 배치를 흉내 냈다**
+                (카드에서 공지는 하단 왼쪽 글, 그림은 오른쪽 — week-card.tsx 의
+                .week-card__main·.week-card__art). 공지를 안 쓰기로 해 입력만 걷었으므로 그
+                좌우 대칭의 근거도 함께 사라졌다 — 이제 상자가 하나뿐이라 대칭시킬 짝이 없다.
+
+                **지운 것은 "새 공지를 만드는 길"이다.** `draft.note`·`NOTE_CHANGED`·
+                `weekToDraft` 의 note·`buildWeekCard({note})` 는 전부 그대로다: 그것까지 걷으면
+                **이미 저장된 공지가 있는 주를 저장할 때 그 값이 날아간다**(폼이 안 보내면 전체
+                교체 뮤테이션이 null 로 덮는다). `.sched-note`·`.sched-note__label` CSS 도
+                남긴다 — 바로 아래 팬아트 라벨과 작가 표기가 같은 클래스를 쓴다.
+
+                **`.sched__meta` 래퍼도 함께 걷었다.** 그 겹의 일은 "두 박스를 가로로 나란히
+                세우고 좁아지면 쌓는다"였는데 박스가 하나면 그 일이 통째로 없다 — 남겨 두면
+                아무것도 안 하는 flex 컨테이너가 되고, 다음 사람이 그 안의 `flex-basis 240` 을
+                보고 없는 형제를 찾는다. 팬아트 상자는 이제 `.sched__aside-pin` 의 직접
+                자식이라 미리보기와의 간격을 그 flex gap 이 그대로 준다. */}
+
+              {/* ── 이미 적어 둔 공지가 있는 주에서만 뜬다(적대적 리뷰 2라운드, 2026-08-01) ──
+                처음엔 입력을 조건 없이 걷었다. 그러면 **새 공지가 안 생기는 대신 옛 공지가
+                갇힌다**: 저장 경로는 그 값을 계속 보존하고 읽기 화면·PNG 카드는 계속 그리는데,
+                관리자에겐 고치거나 내릴 길이 하나도 없다. 오타가 있든 철 지난 내용이든 영구히
+                공개된 채로 남는 셈이라, "안 쓰기로 했다"가 "손댈 수 없다"가 돼 버린다.
+
+                `baseline.note`(저장된 값)로 가른다 — `draft.note` 로 가르면 **비우는 순간 칸이
+                사라져** 그 편집을 저장할 수도, 되돌릴 수도 없다(자기가 만든 상태에 자기가
+                갇힌다). baseline 은 저장 전까지 안 변하므로 비운 채로도 칸이 남아 있고, 저장이
+                끝나면 그때 사라진다 — 그게 "다 치웠다"는 신호이기도 하다.
+
+                라벨이 "이번 주 공지 (선택)"이 아닌 이유: 이 칸은 이제 **새로 쓰는 자리가
+                아니다.** 무엇을 하는 자리인지가 이름에 있어야 한다. */}
+              {baseline.note.trim() !== "" && (
+                <div className="paper sched-meta__note-box" data-od-id="schedule-note-legacy">
                   <label className="sched-note" htmlFor="sched-note-input">
-                    <span className="sched-note__label">이번 주 공지 (선택)</span>
+                    <span className="sched-note__label">이미 적어 둔 공지</span>
                     <input
                       id="sched-note-input"
                       className="sched-field"
                       type="text"
                       maxLength={500}
-                      placeholder="예: 이번 주는 젤다 위주로 달립니다"
                       value={draft.note}
                       data-od-id="schedule-note-input"
                       onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
                     />
                   </label>
+                  {/* 안내라 표기가 아니라 문장이고, 합쇼체다(AGENTS). 지우는 법을 말해 두지
+                      않으면 "비워도 되나"를 확신 못 해 그대로 두게 된다. */}
+                  <p className="sched-note__hint">
+                    비우고 저장하면 이 주의 공지가 내려갑니다. 새 공지는 더 쓰지 않습니다.
+                  </p>
                 </div>
+              )}
 
-                {/* 팬아트(ADR-0028) — **한 상자다**: 썸네일·버튼·그린이·형식 힌트가 전부 이 안에
+              {/* 팬아트(ADR-0028) — **한 상자다**: 썸네일·버튼·그린이·형식 힌트가 전부 이 안에
             있다(결정 29 — DOM 은 전부터 한 div 였고, 이번엔 그 div 자체에 테두리를 준다).
             **입력 컨트롤이 있으므로 사진지 섬(.polaroid)을 쓰지 않는다**: 그 섬은 다크에서
             라이트 토큰을 국소 재선언한 크림 종이라 폼 컨트롤의 테두리·포커스 대비가 거기서
@@ -493,99 +527,94 @@ export function ScheduleEditor({
 
             미리보기는 **실제 서빙 경로**(/api/fanart/…)로 그린다. objectURL 이 아니라 그걸 쓰면
             "저장하면 팬이 볼 그림" 그대로를 보고, 서빙 라우트까지 이 화면에서 함께 검증된다. */}
-                <div
-                  className="paper sched-fanart"
-                  role="group"
-                  aria-labelledby="sched-fanart-label"
-                  data-od-id="schedule-fanart"
-                >
-                  <span className="sched-note__label" id="sched-fanart-label">
-                    팬아트 (선택)
-                  </span>
+              <div
+                className="paper sched-fanart"
+                role="group"
+                aria-labelledby="sched-fanart-label"
+                data-od-id="schedule-fanart"
+              >
+                <span className="sched-note__label" id="sched-fanart-label">
+                  팬아트 (선택)
+                </span>
 
-                  <div className="sched-fanart__row">
-                    {draft.fanartImageKey && (
-                      /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
+                <div className="sched-fanart__row">
+                  {draft.fanartImageKey && (
+                    /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
                  비율이 아니다(읽기 화면은 반대로 실제 치수로 예약한다). */
-                      <img
-                        className="sched-fanart__thumb"
-                        src={`/api/fanart/${draft.fanartImageKey}`}
-                        alt="올린 팬아트"
-                        width={96}
-                        height={96}
-                        data-od-id="schedule-fanart-thumb"
-                      />
-                    )}
-                    <div className="sched-fanart__acts">
-                      {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
+                    <img
+                      className="sched-fanart__thumb"
+                      src={`/api/fanart/${draft.fanartImageKey}`}
+                      alt="올린 팬아트"
+                      width={96}
+                      height={96}
+                      data-od-id="schedule-fanart-thumb"
+                    />
+                  )}
+                  <div className="sched-fanart__acts">
+                    {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
                   input 이 받고(sr-only 는 clip 이라 포커스가 살아 있다), 링은 아래 CSS 의
                   :focus-within 이 label 에 그린다. */}
-                      <label className="btn btn--secondary sched-fanart__pick">
-                        {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
-                        <input
-                          type="file"
-                          className="sr-only"
-                          accept={FANART_ACCEPT}
-                          disabled={fanartLocked}
-                          data-od-id="schedule-fanart-file"
-                          onChange={onPickFanart}
-                        />
-                      </label>
-                      {draft.fanartImageKey && (
-                        <button
-                          type="button"
-                          className="btn btn--secondary sched-fanart__del"
-                          disabled={fanartLocked}
-                          data-od-id="schedule-fanart-remove"
-                          onClick={() => send({ type: "FANART_REMOVED" })}
-                        >
-                          내리기
-                        </button>
-                      )}
-                    </div>
+                    <label className="btn btn--secondary sched-fanart__pick">
+                      {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
+                      <input
+                        type="file"
+                        className="sr-only"
+                        accept={FANART_ACCEPT}
+                        disabled={fanartLocked}
+                        data-od-id="schedule-fanart-file"
+                        onChange={onPickFanart}
+                      />
+                    </label>
+                    {draft.fanartImageKey && (
+                      <button
+                        type="button"
+                        className="btn btn--secondary sched-fanart__del"
+                        disabled={fanartLocked}
+                        data-od-id="schedule-fanart-remove"
+                        onClick={() => send({ type: "FANART_REMOVED" })}
+                      >
+                        내리기
+                      </button>
+                    )}
                   </div>
+                </div>
 
-                  {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
+                {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
               그림은 미리 줄여 올려야 한다. 값 칸이라 문장이 아니라 표기다(AGENTS). */}
-                  <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
+                <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
 
-                  {uploading && (
-                    <p
-                      className="sched-fanart__busy"
-                      role="status"
-                      data-od-id="schedule-fanart-busy"
-                    >
-                      올리는 중…
-                    </p>
-                  )}
-                  {fanartError && (
-                    <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
-                      {fanartError}
-                    </p>
-                  )}
+                {uploading && (
+                  <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">
+                    올리는 중…
+                  </p>
+                )}
+                {fanartError && (
+                  <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
+                    {fanartError}
+                  </p>
+                )}
 
-                  {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
+                {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
               CHECK 가 둘 다 거절하므로, 화면이 애초에 못 만들게 하는 게 가장 조용한 방어다.
               업로드 중에는 잠근다: 성공하면 표기가 비워지므로(새 그림에 옛 이름을 안 붙인다)
               그 사이 타이핑한 값이 사라져 보인다. */}
-                  {draft.fanartImageKey && (
-                    <label className="sched-note sched-fanart__credit">
-                      <span className="sched-note__label">작가 표기 (선택)</span>
-                      <input
-                        className="sched-field"
-                        type="text"
-                        maxLength={100}
-                        placeholder="그린 사람"
-                        value={draft.fanartCredit}
-                        disabled={uploading}
-                        data-od-id="schedule-fanart-credit"
-                        onChange={(e) =>
-                          send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })
-                        }
-                      />
-                    </label>
-                  )}
-                </div>
+                {draft.fanartImageKey && (
+                  <label className="sched-note sched-fanart__credit">
+                    <span className="sched-note__label">작가 표기 (선택)</span>
+                    <input
+                      className="sched-field"
+                      type="text"
+                      maxLength={100}
+                      placeholder="그린 사람"
+                      value={draft.fanartCredit}
+                      disabled={uploading}
+                      data-od-id="schedule-fanart-credit"
+                      onChange={(e) =>
+                        send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })
+                      }
+                    />
+                  </label>
+                )}
               </div>
             </div>
           </div>
