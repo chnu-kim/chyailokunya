@@ -408,6 +408,46 @@ test("관리자: 슬롯에 파일을 떨구면 업로드가 난다", async ({ br
   await admin.close();
 });
 
+/* **잠긴 동안에도 `dragover` 를 취소한다**(codex 두 채널이 독립적으로 잡은 결함, 2026-08-01).
+
+   `fanartLocked` 일 때 취소를 건너뛰면 브라우저 기본 동작이 살아나 **떨군 파일로 탭이 이동하고
+   저장 안 된 편집이 통째로 날아간다** — 저장·업로드 중이 정확히 그 순간이다. 잠금이 뜻하는
+   것은 "업로드를 안 낸다"이지 "브라우저에 넘긴다"가 아니다.
+
+   **dom 단위의 잠금 테스트로는 이 축이 안 잡힌다** — 거기선 `drop` 을 직접 쏘므로 "dragover 를
+   취소해야 drop 이 온다"는 브라우저 전제 자체를 안 탄다(리뷰 지적). 그래서 진짜 잠금 상태를
+   만들어 여기서 잰다: 업로드 응답을 붙잡아 `uploading` 에 머물게 한 뒤 취소 여부를 읽는다. */
+test("관리자: 업로드 중에도 드롭 기본 동작을 막는다 — 안 막으면 편집이 날아간다", async ({
+  browser,
+  baseURL,
+}) => {
+  const admin = await contextAs(browser, baseURL!);
+  const page = await admin.newPage();
+
+  // 업로드를 응답 없이 붙잡아 둔다 — 그동안 편집기는 `uploading` 이다.
+  let release: (() => void) | null = null;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/api/fanart", async (route) => {
+    await held;
+    await route.abort();
+  });
+
+  await page.goto(`/schedule?week=${SLOT_WEEK}`);
+  await expectSignedIn(page);
+  await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(FANART_PNG);
+  // 잠긴 것을 먼저 못박는다 — 안 잠겼으면 아래가 무엇을 재는지 알 수 없다.
+  await expect(page.locator('[data-od-id="schedule-fanart-file"]')).toBeDisabled();
+
+  const slot = page.locator('[data-od-id="schedule-fanart-slot"]');
+  const prevented = await slot.evaluate(
+    (el) => !el.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true })),
+  );
+  expect(prevented, "잠긴 동안에도 취소해야 브라우저가 파일로 이동하지 않는다").toBe(true);
+
+  release!();
+  await admin.close();
+});
+
 test("서빙: 키 형식이 아니거나 없는 객체는 404", async ({ request }) => {
   // 경로 순회. 키 검증이 이 한 자리에서 막으므로 R2 를 두드리지도 않는다.
   expect((await request.get("/api/fanart/..%2F..%2Fpackage.json")).status()).toBe(404);

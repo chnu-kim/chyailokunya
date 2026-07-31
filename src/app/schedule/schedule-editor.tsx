@@ -555,17 +555,24 @@ export function ScheduleEditor({
                   드래그앤드롭은 `onDragOver` 에서 `preventDefault()` 를 해야 `drop` 이 난다
                   (기본 동작이 "받지 않음"이다). `dragleave` 는 자식 위로 지나갈 때도 나므로
                   **`relatedTarget` 이 이 상자 안인지**를 보고 걸러낸다 — 안 그러면 아이콘
-                  위를 지나는 순간 강조가 깜빡인다(카운터를 두는 흔한 우회 없이 끝난다). */}
+                  위를 지나는 순간 강조가 깜빡인다(카운터를 두는 흔한 우회 없이 끝난다).
+
+                  **잠겨 있어도 `preventDefault()` 는 한다**(codex 두 채널이 독립적으로 잡은
+                  결함). 건너뛰면 브라우저 기본 동작이 살아나 **떨군 파일로 탭이 이동하고 저장
+                  안 된 편집이 통째로 날아간다** — 저장·업로드 중이 정확히 그 순간이다. 잠금이
+                  뜻하는 것은 "업로드를 안 낸다"이지 "브라우저에 넘긴다"가 아니다. 대신
+                  `dropEffect = "none"` 으로 "여기선 못 받는다"를 커서가 말하고, 강조도 안 켠다. */}
                 <div
                   className={dragging ? "sched-fanart__slot is-dragging" : "sched-fanart__slot"}
                   data-od-id="schedule-fanart-slot"
+                  // 잠겨 있어도 취소는 한다 — 위 블록 주석의 마지막 문단이 근거다.
                   onDragOver={(ev) => {
-                    if (fanartLocked) return;
                     ev.preventDefault();
+                    if (fanartLocked) ev.dataTransfer.dropEffect = "none";
                   }}
                   onDragEnter={(ev) => {
-                    if (fanartLocked) return;
                     ev.preventDefault();
+                    if (fanartLocked) return;
                     setDragging(true);
                   }}
                   onDragLeave={(ev) => {
