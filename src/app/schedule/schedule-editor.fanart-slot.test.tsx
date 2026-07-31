@@ -157,5 +157,17 @@ describe("ScheduleEditor — 팬아트 슬롯", () => {
     const before = fetchMock.mock.calls.length;
     fireEvent.drop(ui.slot(), { dataTransfer: transfer([png()]) });
     expect(fetchMock.mock.calls.length).toBe(before);
+
+    /* **그런데 취소는 여전히 한다.** 잠겼다고 `dragover` 를 그냥 흘리면 브라우저 기본 동작이
+       살아나 떨군 파일로 탭이 이동하고 **저장 안 된 편집이 통째로 날아간다** — 저장 중이
+       정확히 그 순간이다. 잠금은 "업로드를 안 낸다"이지 "브라우저에 넘긴다"가 아니다
+       (codex 두 채널이 독립적으로 잡은 결함). */
+    expect(
+      fireEvent.dragOver(ui.slot(), { dataTransfer: transfer([png()]) }),
+      "잠긴 동안에도 dragover 를 취소한다",
+    ).toBe(false);
+    // 강조는 안 켜진다 — 받을 수 없는 자리라고 화면이 말해야 한다.
+    fireEvent.dragEnter(ui.slot(), { dataTransfer: transfer([png()]) });
+    expect(ui.slot().className).not.toContain("is-dragging");
   });
 });
