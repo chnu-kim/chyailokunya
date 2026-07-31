@@ -626,122 +626,147 @@ export function ScheduleEditor({
               const isToday = date === today;
               const expanded = expandedDate === date;
               const posters = daySummaryPosters(dayEntries, gamesById);
+              /* 휴방 표시는 **줄 전체가 진다**(결정 32). 전엔 접힌 줄에 `chip--warn 휴방` 칩이
+                 서서 "이번 주 어느 날이 쉬나"를 한눈에 말했는데, 칩 자리가 조작 가능한 체크박스로
+                 바뀌며 그 큰 신호가 체크 표시 하나로 줄었다 — 그 자리를 카드 톤이 대신 받는다
+                 (`.sched-day--rest`, schedule.css). 칩을 체크박스 옆에 함께 두는 길은 안 택했다:
+                 같은 사실을 한 줄에서 두 번 말하게 되고, 그게 정확히 이 개편이 없애는 중복이다. */
               return (
                 <li
                   key={date}
-                  className={isToday ? "sched-day sched-day--today" : "sched-day"}
+                  className={[
+                    "sched-day",
+                    isToday ? "sched-day--today" : "",
+                    day.rest ? "sched-day--rest" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   data-od-id={`schedule-day-${date}`}
                   /* 읽기 화면과 같은 규약 — 보조 기술에도 오늘이 어느 칸인지 말한다. 오늘이 아닌
                    날엔 속성 자체를 안 단다(`aria-current="false"` 는 "이 집합에 현재 항목이
                    있다"는 잘못된 신호다, schedule-read.tsx 의 같은 자리 주석). */
                   {...(isToday ? { "aria-current": "date" as const } : {})}
                 >
-                  {/* 접힌 요약 줄 — 항상 button 이다(결정 28). 시각 입력·휴방 체크박스 같은 폼
-                      컨트롤을 여기 두면 이 요소가 접힘/펼침에 따라 "button" 과 "input 을 낀 div"로
-                      갈려 aria-expanded 를 가진 요소 자체가 바뀐다 — 그래서 폼 컨트롤은 전부 아래
-                      패널로 내리고 이 줄은 읽기 전용 요약만 그린다. draft 를 그대로 읽으므로
-                      펼쳐도 실시간으로 갱신된다(지금 무엇을 편집 중인지의 앵커, 결정 25 와 같은
-                      "보이는 것 = 편집 중인 값" 원칙). */}
-                  <button
-                    type="button"
-                    className="sched-day__summary"
-                    aria-expanded={expanded}
-                    data-od-id={`schedule-day-toggle-${date}`}
-                    onClick={() => setExpandedDate(expanded ? null : date)}
-                  >
-                    <span className="sched-day__label">
-                      <span className="sched-day__dow">{WEEKDAY_LABELS[i]!}</span>
-                      <span className="sched-day__md">{formatMD(date)}</span>
-                      {isToday && <span className="chip chip--ink sched-day__today">오늘</span>}
-                    </span>
-                    {/* 휴방이면 시각 대신 이 칩이 선다 — 읽기 화면의 .sched-day__off/.sched-day__time
-                        상호배타 규칙과 같다(쉬는 날의 시작 시각은 뜻이 안 맞는다). chip--ink 를 안
-                        쓰는 이유: 오늘 칩과 같은 줄에 같이 설 수 있는데 둘 다 잉크 채움이면 서로
-                        구분이 안 간다 — chip--warn 은 이 표면(--surface)에서 라이트 6.20:1·다크
-                        9.01:1 로 대비가 넉넉하다(스크립트로 계산, AGENTS "대비는 손계산 말고"). */}
-                    {day.rest ? (
-                      <span className="chip chip--warn sched-day__rest-chip">휴방</span>
-                    ) : (
-                      <span className="sched-day__summary-time">{day.startTime || "—"}</span>
-                    )}
-                    {/* 표지·제목 요약. 휴방이면 지우지 않고 흐리게 그대로 둔다 — 지우면 "저장은
-                        되는데 접힌 상태에선 안 보이는 항목"이 되어 결정 27 이 고친 조용한 무시가
-                        부분적으로 되살아난다(이슈 #56 결정 28 코멘트). */}
-                    <span
-                      className={
-                        day.rest
-                          ? "sched-day__summary-entries sched-day__summary-entries--rest"
-                          : "sched-day__summary-entries"
-                      }
-                    >
-                      {posters.map((url, idx) => (
-                        <img
-                          key={idx}
-                          className="sched-entry__poster"
-                          src={url}
-                          alt=""
-                          width={30}
-                          height={40}
-                        />
-                      ))}
-                      <span className="sched-day__summary-title">
-                        {daySummaryTitle(dayEntries)}
-                      </span>
-                    </span>
-                    <svg className="sched-day__chevron" aria-hidden="true" viewBox="0 0 16 16">
-                      <path
-                        d="M4 6l4 4 4-4"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
+                  {/* ── 하루 머리 줄(결정 32, 2026-08-01) ──────────────────────────────────
+                      **접힌 채로 시각·휴방을 조작한다.** 전엔 이 줄이 `19:00` 을 보여주기만 하고
+                      펼치면 같은 값이 별도 줄의 입력으로 다시 나타나 접힘↔펼침이 다른 언어였다 —
+                      "이번 주는 수·목만 휴방" 같은 흔한 작업이 펼치기 7번을 요구했다. 펼침은 이제
+                      **항목 편집 전용**이다.
 
-                  {expanded && (
-                    <div className="sched-day__panel" data-od-id={`schedule-day-panel-${date}`}>
-                      {/* 하루의 속성(이슈 #117) — 시각과 휴방. 항목 행이 아니라 여기 한 번만 선다.
-                        휴방이면 시각 입력을 잠근다: 쉬는 날에 시작 시각을 붙이는 건 뜻이 안 맞고,
-                        잠가 두면 그 조합을 만들 길 자체가 없어진다(표시에서 휴방이 이긴다는
-                        결정 5 를 입력 단계에서 미리 지킨다). */}
-                      <div className="sched-day__meta">
-                        <label className="sr-only" htmlFor={`${date}-time`}>
-                          {formatMD(date)} 방송 시작 시각
-                        </label>
+                      **폼 컨트롤은 토글 버튼의 형제다**(결정 28 이 경계한 자리). 버튼 안에 넣으면
+                      이 요소가 접힘/펼침과 무관하게 "button" 과 "input 을 낀 div"로 갈려
+                      `aria-expanded` 를 가진 요소 자체가 바뀐다. 그래서 버튼은 **여전히 요약만**
+                      담고(요일·날짜·표지·제목·chevron) 시각·휴방은 그 옆 `.sched-day__when` 이다.
+
+                      **DOM 순서 = 시각 순서다(두 폭 모두).** 넓은 폭은 한 줄에 `버튼 | 시각 |
+                      휴방`, 560 이하는 버튼이 한 줄을 통째로 쓰고 시각·휴방이 그 아래로 접힌다 —
+                      `order` 를 안 쓰므로 탭 순서가 어느 폭에서도 화면과 안 갈린다(#137 이 곁칸
+                      순서에서 감수한 그 불일치를 여기선 안 만든다). 근거는 schedule.css. */}
+                  <div className="sched-day__head">
+                    <button
+                      type="button"
+                      className="sched-day__summary"
+                      aria-expanded={expanded}
+                      data-od-id={`schedule-day-toggle-${date}`}
+                      onClick={() => setExpandedDate(expanded ? null : date)}
+                    >
+                      <span className="sched-day__label">
+                        <span className="sched-day__dow">{WEEKDAY_LABELS[i]!}</span>
+                        <span className="sched-day__md">{formatMD(date)}</span>
+                        {isToday && <span className="chip chip--ink sched-day__today">오늘</span>}
+                      </span>
+                      {/* 표지·제목 요약. 휴방이면 지우지 않고 흐리게 그대로 둔다 — 지우면 "저장은
+                          되는데 접힌 상태에선 안 보이는 항목"이 되어 결정 27 이 고친 조용한 무시가
+                          부분적으로 되살아난다(이슈 #56 결정 28 코멘트). draft 를 그대로 읽으므로
+                          펼쳐도 실시간으로 갱신된다(결정 25 와 같은 "보이는 것 = 편집 중인 값"). */}
+                      <span
+                        className={
+                          day.rest
+                            ? "sched-day__summary-entries sched-day__summary-entries--rest"
+                            : "sched-day__summary-entries"
+                        }
+                      >
+                        {posters.map((url, idx) => (
+                          <img
+                            key={idx}
+                            className="sched-entry__poster"
+                            src={url}
+                            alt=""
+                            width={30}
+                            height={40}
+                          />
+                        ))}
+                        <span className="sched-day__summary-title">
+                          {daySummaryTitle(dayEntries)}
+                        </span>
+                      </span>
+                      <svg className="sched-day__chevron" aria-hidden="true" viewBox="0 0 16 16">
+                        <path
+                          d="M4 6l4 4 4-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+
+                    {/* 하루의 속성(이슈 #117) — 시각과 휴방. 항목이 아니라 하루에 딸린 값이라
+                        항목 목록 밖, 머리 줄에 한 번만 선다. 휴방이면 시각 입력을 잠근다: 쉬는
+                        날에 시작 시각을 붙이는 건 뜻이 안 맞고, 잠가 두면 그 조합을 만들 길
+                        자체가 없어진다(표시에서 휴방이 이긴다는 결정 5 를 입력 단계에서 미리
+                        지킨다). 둘을 한 겹으로 묶는 이유는 560 이하에서 **둘이 함께** 다음 줄로
+                        내려가야 해서다 — 감싸지 않으면 flex 가 base size 로 줄바꿈을 계산해
+                        시각만 첫 줄에 남는다(schedule.css 의 감축 경로 주석). */}
+                    <div className="sched-day__when">
+                      <label className="sr-only" htmlFor={`${date}-time`}>
+                        {formatMD(date)} 방송 시작 시각
+                      </label>
+                      <input
+                        id={`${date}-time`}
+                        className="sched-field sched-day__time-field"
+                        type="time"
+                        value={day.startTime}
+                        disabled={day.rest}
+                        data-od-id={`schedule-day-time-${date}`}
+                        onChange={(ev) =>
+                          send({
+                            type: "DAY_PATCHED",
+                            date,
+                            patch: { startTime: ev.target.value },
+                          })
+                        }
+                      />
+                      {/* **날짜를 접근 가능한 이름 안에 넣는다**(결정 32). 전엔 이 체크박스가
+                          펼친 패널 안에 있어 한 번에 하나만 존재했고, "휴방" 하나로도 어느
+                          하루인지가 문맥으로 정해졌다. 이제 일곱 개가 늘 탭 순서에 있으므로
+                          이름이 전부 "휴방"이면 스크린 리더에선 구별이 안 간다 — 시각 입력이
+                          이미 `sr-only` 라벨로 날짜를 짚고 있던 것과 같은 처방이다.
+                          `aria-label` 이 아니라 보이는 글자 **앞의** sr-only 조각인 이유:
+                          이름이 "4.1 휴방"으로 조립돼 보이는 글자를 그대로 품는다(WCAG 2.5.3
+                          label-in-name — `aria-label` 로 갈아 끼우면 그 포함 관계를 손으로
+                          유지해야 한다). */}
+                      <label className="sched-day__rest-toggle">
                         <input
-                          id={`${date}-time`}
-                          className="sched-field sched-day__time"
-                          type="time"
-                          value={day.startTime}
-                          disabled={day.rest}
-                          data-od-id={`schedule-day-time-${date}`}
+                          type="checkbox"
+                          checked={day.rest}
+                          data-od-id={`schedule-day-rest-${date}`}
                           onChange={(ev) =>
                             send({
                               type: "DAY_PATCHED",
                               date,
-                              patch: { startTime: ev.target.value },
+                              patch: { rest: ev.target.checked },
                             })
                           }
                         />
-                        <label className="sched-day__rest-toggle">
-                          <input
-                            type="checkbox"
-                            checked={day.rest}
-                            data-od-id={`schedule-day-rest-${date}`}
-                            onChange={(ev) =>
-                              send({
-                                type: "DAY_PATCHED",
-                                date,
-                                patch: { rest: ev.target.checked },
-                              })
-                            }
-                          />
-                          휴방
-                        </label>
-                      </div>
+                        <span className="sr-only">{formatMD(date)} </span>휴방
+                      </label>
+                    </div>
+                  </div>
 
+                  {expanded && (
+                    <div className="sched-day__panel" data-od-id={`schedule-day-panel-${date}`}>
                       {/* 휴방이면 이 덩어리가 통째로 잠긴다(2026-07-31). **항목은 안 지운다** —
                       서버는 휴방인 날의 항목도 거절 없이 저장하는데(saveWeek) 읽기 화면과 PNG
                       카드만 `rest ? [] : entries` 로 버려서(결정 5), 잠그기 전엔 "저장은 되고
@@ -773,81 +798,93 @@ export function ScheduleEditor({
                               key={e.key}
                               data-od-id={`schedule-entry-${e.key}`}
                             >
+                              {/* ── 항목 한 줄 = 한 상자(결정 33, 2026-08-01) ────────────────
+                                전엔 표지·제목·삭제가 각자 테두리를 갖고 하루 카드 > 패널 >
+                                필드로 같은 무게의 테두리가 세 겹 중첩됐다(사용자가 "흩뿌려진
+                                느낌"이라 부른 자리 중 하나). 이제 **상자는 이 행 하나**이고 안쪽
+                                컨트롤은 테두리를 안 그린다 — 중첩이 두 겹으로 준다.
+
+                                연결 게임명도 이 상자 **안** 둘째 행으로 들어온다. 밖에 있던
+                                시절엔 그 문단이 다음 항목과 같은 gap 으로 떨어져 있어 "누구에게
+                                딸린 사실인가"가 자리로 안 읽혔다. */}
                               <div className="sched-row">
-                                <button
-                                  type="button"
-                                  className="sched-field sched-row__game-trigger"
-                                  aria-haspopup="true"
-                                  /* **`!day.rest` 가 여기에도 걸린다**(codex 리뷰 P3). 패널은 아래에서
+                                <div className="sched-row__main">
+                                  <button
+                                    type="button"
+                                    className="sched-field sched-row__game-trigger"
+                                    aria-haspopup="true"
+                                    /* **`!day.rest` 가 여기에도 걸린다**(codex 리뷰 P3). 패널은 아래에서
                                  휴방일 때 언마운트되는데 `openGameSearchKey` 는 그대로 두므로
                                  (휴방을 도로 끄면 열어 뒀던 자리가 돌아오게), 이 조건을 안 맞추면
                                  "펼쳐졌다고 말하지만 펼쳐진 것이 없는" 잠긴 버튼이 된다 — 보조
                                  기술에는 없는 팝업을 가리키는 컨트롤로 들린다. */
-                                  aria-expanded={openGameSearchKey === e.key && !day.rest}
-                                  aria-label={gameLabel}
-                                  title={gameLabel}
-                                  disabled={day.rest}
-                                  data-od-id={`schedule-entry-game-trigger-${e.key}`}
-                                  onClick={() =>
-                                    setOpenGameSearchKey(openGameSearchKey === e.key ? null : e.key)
-                                  }
-                                >
-                                  {linkedName === null ? (
-                                    <svg
-                                      className="sched-row__game-icon"
-                                      aria-hidden="true"
-                                      viewBox="0 0 16 16"
-                                    >
-                                      <circle
-                                        cx="7"
-                                        cy="7"
-                                        r="5"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.6"
+                                    aria-expanded={openGameSearchKey === e.key && !day.rest}
+                                    aria-label={gameLabel}
+                                    title={gameLabel}
+                                    disabled={day.rest}
+                                    data-od-id={`schedule-entry-game-trigger-${e.key}`}
+                                    onClick={() =>
+                                      setOpenGameSearchKey(
+                                        openGameSearchKey === e.key ? null : e.key,
+                                      )
+                                    }
+                                  >
+                                    {linkedName === null ? (
+                                      <svg
+                                        className="sched-row__game-icon"
+                                        aria-hidden="true"
+                                        viewBox="0 0 16 16"
+                                      >
+                                        <circle
+                                          cx="7"
+                                          cy="7"
+                                          r="5"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                        />
+                                        <path
+                                          d="M11 11l3.5 3.5"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinecap="round"
+                                        />
+                                      </svg>
+                                    ) : linked?.posterImageUrl ? (
+                                      <img
+                                        className="sched-row__game-thumb"
+                                        src={linked.posterImageUrl}
+                                        alt=""
+                                        width={30}
+                                        height={40}
                                       />
-                                      <path
-                                        d="M11 11l3.5 3.5"
-                                        stroke="currentColor"
-                                        strokeWidth="1.6"
-                                        strokeLinecap="round"
-                                      />
-                                    </svg>
-                                  ) : linked?.posterImageUrl ? (
-                                    <img
-                                      className="sched-row__game-thumb"
-                                      src={linked.posterImageUrl}
-                                      alt=""
-                                      width={30}
-                                      height={40}
-                                    />
-                                  ) : (
-                                    /* 표지가 없는 게임. 게임 보드의 폴백(빗금 패턴 + 이니셜 +
+                                    ) : (
+                                      /* 표지가 없는 게임. 게임 보드의 폴백(빗금 패턴 + 이니셜 +
                                    발바닥)에서 **이니셜만** 가져온다 — 이 상자는 31×41 이라
                                    9px 주기 빗금이 글자를 덮어 읽는 걸 방해한다. 사진지 톤
                                    (--thumb-paper/--thumb-edge)은 그대로라 같은 언어로 읽힌다. */
-                                    <span className="sched-row__game-thumb sched-row__game-fallback">
-                                      {linkedName.charAt(0)}
-                                    </span>
-                                  )}
-                                </button>
+                                      <span className="sched-row__game-thumb sched-row__game-fallback">
+                                        {linkedName.charAt(0)}
+                                      </span>
+                                    )}
+                                  </button>
 
-                                <label className="sr-only" htmlFor={`${e.key}-title`}>
-                                  제목
-                                </label>
-                                <input
-                                  id={`${e.key}-title`}
-                                  className="sched-field sched-row__title"
-                                  type="text"
-                                  maxLength={200}
-                                  placeholder="제목 (예: 저챗)"
-                                  value={e.title}
-                                  disabled={day.rest}
-                                  data-od-id={`schedule-entry-title-${e.key}`}
-                                  onChange={(ev) => patch(e.key, { title: ev.target.value })}
-                                />
+                                  <label className="sr-only" htmlFor={`${e.key}-title`}>
+                                    제목
+                                  </label>
+                                  <input
+                                    id={`${e.key}-title`}
+                                    className="sched-field sched-row__title"
+                                    type="text"
+                                    maxLength={200}
+                                    placeholder="제목 (예: 저챗)"
+                                    value={e.title}
+                                    disabled={day.rest}
+                                    data-od-id={`schedule-entry-title-${e.key}`}
+                                    onChange={(ev) => patch(e.key, { title: ev.target.value })}
+                                  />
 
-                                {/* **삭제만은 휴방에도 열어 둔다**(codex 리뷰 P2, 2026-07-31).
+                                  {/* **삭제만은 휴방에도 열어 둔다**(codex 리뷰 P2, 2026-07-31).
                                 잠금의 목적은 "휴방인 날에 나가지 않을 내용을 새로 만들거나
                                 고치지 마라"이고, 지우는 건 그 반대 방향(정리)이라 걸릴 이유가
                                 없다. 막았더니 **빠져나갈 길이 없는 자리**가 생겼다: "+항목
@@ -855,25 +892,25 @@ export function ScheduleEditor({
                                 빈 제목이 저장을 막는데(firstBlankTitleEntry) 제목도 못 쓰고
                                 삭제도 못 한다 — 그 오류 문구 자체가 "제목을 채우거나 삭제해
                                 주십시오"라고 두 길을 안내하는데 화면이 둘 다 막고 있었다. */}
-                                <button
-                                  type="button"
-                                  className="sched-row__del"
-                                  data-od-id={`schedule-entry-del-${e.key}`}
-                                  onClick={() => remove(e.key)}
-                                >
-                                  <svg aria-hidden="true" viewBox="0 0 16 16">
-                                    <path
-                                      d="M4 4l8 8M12 4l-8 8"
-                                      stroke="currentColor"
-                                      strokeWidth="1.6"
-                                      strokeLinecap="round"
-                                    />
-                                  </svg>
-                                  <span className="sr-only">항목 삭제</span>
-                                </button>
-                              </div>
+                                  <button
+                                    type="button"
+                                    className="sched-row__del"
+                                    data-od-id={`schedule-entry-del-${e.key}`}
+                                    onClick={() => remove(e.key)}
+                                  >
+                                    <svg aria-hidden="true" viewBox="0 0 16 16">
+                                      <path
+                                        d="M4 4l8 8M12 4l-8 8"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                      />
+                                    </svg>
+                                    <span className="sr-only">항목 삭제</span>
+                                  </button>
+                                </div>
 
-                              {/* **제목이 게임명을 대신 말하지 못할 때만** 연결을 글자로 적는다
+                                {/* **제목이 게임명을 대신 말하지 못할 때만** 연결을 글자로 적는다
                               (적대적 리뷰 지적, 2026-07-31).
 
                               트리거를 아이콘으로 줄이면서 게임명을 `aria-label`·`title` 로
@@ -887,14 +924,15 @@ export function ScheduleEditor({
                               채워진다)엔 같은 글자가 한 행에 두 번 선다. 그래서 **다를 때만**
                               적는다: 그게 정확히 위험한 경우다. 비교는 trim 만 하고 대소문자는
                               안 접는다 — 게임명 표기가 다른 것도 관리자가 알아야 할 차이다. */}
-                              {linkedName !== null && linkedName !== e.title.trim() && (
-                                <p
-                                  className="sched-row__linked"
-                                  data-od-id={`schedule-entry-linked-${e.key}`}
-                                >
-                                  연결: {linkedName}
-                                </p>
-                              )}
+                                {linkedName !== null && linkedName !== e.title.trim() && (
+                                  <p
+                                    className="sched-row__linked"
+                                    data-od-id={`schedule-entry-linked-${e.key}`}
+                                  >
+                                    연결: {linkedName}
+                                  </p>
+                                )}
+                              </div>
 
                               {/* 휴방을 켜면 열려 있던 패널도 함께 사라진다 — 트리거만 잠그면 그
                               아래 검색창은 멀쩡히 살아 있어 "잠갔다"는 표시와 어긋난다.

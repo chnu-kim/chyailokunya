@@ -664,28 +664,38 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
       expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
       await expectTouchTarget(page.locator('[data-od-id="schedule-save"]'), "저장");
 
-      /* 하루 칸 펼치기 트리거(결정 28) — 접힌 요약 줄 전체가 44×44 이상이어야 한다. 새
-         조작이라 여기 같이 적어야 검사에 든다(이 스펙은 셀렉터를 손으로 열거한다, AGENTS).
-         아래 시각·휴방·항목 조작은 전부 이 버튼으로 편 패널 안에 있어 펴야 존재한다. */
+      /* 하루 칸 펼치기 트리거(결정 28) — 44×44 이상이어야 한다. 새 조작이라 여기 같이 적어야
+         검사에 든다(이 스펙은 셀렉터를 손으로 열거한다, AGENTS). 결정 32 이후 이 버튼은 머리
+         줄 **전체**가 아니라 그 안의 요약 영역이다 — 시각·휴방이 형제로 나란히 서므로 폭이
+         줄었고, 그래서 여기서 다시 재는 값이 예전과 다른 사실을 말한다. */
       await expectTouchTarget(
         page.locator('[data-od-id^="schedule-day-toggle-"]').first(),
         "하루 칸 펼치기",
       );
-      await openDay(page, 0);
 
       /* 하루의 속성 조작(이슈 #117) — 시각 입력과 휴방 토글. 이 스펙은 셀렉터를 **손으로**
          열거하므로 본문에 인터랙티브 요소를 더하면 여기 같이 적어야 검사에 든다(AGENTS).
          체크박스는 네이티브 상자가 18px 이라 라벨이 감싸 44 를 세운다 — 그 라벨을 재야 실제
-         히트 영역이 잡힌다(상자만 재면 늘 미달로 보인다). */
+         히트 영역이 잡힌다(상자만 재면 늘 미달로 보인다).
+
+         **`openDay` 앞에서 잰다**(결정 32, 2026-08-01) — 둘은 이제 머리 줄이라 접힌 채로도
+         조작된다. 펴고 재면 "패널 안에 있어도 통과하는" 검사로 되돌아가, 이 개편이 뒤집혀도
+         초록이다. 그리고 320 에서 머리 줄이 두 줄로 접히므로(schedule.css 의 560 미디어쿼리)
+         그 접힘 뒤에도 44 가 서는지는 여기서만 본다. */
       await expectTouchTarget(
         page.locator('[data-od-id^="schedule-day-time-"]').first(),
-        "하루 시작 시각",
+        "하루 시작 시각(접힌 채)",
       );
       /* **부모(`xpath=..`)가 아니라 클래스로 잡는다**(2026-07-31). 히트 영역을 만드는 것은
          "체크박스의 부모"라는 **위치**가 아니라 `.sched-day__rest-toggle` 이라는 **부품**이다 —
          위치로 잡으면 그 토글을 다른 줄로 옮기는 순간(레이아웃 개편) 조상이 바뀌어, 검사가
-         엉뚱한 상자를 재거나 조용히 통과한다. 이름으로 잡으면 어디로 옮겨도 같은 것을 잰다. */
-      await expectTouchTarget(page.locator(".sched-day__rest-toggle").first(), "휴방 토글");
+         엉뚱한 상자를 재거나 조용히 통과한다. 이름으로 잡으면 어디로 옮겨도 같은 것을 잰다
+         (결정 32 가 실제로 그 줄을 옮겼고, 이 셀렉터는 그대로 살았다). */
+      await expectTouchTarget(
+        page.locator(".sched-day__rest-toggle").first(),
+        "휴방 토글(접힌 채)",
+      );
+      await openDay(page, 0);
       await expectTouchTarget(
         page.locator('[data-od-id="schedule-publish-toggle"]'),
         "발행 상태 전환",

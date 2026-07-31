@@ -21,11 +21,15 @@ import { ScheduleEditor } from "./schedule-editor";
    e2e 는 이미 dev 서버 하나를 여러 스펙이 나눠 쓰느라 무거운 스펙 하나가 남을 줄줄이 타임아웃
    시킨 전례가 있다(AGENTS, 팬아트 5MB 업로드).
 
-   **하루 칸 아코디언(결정 28, 2026-07-31 후속)** — 시각·휴방·항목이 전부 패널 안으로 내려가
-   접힌 상태에선 DOM 에 없다. 그래서 `restToggle`·`gameTrigger`·`title`·`add`·`time`·`note` 를
-   전부 **getter** 로 바꿨다(렌더 시점에 한 번만 잡던 옛 `!` 단언은 패널이 닫힌 채 렌더되는
-   순간 null 뒤의 `!` 가 되어 모든 테스트가 클릭 전에 죽는다) — 값을 쓸 때마다 다시 찾아야
-   패널이 열리기 전/후 어느 쪽에서 불러도 안전하다. */
+   **하루 칸 아코디언(결정 28, 2026-07-31 후속)** — 항목 조작이 패널 안으로 내려가 접힌
+   상태에선 DOM 에 없다. 그래서 `gameTrigger`·`title`·`add`·`note` 를 전부 **getter** 로
+   바꿨다(렌더 시점에 한 번만 잡던 옛 `!` 단언은 패널이 닫힌 채 렌더되는 순간 null 뒤의 `!`
+   가 되어 모든 테스트가 클릭 전에 죽는다) — 값을 쓸 때마다 다시 찾아야 패널이 열리기 전/후
+   어느 쪽에서 불러도 안전하다.
+
+   **시각·휴방은 머리 줄로 올라갔다(결정 32, 2026-08-01)** — 접힌 채로 조작된다. 아래 첫
+   테스트가 **펴지 않고** 휴방을 켜서 그 계약을 못박는다: 그 앞에 `toggle()` 을 끼우면
+   "패널 안이어도 통과하는" 테스트로 되돌아가 개정 자체가 안 보이게 된다. */
 
 vi.mock("@/features/trpc/client", () => ({
   trpc: {
@@ -101,6 +105,28 @@ function renderEditor() {
 describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  /* 결정 32 의 계약 — **접힌 채로 시각·휴방이 선다.** 옛 골격에선 둘 다 패널 안이라 이
+     테스트가 `toggle()` 없이는 null 로 죽었다. 그 반대가 참인지 먼저 못박고 시작한다:
+     여기가 빨개지면 둘이 다시 패널로 내려갔다는 뜻이다. */
+  it("접힌 채로도 시각·휴방이 DOM 에 있고 조작된다 — 펼침은 항목 편집 전용이다", () => {
+    const ui = renderEditor();
+
+    // 접혀 있다(패널 없음, 항목 조작도 없음).
+    expect(ui.toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(ui.container.querySelector(`[data-od-id="schedule-day-panel-${MONDAY}"]`)).toBeNull();
+    expect(ui.container.querySelector('[data-od-id="schedule-entry-title-db-1"]')).toBeNull();
+
+    // 그런데도 시각·휴방은 선다 — 그리고 **한 번도 펴지 않고** 값이 바뀐다.
+    fireEvent.change(ui.time(), { target: { value: "21:30" } });
+    expect(ui.time()).toHaveValue("21:30");
+    fireEvent.click(ui.restToggle());
+    expect(ui.restToggle()).toBeChecked();
+    // 휴방을 켜면 시각이 잠긴다(이슈 #117) — 그 규칙도 접힌 채로 그대로 돈다.
+    expect(ui.time()).toBeDisabled();
+    // 여전히 접혀 있다 — 조작이 아코디언을 건드리지 않는다.
+    expect(ui.toggle()).toHaveAttribute("aria-expanded", "false");
   });
 
   it("휴방을 켜면 그 날 항목 조작이 전부 잠기고 이유가 화면에 뜬다", () => {
@@ -183,7 +209,9 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
         today={OTHER_WEEK}
       />,
     );
-    // 접힌 요약 줄부터 연다 — 시각·휴방은 이제 패널 안이라 열기 전엔 DOM 에 없다.
+    /* 접힌 요약 줄부터 연다 — **휴방 때문이 아니라 `schedule-day-add-` 때문이다**(결정 32
+       이후 시각·휴방은 접힌 채로도 있다). 아래에서 ＋ 가 잠겼는지 보려면 패널이 열려 있어야
+       한다. */
     fireEvent.click(
       container.querySelector<HTMLButtonElement>(`[data-od-id="schedule-day-toggle-${MONDAY}"]`)!,
     );
