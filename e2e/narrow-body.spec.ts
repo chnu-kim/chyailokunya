@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { openDay } from "./schedule-helpers";
 import { E2E_FAN, expectSignedIn, signIn } from "./session";
 
 /* 좁은 폭 **본문** 회귀 방지(이슈 #45). nav-touch-target.spec.ts 가 크롬을 맡고 여기가 그
@@ -657,6 +658,16 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
 
       expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
       await expectTouchTarget(page.locator('[data-od-id="schedule-save"]'), "저장");
+
+      /* 하루 칸 펼치기 트리거(결정 28) — 접힌 요약 줄 전체가 44×44 이상이어야 한다. 새
+         조작이라 여기 같이 적어야 검사에 든다(이 스펙은 셀렉터를 손으로 열거한다, AGENTS).
+         아래 시각·휴방·항목 조작은 전부 이 버튼으로 편 패널 안에 있어 펴야 존재한다. */
+      await expectTouchTarget(
+        page.locator('[data-od-id^="schedule-day-toggle-"]').first(),
+        "하루 칸 펼치기",
+      );
+      await openDay(page, 0);
+
       /* 하루의 속성 조작(이슈 #117) — 시각 입력과 휴방 토글. 이 스펙은 셀렉터를 **손으로**
          열거하므로 본문에 인터랙티브 요소를 더하면 여기 같이 적어야 검사에 든다(AGENTS).
          체크박스는 네이티브 상자가 18px 이라 라벨이 감싸 44 를 세운다 — 그 라벨을 재야 실제
@@ -700,8 +711,11 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
          않는지 본다(고정 px 트랙은 해제 폭 없이 두면 그 값이 그대로 가로 넘침이다). */
       expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
 
-      // 항목을 하나 만들어야 게임 검색 트리거가 존재한다.
-      await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+      /* ＋ 는 44×44 아이콘으로 줄었다(결정 28) — 글자였을 때보다 폭이 좁아져 하한을 못 채울
+         위험이 커진 자리라 클릭 전에 크기부터 잰다. 그다음 눌러야 게임 검색 트리거가 존재한다. */
+      const dayAdd = page.locator('[data-od-id^="schedule-day-add-"]').first();
+      await expectTouchTarget(dayAdd, "항목 추가");
+      await dayAdd.click();
       const trigger = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
       await expectTouchTarget(trigger, "게임 검색 돋보기");
       await expectTouchTarget(
@@ -713,10 +727,29 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
       await trigger.click();
       expect(await pageOverflow(page)).toBeLessThanOrEqual(0);
 
-      // 마지막 요일 카드가 sticky 바에 다 가려진 채로 끝나지 않는다 — 끝까지 스크롤하면
-      // 카드 아랫변이 바의 윗변보다 위(또는 같은 자리)에 온다.
+      /* 마지막 요일 카드가 sticky 바에 다 가려진 채로 끝나지 않는다 — 끝까지 스크롤하면
+         카드 아랫변이 바의 윗변보다 위(또는 같은 자리)에 온다.
+
+         **`scrollIntoViewIfNeeded` 가 아니라 문서 끝까지 직접 스크롤한다**(결정 28 이후 실측
+         지뢰) — 그 메서드는 대상이 "충분히 보이면" 일찍 멈춘다. 접힌 마지막 카드는 66px 라
+         뷰포트 중간쯤에서 이미 "보이는" 것으로 판정돼, 미저장 힌트 문구로 195px 까지 늘어난
+         sticky 바 밑까지는 안 밀어붙였다(실측: scrollY 1014 인데 maxScroll 1541 — 527px 를
+         남기고 멈췄다). `position: sticky` 는 실제 최대 스크롤에서 정적 위치와 일치하므로,
+         진짜 문서 끝까지 스크롤해야 이 단언이 "가려짐"만 잡고 스크롤 도중의 겹침(의도된 동작)은
+         안 잡는다.
+
+         **`behavior: "instant"` 를 명시한다** — 이 사이트가 `scroll-behavior: smooth` 를 켜
+         둬서(schedule.css 상단이 아니라 전역 CSS) 기본값이면 스크롤이 애니메이션으로 진행되고,
+         곧바로 좌표를 읽으면 **중간값**이 잡힌다(AGENTS 의 같은 지뢰 — `scrollIntoViewIfNeeded`
+         자리가 아니라 여기서도 재현됐다: 실측 1097.8, 스크롤이 안 끝난 상태). */
       const lastDay = page.locator(".sched-day").last();
-      await lastDay.scrollIntoViewIfNeeded();
+      await page.evaluate(() =>
+        window.scrollTo({
+          top: document.documentElement.scrollHeight,
+          left: 0,
+          behavior: "instant",
+        }),
+      );
       const [dayBox, barBox] = await Promise.all([
         lastDay.boundingBox(),
         page.locator('[data-od-id="schedule-save-bar"]').boundingBox(),
@@ -750,7 +783,9 @@ test.describe("감축 경로 — 주간표 미리보기", () => {
     await expectSignedIn(page);
 
     /* 카드 자체는 항목 하나로 서지만(draft), 아래에서 실제로 받으려면 발행 + 저장이 필요하다 —
-       저장 뒤 칩을 눌러 확인창을 거친다(schedule.spec 의 publishNow 와 같은 순서). */
+       저장 뒤 칩을 눌러 확인창을 거친다(schedule.spec 의 publishNow 와 같은 순서). 결정 28
+       이후 조작은 패널 안이다. */
+    await openDay(page, 0);
     await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
     await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("좁은 폭 미리보기");
     await page.locator('[data-od-id="schedule-save"]').click();

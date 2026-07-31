@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
+import { openDay } from "./schedule-helpers";
 import { expectSignedIn, signIn } from "./session";
 
 /* 주간 일정(이슈 #56). 라우팅 대조는 routes.spec 이, 보드 날짜 유도·발행 경계는 tRPC 단위
@@ -35,7 +36,9 @@ test("관리자: 편집기로 항목을 저장하고 되읽는다", async ({ pag
   await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
   await expect(page.locator(".sched-day")).toHaveCount(7);
 
-  // 첫 날(월요일) 카드에 자유 항목을 더한다 → 제목 채우기 전엔 저장에 안 실려 dirty 가 아니다.
+  // 첫 날(월요일) 카드를 펼친다 — 결정 28 이후 조작은 전부 패널 안이다(openDay).
+  await openDay(page, 0);
+  // 자유 항목을 더한다 → 제목 채우기 전엔 저장에 안 실려 dirty 가 아니다.
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   const title = page.locator('[data-od-id^="schedule-entry-title-"]').first();
   await title.fill("e2e 저챗");
@@ -46,8 +49,10 @@ test("관리자: 편집기로 항목을 저장하고 되읽는다", async ({ pag
   // 저장이 서버까지 끝나면 dirty 가 풀려 버튼이 "저장됨"(비활성)으로 바뀐다.
   await expect(save).toHaveText("저장됨");
 
-  // 되읽기: 새로고침해도 getWeekForEdit 왕복으로 항목이 남는다.
+  // 되읽기: 새로고침해도 getWeekForEdit 왕복으로 항목이 남는다. 새로고침은 아코디언도
+  // 접힌 채로 되돌리므로 다시 편다.
   await page.reload();
+  await openDay(page, 0);
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]').first()).toHaveValue(
     "e2e 저챗",
   );
@@ -69,6 +74,7 @@ test("관리자: 미리보기가 타이핑을 따라오고, 미저장이면 다�
   // 다른 스펙이 안 읽는 먼 미래 주.
   await page.goto("/schedule?week=2030-05-06");
 
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   const title = page.locator('[data-od-id^="schedule-entry-title-"]').first();
   await title.fill("e2e 발행 항목");
@@ -111,6 +117,7 @@ test("관리자: 미리보기가 타이핑을 따라오고, 미저장이면 다�
   const firstDayCard = page.locator('[data-od-id^="week-card-day-"]').first();
   await expect(firstDayCard.locator(".week-card__entry")).toHaveCount(1);
 
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   // 저장될 값이 안 바뀌었으므로 저장 버튼도 다운로드도 그대로다.
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
@@ -159,6 +166,8 @@ test("관리자: 이관된 레거시 주는 항목이 있어도 발행이 꺼진
      이관해 놓은 과거 아카이브와 같은 모양이고, 보드는 그걸 초안이 아닌 주로 센다(ADR-0022). */
   await page.goto("/schedule?week=2026-03-01");
   await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
+  // 픽스처의 이 항목은 정확히 이 날짜다(games.sql) — 요일 인덱스를 굳이 안 셈해도 된다.
+  await openDay(page, "2026-03-01");
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]').first()).toHaveValue(
     "엘든 링",
   );
@@ -188,7 +197,9 @@ test("관리자: 항목 없는 새 주는 초안으로 열린다(발행 체크 �
   // 픽스처가 안 건드리는 먼 미래 주 — 메타도 항목도 없는 브랜드-뉴 주.
   await page.goto("/schedule?week=2028-01-03");
   await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
-  // 항목이 하나도 없다(레거시가 아니다).
+  // 항목이 하나도 없다(레거시가 아니다) — 접힌 채로 재면 항상 0(아코디언이 숨긴 것뿐)이라
+  // 먼저 펴서 확인한다.
+  await openDay(page, 0);
   await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveCount(0);
   /* 발행은 **꺼진 채** 열려야 한다 — 다음 주를 처음 짜는 자리라 초안이 기본이고, 발행은 다
      되면 관리자가 켠다(결정 13). 레거시 주와 화면상 같은 단언이지만 서버가 쥔 상태는 다르다:
@@ -213,6 +224,7 @@ test("관리자: 휴방만 정한 주도 발행할 수 있다(이슈 #117 결정
   await page.goto("/schedule?week=2036-06-02");
   await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
 
+  await openDay(page, "2036-06-02");
   await page.locator('[data-od-id="schedule-day-rest-2036-06-02"]').check();
   await page.locator('[data-od-id="schedule-save"]').click();
   await expect(page.locator('[data-od-id="schedule-save"]')).toBeDisabled();
@@ -259,6 +271,7 @@ test("관리자: 카드를 원본 크기로 열고 닫는다", async ({ page, ba
   });
   expect(closedDisplay).toBe("none");
 
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("확대 확인용");
 
@@ -301,6 +314,7 @@ test("관리자: 휴방인 날 잠긴 것은 같은 세기로 흐리고 삭제�
   await page.goto("/schedule?week=2037-06-01");
   await expect(page.locator('[data-od-id="schedule-editor"]')).toBeVisible();
 
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("마인크래프트 하기");
   await page.locator('[data-od-id^="schedule-day-rest-"]').first().check();
@@ -352,6 +366,7 @@ test("공개 읽기: WeekNav 로 주를 넘겨도(리마운트 없이) 다운로
   await signIn(page.context(), baseURL!);
   // 인접한 두 주 — 다른 스펙이 안 읽는 자리.
   await page.goto("/schedule?week=2031-06-02");
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("A 주 항목");
   await page.locator('[data-od-id="schedule-save"]').click();
@@ -359,6 +374,7 @@ test("공개 읽기: WeekNav 로 주를 넘겨도(리마운트 없이) 다운로
   await publishNow(page);
 
   await page.goto("/schedule?week=2031-06-09");
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("B 주 항목");
   await page.locator('[data-od-id="schedule-save"]').click();
@@ -414,6 +430,7 @@ test("관리자: 초안 주도 미리보기는 뜨고, 다운로드만 잠긴 �
   /* **사유의 순서를 못박는다.** 이 주는 미발행이면서 동시에 미저장이 될 수 있는데(무언가
      고치는 순간), 그때 "저장하면 받을 수 있습니다"라고 말하면 거짓이다 — 발행하지 않는 한
      저장해도 못 받는다. 발행이 먼저다. */
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("초안 항목");
   await expect(page.locator('[data-od-id="week-card-download-blocked"]')).toHaveText(
@@ -431,6 +448,7 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
   await signIn(page.context(), baseURL!);
   // 다른 스펙이 안 읽는 먼 미래 주.
   await page.goto("/schedule?week=2032-02-02");
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("PNG 검증 항목");
   // 7열 모양도 같은 결함이 있었다(500자 공지에서 목록이 356→104px 로 눌려 항목이 잘렸다).
@@ -537,6 +555,7 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
   await signIn(page.context(), baseURL!);
   // 다른 스펙이 안 읽는 먼 미래 주(D1 픽스처를 공유하므로 — AGENTS).
   await page.goto("/schedule?week=2033-01-10");
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("팬아트 카드 항목");
 
@@ -643,6 +662,7 @@ test("관리자: 발행을 취소하면 공개만 꺼지고 항목은 남는다 
   await signIn(page.context(), baseURL!);
   // 다른 스펙이 안 읽는 먼 미래 주.
   await page.goto("/schedule?week=2033-05-02");
+  await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("발행 취소 확인용");
   await page.locator('[data-od-id="schedule-save"]').click();
@@ -677,6 +697,7 @@ test("관리자: 제목이 빈 항목이 있으면 저장이 막히고 요일을
      dirty 비교에서도 걸러내므로(isWeekDirty 가 그 함수를 그대로 쓴다), 저장 버튼이 계속
      비활성이라 이 가드를 만날 수조차 없다. 그래서 **하나는 채우고 하나는 비운다** — 채운
      쪽이 dirty 를 세워 저장 버튼을 활성화하고, 빈 쪽이 이 가드에 걸린다. */
+  await openDay(page, "2033-09-05");
   await page.locator('[data-od-id="schedule-day-add-2033-09-05"]').click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("채워진 항목");
   await page.locator('[data-od-id="schedule-day-add-2033-09-05"]').click();
@@ -703,6 +724,7 @@ test("관리자: 게임 검색 — 보드에 있는 게임은 로컬에서 즉�
   await signIn(page.context(), baseURL!);
   // 픽스처의 "엘든 링"은 다른 스펙도 참조하지만 읽기만 하므로 안전하다(games.sql).
   await page.goto("/schedule?week=2033-11-07");
+  await openDay(page, "2033-11-07");
   await page.locator('[data-od-id="schedule-day-add-2033-11-07"]').click();
 
   const trigger = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
@@ -761,6 +783,7 @@ test("관리자: 게임 검색 — 로컬 부분 일치가 있어도 치지직 �
   await signIn(page.context(), baseURL!);
   // 다른 스펙이 안 읽는 먼 미래 주.
   await page.goto("/schedule?week=2034-02-06");
+  await openDay(page, "2034-02-06");
   await page.locator('[data-od-id="schedule-day-add-2034-02-06"]').click();
 
   const trigger = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
@@ -797,6 +820,7 @@ test("관리자: 게임 검색 — 로컬에 없으면 치지직에서 찾아 �
   await signIn(page.context(), baseURL!);
   // 다른 스펙이 안 읽는 먼 미래 주.
   await page.goto("/schedule?week=2034-01-02");
+  await openDay(page, "2034-01-02");
   await page.locator('[data-od-id="schedule-day-add-2034-01-02"]').click();
 
   const trigger = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
@@ -813,6 +837,7 @@ test("관리자: 게임 검색 — 로컬에 없으면 치지직에서 찾아 �
      행만 즉시 만들었으므로(결정 19) **게임은 서버에 남아 있어야 한다** — 새로고침 뒤 새
      항목을 열어 로컬 매치로(치지직 모킹 없이) 다시 찾아지는지로 그 영속을 확인한다. */
   await page.reload();
+  await openDay(page, "2034-01-02");
   await page.locator('[data-od-id="schedule-day-add-2034-01-02"]').click();
   const trigger2 = page.locator('[data-od-id^="schedule-entry-game-trigger-"]').first();
   await trigger2.click();

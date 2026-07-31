@@ -19,7 +19,13 @@ import { ScheduleEditor } from "./schedule-editor";
 
    e2e 가 아니라 dom 단위로 두는 이유: 판정이 전부 이 컴포넌트 안에서 끝나고(서버 왕복이 없다),
    e2e 는 이미 dev 서버 하나를 여러 스펙이 나눠 쓰느라 무거운 스펙 하나가 남을 줄줄이 타임아웃
-   시킨 전례가 있다(AGENTS, 팬아트 5MB 업로드). */
+   시킨 전례가 있다(AGENTS, 팬아트 5MB 업로드).
+
+   **하루 칸 아코디언(결정 28, 2026-07-31 후속)** — 시각·휴방·항목이 전부 패널 안으로 내려가
+   접힌 상태에선 DOM 에 없다. 그래서 `restToggle`·`gameTrigger`·`title`·`add`·`time`·`note` 를
+   전부 **getter** 로 바꿨다(렌더 시점에 한 번만 잡던 옛 `!` 단언은 패널이 닫힌 채 렌더되는
+   순간 null 뒤의 `!` 가 되어 모든 테스트가 클릭 전에 죽는다) — 값을 쓸 때마다 다시 찾아야
+   패널이 열리기 전/후 어느 쪽에서 불러도 안전하다. */
 
 vi.mock("@/features/trpc/client", () => ({
   trpc: {
@@ -79,7 +85,9 @@ function renderEditor() {
     container.querySelector<T>(`[data-od-id="${odId}"]`);
   return {
     container,
-    restToggle: pick<HTMLInputElement>(`schedule-day-rest-${MONDAY}`)!,
+    // 접힌 요약 줄의 펼치기 트리거 — 이걸 먼저 눌러야 아래 것들이 DOM 에 나타난다.
+    toggle: () => pick<HTMLButtonElement>(`schedule-day-toggle-${MONDAY}`)!,
+    restToggle: () => pick<HTMLInputElement>(`schedule-day-rest-${MONDAY}`)!,
     // 항목 key 는 서버에서 온 행이라 `db-<id>` 다(weekToDraft).
     gameTrigger: () => pick<HTMLButtonElement>("schedule-entry-game-trigger-db-1")!,
     title: () => pick<HTMLInputElement>("schedule-entry-title-db-1")!,
@@ -97,6 +105,7 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
 
   it("휴방을 켜면 그 날 항목 조작이 전부 잠기고 이유가 화면에 뜬다", () => {
     const ui = renderEditor();
+    fireEvent.click(ui.toggle());
 
     // 잠그기 전엔 넷 다 살아 있어야 한다 — 이 단언이 없으면 아래 disabled 검사가 "원래부터
     // 잠겨 있었다"와 구분이 안 된다.
@@ -105,7 +114,7 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
     expect(ui.add()).toBeEnabled();
     expect(ui.note()).toBeNull();
 
-    fireEvent.click(ui.restToggle);
+    fireEvent.click(ui.restToggle());
 
     expect(ui.gameTrigger()).toBeDisabled();
     expect(ui.title()).toBeDisabled();
@@ -125,11 +134,12 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
        (휴방을 도로 끄면 열어 뒀던 자리가 돌아오게), `aria-expanded` 를 같은 조건으로 안 맞추면
        "펼쳐졌다고 말하지만 펼쳐진 것이 없는" 잠긴 버튼이 남는다. */
     const ui = renderEditor();
+    fireEvent.click(ui.toggle());
 
     fireEvent.click(ui.gameTrigger());
     expect(ui.gameTrigger()).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.click(ui.restToggle);
+    fireEvent.click(ui.restToggle());
 
     expect(ui.gameTrigger()).toHaveAttribute("aria-expanded", "false");
     // 패널 자체도 사라져야 한다 — 속성만 고치고 검색창이 남으면 잠금이 반쪽이다.
@@ -138,9 +148,10 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
 
   it("휴방을 껐다 켜도 항목은 지워지지 않는다", () => {
     const ui = renderEditor();
+    fireEvent.click(ui.toggle());
 
-    fireEvent.click(ui.restToggle);
-    fireEvent.click(ui.restToggle);
+    fireEvent.click(ui.restToggle());
+    fireEvent.click(ui.restToggle());
 
     expect(ui.title()).toBeEnabled();
     // **값까지 본다.** 항목 행이 다시 그려지기만 하고 값이 비었다면 "잠그는 대신 지웠다"는
@@ -151,8 +162,9 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
 
   it("휴방인 날에도 항목을 지울 수 있다 — 빈 제목이 저장을 막는 막다른 골목을 막는다", () => {
     const ui = renderEditor();
+    fireEvent.click(ui.toggle());
 
-    fireEvent.click(ui.restToggle);
+    fireEvent.click(ui.restToggle());
     fireEvent.click(ui.del());
 
     // 실제로 사라져야 한다 — 버튼이 눌리기만 하고 아무 일도 안 나면 길이 없는 건 그대로다.
@@ -171,11 +183,15 @@ describe("ScheduleEditor — 휴방인 날은 항목을 못 고친다", () => {
         today={OTHER_WEEK}
       />,
     );
-    const toggle = container.querySelector<HTMLInputElement>(
+    // 접힌 요약 줄부터 연다 — 시각·휴방은 이제 패널 안이라 열기 전엔 DOM 에 없다.
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>(`[data-od-id="schedule-day-toggle-${MONDAY}"]`)!,
+    );
+    const rest = container.querySelector<HTMLInputElement>(
       `[data-od-id="schedule-day-rest-${MONDAY}"]`,
     )!;
 
-    fireEvent.click(toggle);
+    fireEvent.click(rest);
 
     /* 빈 날에도 붙이면 일곱 줄이 같은 말을 반복하고, 정작 알려야 할 사실("지금 들어 있는
        이것들이 안 나간다")이 그 반복 속에 묻힌다. */
