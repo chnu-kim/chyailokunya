@@ -13,48 +13,61 @@
   padding: var(--space-7) 0 var(--space-9);
 }
 
-/* ── 편집기의 2열 골격(결정 24) · 메타 재배치(결정 29, 2026-07-31 개정) ───────────
+/* ── 편집기의 2열 골격(결정 24) · 메타 재배치(결정 29) · 폭 재배분(결정 31, 2026-08-01) ──
    영역이 둘이다 — 요일 목록 · 오른쪽 곁칸(`.sched__aside` = 미리보기 + 주 메타). 좁은 폭에선
    grid 를 아예 안 걸어 DOM 순서대로 흐르고(곁칸 → 요일 — 결정 29 가 이 순서로 뒤집었다, 왜인지는
-   schedule-editor.tsx 의 같은 자리 주석), 1300 이상에서만 `grid-template-areas` 로 요일을
+   schedule-editor.tsx 의 같은 자리 주석), 1440 이상에서만 `grid-template-areas` 로 요일을
    왼쪽 열에, 곁칸을 오른쪽 열에 세운다. 곁칸은 `.sched__aside` 하나가 grid-area 를 갖고, 그
    안에서 미리보기·메타가 `flex-direction: column` 으로 쌓인다(왜 별도 grid-area 가 아니라
    flex 로 감쌌는지는 아래 @media 블록 주석).
 
-   ── **1280px 은 새 브레이크포인트다** ────────────────────────────────────────
-   kunya-design §5 의 표(860·760·699·600·560·480·430)엔 이보다 넓은 값이 없다. `home.css` 에
-   `min-width: 1280px` 이 있지만 그 스킬이 "낙서 장식 전용 조건이라 이 목록의 후보가 아니다"라고
-   **명시적으로 배제**하므로 선례로 인용하지 않는다. 근거는 이 화면 고유의 실측이다:
+   ── **1440px 은 새 브레이크포인트다**(2026-08-01, 결정 31 이 1300 을 대체) ──────────
+   kunya-design §5 의 표엔 이보다 넓은 값이 없다. `home.css` 에 `min-width: 1280px` 이 있지만
+   그 스킬이 "낙서 장식 전용 조건이라 이 목록의 후보가 아니다"라고 **명시적으로 배제**하므로
+   선례로 인용하지 않는다. 근거는 이 화면 고유의 실측이고, 두 하한이 만나는 자리다:
 
-   미리보기 카드는 1200px 고정 폭을 축소해 보여준다(week-card-download.tsx). 열이 좁아지면
-   배율이 따라 내려가고 **카드 안 항목 제목(16px)이 먼저 죽는다** — 그 글자가 10px 아래로
-   내려가면 "무엇이 받아질지"를 못 읽어 미리보기가 미리보기이길 그만둔다(같은 근거로 560px
-   이하에선 아예 감춘다, 아래 미디어쿼리).
+   **하한 하나 — 미리보기 760px.** 미리보기 카드는 1200px 고정 폭을 축소해 보여준다
+   (week-card-download.tsx). 열이 좁아지면 배율이 따라 내려가고 **카드 안 항목 제목(16px)이
+   먼저 죽는다** — 그 글자를 못 읽으면 "무엇이 받아질지"를 못 봐서 미리보기가 미리보기이길
+   그만둔다(같은 근거로 좁은 폭에선 축소본만 남긴다, 아래 미디어쿼리). 760px = 배율 0.6333 =
+   제목 10.13px 이고, 이 값은 **옛 1300 진입폭에서 이미 쓰이던 그 배율이다**(실측 2026-08-01) —
+   새로 고른 기준이 아니라 이 저장소가 판독 가능하다고 판정하고 써 온 값을 그대로 하한으로
+   승격한 것이다. 그래서 미리보기 열은 이제 **고정 760** 이다: 남는 폭을 주면 카드만 커지는데,
+   그 여유는 폼이 훨씬 아쉬워한다(결정 31).
 
-   그 하한에서 거꾸로 짚으면: 제목 10px = 배율 0.625 = 미리보기 열 750px, 거기에 편집 열 460
-   + gap 32 + 페이지 좌우 패딩 48 을 더해 **1290px**. 그래서 1300 이다.
+   **하한 둘 — 편집 열 600px.** 하루 머리 줄이 한 행에 서려면(결정 32) 고정분이 338.44px 든다
+   — 요일·날짜 라벨 56 + 시각 입력 128 + 휴방 토글 67.89 + chevron 20.55 + gap 8×4 + 카드
+   좌우 패딩 32 + 테두리 2(전부 실측 2026-08-01). 시각 입력 128 은 **줄일 수 없다**: 크롬이
+   브라우저 UI 언어로 형식을 정해("07:00 PM") 그 폭이 사용자 환경에 달렸다(앱이 못 정한다는
+   건 2026-07-20 에 이미 확인한 사실이다). 여기에 표지 2개(68)와 요약 제목 자리를 더하면
+   600px 에서 제목이 193px 선다 — 그 아래로는 결정 28 의 요약 줄이 사실상 죽는다.
 
-   **처음엔 1280 으로 잡았다가 실측에서 되돌렸다** — 그 폭에서 미리보기 열이 740px(배율
-   0.617, 제목 9.87px)이라 바로 이 주석이 세운 기준을 경계에서 스스로 밑돌았다. 실측 배율 —
-   창 1300: 0.633(제목 10.1px) · 1400 이상: 0.717(11.5px, wrap 상한에 걸려 더 안 커진다).
+   600 + gap 32 + 760 + 페이지 좌우 패딩 48 = **1440**.
 
-   1280 이 흔한 창 폭이라(13" 스케일드) 그 구간이 1열로 떨어지는데, **1열에서 미리보기는 오히려
-   더 크다** — 전폭을 쓰므로 배율이 0.81~1.0 이다(실측 1024px 창에서 0.813). 2열이 사는 값은
-   "폼과 카드를 동시에 본다"이지 카드 크기가 아니고, 그 값이 카드를 못 읽을 만큼 좁아지는
-   지점에서는 1열이 더 낫다.
+   **1300~1439 가 1열로 내려간다 — 알고 받아들인 후퇴다.** 그 구간은 지금까지 2열이었지만
+   편집 열이 460px 이었고, 이 개편이 요구하는 600 에 한참 못 미친다. 1열로 가면 편집 열이
+   **전폭(1072px)** 이 되어 오히려 2.3배 넓어지고, **미리보기도 같이 커진다** — 전폭을 쓰므로
+   배율이 0.893 으로 올라 카드 제목이 14.29px 다(실측 2026-08-01, 1439px 창). 2열의 10.13px
+   보다 오히려 잘 읽힌다. 곁칸이 DOM 상 앞이라 미리보기 위치도 그대로다(schedule-editor.tsx 의
+   sched__grid 주석) — 세로 스크롤이 늘 뿐 무엇도 사라지지 않는다. 2열이 사는 값은 "폼과 카드를 동시에 본다"이지 2열 그 자체가 아니고, 폼이 제 일을
+   못 할 만큼 좁아지는 구간에서는 1열이 낫다(옛 1280 주석이 카드에 대해 세웠던 논리를 이번엔
+   폼에 대해 세운 것이다).
 
-   **편집기만 1400px 로 넓힌다.** 사이트 공용 `.wrap` 은 1120 이고 nav·푸터가 거기 정렬돼
-   있어 이 화면에서만 좌우 끝이 어긋나지만, 관리자 전용 도구 화면이라 크롬 정렬보다 작업
-   효율이 앞선다 — **팬이 보는 읽기 화면은 1120 그대로**라 공개 화면의 정렬은 안 흔든다. */
-@media (min-width: 1300px) {
+   **편집기만 1600px 로 넓힌다**(1400 에서 상향). 사이트 공용 `.wrap` 은 1120 이고 nav·푸터가
+   거기 정렬돼 있어 이 화면에서만 좌우 끝이 어긋나지만, 관리자 전용 도구 화면이라 크롬 정렬보다
+   작업 효율이 앞선다 — **팬이 보는 읽기 화면은 1120 그대로**라 공개 화면의 정렬은 안 흔든다.
+   1600 에서 편집 열은 760 이 된다(1600 − 48 − 32 − 760). */
+@media (min-width: 1440px) {
   .sched--edit .wrap {
-    max-width: 1400px;
+    max-width: 1600px;
   }
   .sched--edit .sched__grid {
     display: grid;
-    /* 편집 열은 400~460 사이에서만 움직인다 — 그 아래면 항목 행(아이콘 44 + 제목 + 삭제 44)이
-       빡빡하고, 그 위로 넓히면 곁칸이 그만큼 작아진다. 남는 폭은 전부 곁칸이 갖는다. */
-    grid-template-columns: minmax(400px, 460px) 1fr;
+    /* **남는 폭은 전부 편집 열이 갖는다**(결정 31 — 예전과 정반대다). 미리보기는 판독 하한
+       760 고정이라 창을 넓혀도 안 커지고, 그만큼이 폼으로 간다(1440→600 · 1600 이상→760).
+       `minmax(0, 1fr)` 의 0 하한은 grid 자동 최소 크기(min-content)를 끄는 관용구다 — 안 끄면
+       긴 게임 제목 하나가 트랙을 밀어 미리보기를 760 밑으로 밀어낸다. */
+    grid-template-columns: minmax(0, 1fr) 760px;
     /* **단일 행 — 곁칸(미리보기+메타)을 하나의 grid-area 로 묶는다**(2026-07-31, codex review
        가 잡은 회귀). 처음엔 "days preview" / "days meta" 두 행으로 짜서 메타를 미리보기 아래
        별도 area 로 뒀는데, `days` 가 두 행에 걸치는 순간 CSS Grid 트랙 크기 계산이 깨진다:
@@ -201,21 +214,21 @@
 }
 
 /* ── 편집기 오른쪽 곁칸: 미리보기 + 주 메타(결정 29 개정, 2026-07-31 회귀 수정 ×2) ───
-   곁칸이 두 겹이다 — `.sched__aside`(바깥, grid-area 만 갖고 1300 이상에서 stretch 로
+   곁칸이 두 겹이다 — `.sched__aside`(바깥, grid-area 만 갖고 1440 이상에서 stretch 로
    `days` 와 같은 높이까지 늘어나는 포함 블록)와 `.sched__aside-pin`(안쪽, 미리보기·메타를
    `flex-direction: column` 으로 쌓고 sticky 도 여기서 건다). 왜 겹이 둘로 갈렸는지(sticky
    요소 자신이 포함 블록과 같은 높이로 늘어나면 이동 여유가 0이 된다)는 위 `sched__grid` 의
    @media 주석과 schedule-editor.tsx 의 같은 자리 주석에 있다. 이 flex 규칙은 narrow flow
-   (1300 미만)·wide grid(1300 이상) 양쪽에서 그대로 적용돼 간격이 갈리지 않는다. */
+   (1440 미만)·wide grid(1440 이상) 양쪽에서 그대로 적용돼 간격이 갈리지 않는다. */
 .sched__aside-pin {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
 }
-/* narrow flow(1300 미만)에서 이 블록(바깥 겹) 바로 다음이 요일 목록(`.sched__days`)이다 —
+/* narrow flow(1440 미만)에서 이 블록(바깥 겹) 바로 다음이 요일 목록(`.sched__days`)이다 —
    `.sched__days` 자신은 margin 이 0(읽기 화면과 공유하는 클래스라 여기서 못 건드린다, 아래)
    이라 이 여백이 없으면 메타 박스가 첫 하루 카드에 그대로 붙는다(실측: 간격 0px, codex
-   review 지적, 2026-07-31). 1300 이상(grid)에선 요일과 곁칸이 좌우로 나뉘어 이 여백이 안
+   review 지적, 2026-07-31). 1440 이상(grid)에선 요일과 곁칸이 좌우로 나뉘어 이 여백이 안
    보이지만, 있어도 해가 없다. 값은 읽기 화면의 카드→목록 간격(`.week-card-download` 의 옛
    margin-bottom)과 같은 --space-6 로 맞춰 두 화면의 리듬을 같게 한다. */
 .sched__aside {
@@ -223,43 +236,35 @@
 }
 /* `.week-card-download` 자신의 margin-top(공지 아래로 띄우던 값)·margin-bottom(요일 목록과
    가르던 값, 둘 다 읽기 화면·옛 편집기 순서를 위한 값이었다)은 이 곁칸 안에선 둘 다 군더더기다
-   — 위아래 이웃이 이제 페이지 머리글·`.sched__meta` 로 바뀌었고, 그 간격은 전부 `.sched__aside`
+   — 위아래 이웃이 이제 페이지 머리글·팬아트 상자로 바뀌었고, 그 간격은 전부 `.sched__aside`
    의 flex gap 이 정본으로 준다(codex review 지적, 2026-07-31). **narrow flow 에도 적용된다** —
-   media 쿼리 안에 두면 1300 미만에서 여전히 48px 위 여백이 남아 카드가 머리글에서 불필요하게
+   media 쿼리 안에 두면 1440 미만에서 여전히 48px 위 여백이 남아 카드가 머리글에서 불필요하게
    떨어진다(실측: aside 상단 197 인데 카드 시작은 245). */
 .sched__preview .week-card-download {
   margin-top: 0;
   margin-bottom: 0;
 }
 
-/* ── 편집기의 주 메타: 공지 · 팬아트 2박스(결정 29, 2026-07-31 개정) ────────────
-   둘 다 미리보기 카드에만 그려지는 값이라 그 카드 바로 아래, 카드의 좌우 배치(공지 왼쪽·그림
-   오른쪽)와 맞춘 2박스로 나란히 세운다. `flex-wrap` 으로 폭이 좁아지면 자연히 위아래로 쌓인다
-   — 이 화면 전용 폭이라 새 브레이크포인트를 안 만든다(kunya-design §5, "감축 경로"). 미리보기와의
-   간격은 부모 `.sched__aside` 의 flex gap 이 준다 — 이 자신엔 더 안 붙인다. */
-.sched__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-}
-/* 두 박스는 `.paper`(--surface + 테두리 + 그림자)를 그대로 쓴다(kunya-design §3, "있는 부품을
-   쓴다") — `.sched-day` 카드가 이미 같은 표면 위에 `.sched-field`(--border-strong)를 얹어
-   대비를 검증해 뒀다(kunya-design §4). `flex-basis 240` 은 이 박스 안 최소 콘텐츠(공지 필드
-   한 줄, 팬아트 썸네일+버튼 한 줄)가 그 아래로 줄면 답답해지는 지점의 실측값이다 — 더 좁아지면
-   위 `flex-wrap` 이 위아래로 내린다. */
-.sched-meta__note-box,
+/* ── 편집기의 주 메타: 팬아트 한 상자(결정 29 · 공지 입력 제거 2026-08-01) ────────
+   미리보기 카드에만 그려지는 값이라 그 카드 바로 아래에 선다.
+
+   **`.sched__meta` 래퍼는 없어졌다.** 그 겹은 공지·팬아트 두 박스를 가로로 나란히 세우고
+   (카드의 좌우 배치를 흉내 냈다) 좁아지면 `flex-wrap` 으로 쌓는 일을 했는데, 공지 입력이
+   걷히며 박스가 하나만 남아 그 일이 통째로 사라졌다. 상자는 이제 `.sched__aside-pin` 의 직접
+   자식이고 미리보기와의 간격은 그 flex gap(--space-5)이 준다.
+
+   `.paper`(--surface + 테두리 + 그림자)를 그대로 쓴다(kunya-design §3, "있는 부품을 쓴다") —
+   `.sched-day` 카드가 이미 같은 표면 위에 `.sched-field`(--border-strong)를 얹어 대비를
+   검증해 뒀다(kunya-design §4). */
 .sched-fanart {
-  flex: 1 1 240px;
   min-width: 0;
   padding: var(--space-4);
 }
-.sched-meta__note-box .sched-note {
-  margin-bottom: 0; /* 박스 안 유일한 내용이라 옛 블록-스택 여백이 필요 없다 */
-}
 
-/* 편집기의 공지 입력(라벨 + field). 박스(.paper) 안이라 --surface 위에 다시 --surface 인
-   .sched-field 를 얹지만, field 의 --border-strong 이 더 진해 안쪽 경계가 그대로 선다
-   (.sched-day 와 같은 조합). */
+/* 라벨 + field 한 벌. `.sched-note` 라는 이름은 공지 입력에서 왔지만 **팬아트 작가 표기가
+   같은 부품을 쓴다**(그 라벨도 `.sched-note__label` 이다) — 공지가 걷혀도 이 규칙이 남는
+   이유다. 박스(.paper) 안이라 --surface 위에 다시 --surface 인 .sched-field 를 얹지만,
+   field 의 --border-strong 이 더 진해 안쪽 경계가 그대로 선다(.sched-day 와 같은 조합). */
 .sched-note {
   display: block;
   margin-bottom: var(--space-5);
@@ -1565,14 +1570,45 @@ dialog.sched-confirm::backdrop {
   margin-top: var(--space-7);
   margin-bottom: var(--space-6);
 }
-.week-card-download__preview {
+/* 카드와 그 위에 얹히는 조작이 함께 사는 상자(결정 35, 2026-08-01). 아이콘을 절대배치로
+   겹치려면 **포함 블록이 카드와 정확히 같은 상자**여야 하는데, 미리보기 자신은 이제 button 이라
+   그 안에 다른 button 을 못 둔다(HTML 금지) — 그래서 한 겹을 더 두고 둘을 형제로 만든다. */
+.week-card-download__stage {
   position: relative;
   width: 100%;
   max-width: 1200px;
+}
+/* **미리보기가 곧 확대 버튼이다.** button 기본 크롬(패딩·테두리·배경·글꼴)을 전부 걷어
+   예전의 div 와 같은 상자로 되돌린다 — 그러지 않으면 ResizeObserver 가 재는 clientWidth 에
+   패딩이 껴 배율이 어긋난다. `zoom-in` 커서가 "눌리는 그림"이라는 사실을 포인터로 말한다
+   (글자 라벨을 걷은 자리라 이 신호가 전보다 중요해졌다). */
+.week-card-download__preview {
+  display: block;
+  position: relative;
+  width: 100%;
   aspect-ratio: 1200 / 630;
+  padding: 0;
   overflow: hidden;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: zoom-in;
+  background: transparent;
+  border: none;
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-card);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .week-card-download__preview {
+    transition: box-shadow var(--dur-base) var(--ease-paper);
+  }
+}
+.week-card-download__preview:hover {
+  box-shadow: var(--shadow-lift);
+}
+.week-card-download__preview:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 .week-card-download__scale {
   position: absolute;
@@ -1580,12 +1616,61 @@ dialog.sched-confirm::backdrop {
   left: 0;
   transform-origin: top left;
 }
-/* 조작 둘(원본 크기로 보기 · PNG 다운로드)이 한 줄에 선다. 좁은 폭에서 두 버튼이 다 44 를
-   지키며 서려면 접혀야 한다 — 억지로 한 줄에 두면 글자가 잘린다. */
-.week-card-download__acts {
+/* 카드 위 다운로드 아이콘(편집기 전용). **색을 테마 토큰이 아니라 브랜드 앵커로 쓴다** —
+   이 버튼이 앉는 바닥은 카드이고, 카드는 라이트·다크 양쪽에서 크림 종이다(사진지 섬과 같은
+   규칙, kunya-design §4). `--fg`/`--surface` 를 쓰면 다크에서 잉크 위 잉크가 되어 사라진다.
+   대비: --brand-ink(#181818) on 92% --brand-paper 위 16.9:1(스크립트 계산).
+
+   44×44 는 터치 하한이고 여기선 **패딩이 아니라 고정 치수**로 준다 — 아이콘 하나뿐이라
+   글자 크기가 하한을 좌우하지 않는다(.btn 계열의 상습적 함정을 애초에 안 만든다). */
+.week-card-download__icon {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  cursor: pointer;
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand-paper) 92%, transparent);
+  border: 1px solid var(--thumb-edge);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 4px rgba(24, 24, 24, 0.16);
+}
+.week-card-download__icon svg {
+  width: 20px;
+  height: 20px;
+}
+.week-card-download__icon:hover:not(:disabled) {
+  background: var(--brand-paper);
+  border-color: var(--brand-ink);
+}
+.week-card-download__icon:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.week-card-download__icon:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* 아이콘엔 "만드는 중…"을 실을 글자 자리가 없어 이 칩이 그 상태를 대신 말한다(글자 버튼은
+   자기 라벨로 말한다). 아이콘 왼쪽에 나란히 서므로 오른쪽 여백이 아이콘 44 + 간격이다.
+   바닥이 카드라 색은 위 아이콘과 같은 브랜드 앵커를 쓴다. */
+.week-card-download__busy {
+  position: absolute;
+  top: var(--space-3);
+  right: calc(var(--space-3) + 44px + var(--space-2));
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  align-items: center;
+  height: 44px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand-paper) 92%, transparent);
+  border: 1px solid var(--thumb-edge);
+  border-radius: var(--radius-sm);
 }
 .week-card-download__btn {
   /* .btn 계열엔 min-height 가 없다(games.css .head__act 주석과 같은 함정) — 직접 못박는다. */
@@ -1670,26 +1755,52 @@ dialog.sched-zoom::backdrop {
     flex-direction: column;
     align-items: stretch;
   }
-  /* 미리보기는 컨테이너 폭에 맞춰 축소되는데(week-card-download.tsx 의 ResizeObserver) 390px
-     에선 배율이 0.285 라 요일 34px→9.7px · 항목 제목 16px→4.6px 로 글자를 전혀 못 읽는다
-     (실측 2026-07-29). **무엇이 받아질지 못 보여주면 미리보기가 아니다.** 카드는 aria-hidden
-     이고 바로 아래 목록이 같은 내용을 이미 말하므로 감춰도 잃는 의미가 0 이다. 버튼은 남는다 —
-     캡처는 화면 밖에 붙인 복제본을 찍으므로(snapshotCard) 미리보기가 안 보여도 그대로 된다.
+  /* ── **미리보기를 더는 감추지 않는다**(결정 35, 2026-08-01) ─────────────────────
+     2026-07-29 부터 이 자리에 `display: none` 이 있었다. 근거는 "390px 에선 배율이 0.285 라
+     요일 34px→9.7px · 항목 제목 16px→4.6px 로 글자를 전혀 못 읽는다 — 무엇이 받아질지 못
+     보여주면 미리보기가 아니다"였고, **그 실측 자체는 지금도 참이다.**
 
-     **이 선택자는 읽기 화면과 편집기가 공유한다**(WeekCardDownload 를 둘 다 그린다) — 그러니
-     편집기 쪽 근거도 같이 적는다(코드 리뷰가 짚은 자리). 편집기에서 미리보기는 baseline
-     (마지막으로 저장된 값)을 보여주는 유일한 창이라 폼이 dirty 할 때 값어치가 커 보이지만,
-     **그 창은 이 폭에서 어차피 판독 불가다** — 4.6px 글자는 읽기 화면이든 편집기든 똑같이
-     아무것도 안 알려 준다. 그리고 "지금 받으면 뭐가 나오나"라는 그 질문의 답은 원래 그림이
-     아니라 문장이 맡는다(week-card-download__hint 의 "저장하지 않은 변경이 있습니다…").
-     그 힌트는 미리보기 **밖**이라 여기서 안 사라진다 — e2e 가 그 둘을 같이 잰다. */
-  .week-card-download__preview {
-    display: none;
+     바뀐 것은 그 상자의 **일**이다. 확대가 텍스트 버튼에서 카드 클릭으로 옮겨 가면서
+     (week-card-download.tsx) 이 상자는 판독 수단이 아니라 **확대의 진입점**이 됐다. 감추면
+     좁은 폭에서 확대에 닿을 길이 통째로 사라진다 — 옛 규칙이 성립했던 건 그때 확대 버튼이
+     미리보기 **밖**에 따로 있어서다. 4.6px 글자는 여전히 못 읽지만 "여기 카드가 있고 누르면
+     크게 볼 수 있다"는 신호로는 충분하고, 판독은 확대 창이 전부 맡는다.
+
+     남은 대가는 이 폭에서 카드가 세로 205px 를 먹는 것이다. 편집기에선 곁칸이 요일 목록보다
+     앞이라 그만큼 목록이 밀리지만, 카드를 감춰서 아끼던 그 자리가 **확대 경로 전체**와
+     맞바꾼 것이라 받아들인다. */
+
+  /* **이 폭에서만 다운로드 아이콘이 카드 밖으로 내려온다**(실측 2026-08-01).
+     44×44 는 터치 하한이라 못 줄이는데 카드는 여기서 340×178 까지 작아져, 카드 위에 얹으면
+     아이콘이 카드 높이의 4분의 1을 덮고 우측 상단의 주 범위 표기(`6.2 – 6.8`)를 그대로
+     가린다(1600px 에선 같은 44 가 카드의 작은 귀퉁이라 아무것도 안 가린다 — 캡처로 확인).
+     **미리보기가 무엇이 받아질지 가리면 미리보기가 아니다**, 이 파일이 옛 `display: none`
+     규칙에서 세웠던 바로 그 기준이라 여기서도 같은 기준을 적용한다.
+
+     `position: static` 이면 stage 안에서 카드 다음 블록으로 자연히 내려간다 — 별도 배치
+     규칙이 필요 없다. 카드 클릭(확대)은 그대로라 조작 둘이 위아래로 갈릴 뿐이다. */
+  .week-card-download__icon,
+  .week-card-download__busy {
+    position: static;
+    margin-top: var(--space-2);
   }
-  /* 미리보기가 빠지면 이 묶음은 버튼 한 줄뿐이라, 카드를 띄우려고 잡은 위 여백(48)이 공지와
-     버튼 사이를 과하게 벌린다. 그 자리에선 space-5 가 이웃 블록 간격과 같은 결이다. */
-  .week-card-download {
-    margin-top: var(--space-5);
+  /* 내려온 뒤엔 카드 종이가 아니라 페이지 바탕 위에 앉는다 — 크림 앵커(--brand-paper)를 그대로
+     두면 다크에서 흰 알약이 떠 버린다. 이 폭에서만 테마 토큰으로 되돌린다. */
+  .week-card-download__icon {
+    color: var(--fg);
+    background: var(--surface);
+    border-color: var(--border-strong);
+    box-shadow: none;
+  }
+  .week-card-download__icon:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: var(--border-strong);
+  }
+  .week-card-download__busy {
+    color: var(--fg-muted);
+    background: transparent;
+    border-color: transparent;
+    padding-left: 0;
   }
   /* 하루 카드는 라벨을 위로 올린다 — 좁으면 왼쪽 고정폭 라벨이 항목 폭을 너무 먹는다.
      **이제 읽기 화면에만 실효가 있다**(2026-07-31) — 편집기는 이 골격이 기본이 됐다

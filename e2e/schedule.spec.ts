@@ -125,12 +125,12 @@ test("관리자: 미리보기가 타이핑을 따라오고, 미저장이면 다�
   // 그러니 카드도 그대로여야 한다 — 빈 줄이 새면 여기가 2가 된다.
   await expect(firstDayCard.locator(".week-card__entry")).toHaveCount(1);
 
-  /* **공지도 같은 부류다**(codex 리뷰 P2). 서버 스키마는 공백만인 공지를 `null` 로 접고
-     `isWeekDirty` 도 `.trim()` 으로 비교하므로, 공백만 타이핑하면 dirty 가 아니다 — 그런데
-     카드가 날것을 그리면 화면에만 빈 공지 블록이 생긴다. */
-  await expect(page.locator(".week-card__note")).toHaveCount(0);
-  await page.locator('[data-od-id="schedule-note-input"]').fill("   ");
-  await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
+  /* **공지도 같은 부류였다**(codex 리뷰 P2). 공백만인 공지는 저장에서 `null` 로 접히고
+     `isWeekDirty` 도 같은 정규형을 보므로 dirty 가 아닌데, 카드가 날것을 그리면 화면에만 빈
+     공지 블록이 생겼다. **2026-08-01 에 공지 입력을 걷어(결정 35 짝) 화면에서 그 값을 만들 길이
+     없어졌으므로 여기서 못 잰다** — 정규화를 `buildWeekCard` 로 옮기고 그 계약은
+     `features/schedule/card.test.ts` 가 직접 부른다. 아래 한 줄은 남긴다: 공지가 없는 주에
+     블록이 안 생긴다는 사실 자체는 이 화면에서 여전히 참이어야 한다. */
   await expect(page.locator(".week-card__note")).toHaveCount(0);
 });
 
@@ -178,7 +178,7 @@ test("관리자: 2열에서 하루를 크게 확장해도 미리보기-메타 �
 
   const gapOf = async () => {
     const preview = (await page.locator(".sched__preview").boundingBox())!;
-    const meta = (await page.locator(".sched__meta").boundingBox())!;
+    const meta = (await page.locator('[data-od-id="schedule-fanart"]').boundingBox())!;
     return meta.y - (preview.y + preview.height);
   };
 
@@ -277,7 +277,7 @@ test("관리자: 2열에서 스크롤해도 메타가 미리보기 아래로 가
     await page.mouse.wheel(0, amt - (await page.evaluate(() => window.scrollY)));
     await page.waitForTimeout(100);
     const previewBox = (await page.locator(".sched__preview").boundingBox())!;
-    const metaBox = (await page.locator(".sched__meta").boundingBox())!;
+    const metaBox = (await page.locator('[data-od-id="schedule-fanart"]').boundingBox())!;
     expect(metaBox.y, `scroll=${amt}`).toBeGreaterThanOrEqual(previewBox.y + previewBox.height);
   }
 });
@@ -291,18 +291,23 @@ test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 
   page.on("dialog", (d) => d.accept());
   await page.goto("/schedule?week=2027-04-05");
 
-  // 이 주 편집기에 공지를 넣어 dirty 로 만든다(저장은 안 한다).
-  const note = page.locator('[data-od-id="schedule-note-input"]');
-  await note.fill("이 공지는 이 주에만");
+  /* 이 주 편집기를 dirty 로 만든다(저장은 안 한다). **항목 제목으로 만든다** — 예전엔 공지
+     입력이었는데 그 칸이 없어졌다(결정 35 짝). 재는 사실은 그대로다: "이 주에서만 만든 미저장
+     값이 다음 주로 따라가지 않는다". */
+  await openDay(page, 0);
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("이 항목은 이 주에만");
 
   // WeekNav "다음주"로 이동 — 미저장이라 confirm 이 뜨고, 수락되어 새 주로 간다.
   const before = page.url();
   await page.locator('.sched-nav__step[rel="next"]').click();
   await page.waitForFunction((u) => location.href !== u, before);
 
-  // 새 주 편집기의 공지는 비어 있어야 한다 — key remount 로 draft·baseline 이 새 주에서
-  // 다시 서기 때문이다(안 그러면 옛 주 공지가 이월돼 저장이 새 주를 덮어쓴다).
-  await expect(page.locator('[data-od-id="schedule-note-input"]')).toHaveValue("");
+  /* 새 주 편집기엔 그 항목이 없어야 한다 — key remount 로 draft·baseline 이 새 주에서 다시
+     서기 때문이다(안 그러면 옛 주 항목이 이월돼 저장이 새 주를 덮어쓴다). 하루를 펼쳐서 본다:
+     접힌 줄엔 항목 입력이 아예 없으므로(결정 28) 펼치지 않으면 0 이 항상 참이라 이빨이 없다. */
+  await openDay(page, 0);
+  await expect(page.locator('[data-od-id^="schedule-entry-title-"]')).toHaveCount(0);
 });
 
 test("관리자: 이관된 레거시 주는 항목이 있어도 발행이 꺼진 채 열린다", async ({
@@ -557,8 +562,14 @@ test("공개 읽기: WeekNav 로 주를 넘겨도(리마운트 없이) 다운로
    따로 전달된다.
 
    그래서 여기서 새로 재는 것: 미발행 주에서도 **미리보기는 뜨고**(새 주를 짜는 내내가 그
-   상태다 — 안 뜨면 이 창을 옆에 둔 값어치가 없다) 버튼만 잠기며 그 이유가 화면에 있다. */
-test("관리자: 초안 주도 미리보기는 뜨고, 다운로드만 잠긴 채 이유를 말한다", async ({
+   상태다 — 안 뜨면 이 창을 옆에 둔 값어치가 없다) 버튼만 잠기며 그 이유가 어딘가에 있다.
+
+   **2026-08-01 에 그 "어딘가"가 바뀌었다**(결정 35). 미발행 사유는 화면 문장을 안 낸다 — 같은
+   화면 저장·발행 바의 칩("비공개")이 이미 상시로 말해 중복이기 때문이다. 대신 **버튼의 접근
+   가능한 이름**이 사유를 진다: 편집기에서 다운로드는 아이콘뿐이라 이름 말고는 전할 통로가 없다.
+   그래서 이 스펙은 이제 문장이 **없다는 것**과 이름이 **있다는 것**을 함께 잰다 — 앞엣것만
+   재면 사유가 통째로 사라져도 초록이다. */
+test("관리자: 초안 주도 미리보기는 뜨고, 다운로드는 이름으로 이유를 진 채 잠긴다", async ({
   page,
   baseURL,
 }) => {
@@ -570,20 +581,21 @@ test("관리자: 초안 주도 미리보기는 뜨고, 다운로드만 잠긴 �
   // **미리보기는 뜬다.** 이 단언이 옛 계약("미발행이면 카드 자체가 없다")을 정확히 뒤집는다.
   await expect(page.locator('[data-od-id="week-card"]')).toBeVisible();
 
-  await expect(page.locator('[data-od-id="week-card-download-btn"]')).toBeDisabled();
-  await expect(page.locator('[data-od-id="week-card-download-blocked"]')).toHaveText(
-    "발행된 주만 카드로 내려받을 수 있습니다.",
-  );
+  const dl = page.locator('[data-od-id="week-card-download-btn"]');
+  await expect(dl).toBeDisabled();
+  await expect(dl).toHaveAccessibleName("PNG 다운로드 — 발행된 주만 받을 수 있습니다");
+  // 미발행 사유는 화면 문장을 안 낸다 — 발행 칩이 이미 말한다.
+  await expect(page.locator('[data-od-id="week-card-download-blocked"]')).toHaveCount(0);
 
   /* **사유의 순서를 못박는다.** 이 주는 미발행이면서 동시에 미저장이 될 수 있는데(무언가
      고치는 순간), 그때 "저장하면 받을 수 있습니다"라고 말하면 거짓이다 — 발행하지 않는 한
-     저장해도 못 받는다. 발행이 먼저다. */
+     저장해도 못 받는다. 발행이 먼저다. 미저장 사유였다면 화면 문장이 떴을 것이므로, 그 문장이
+     여전히 없다는 것 자체가 순서가 안 뒤집혔다는 증거다. */
   await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("초안 항목");
-  await expect(page.locator('[data-od-id="week-card-download-blocked"]')).toHaveText(
-    "발행된 주만 카드로 내려받을 수 있습니다.",
-  );
+  await expect(dl).toHaveAccessibleName("PNG 다운로드 — 발행된 주만 받을 수 있습니다");
+  await expect(page.locator('[data-od-id="week-card-download-blocked"]')).toHaveCount(0);
 });
 
 /* 이슈 #109 작업순서 4. 상태 코드·content-type 만 보던 옛 Satori 라우트와 달리, 클라이언트
@@ -599,8 +611,13 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
   await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("PNG 검증 항목");
-  // 7열 모양도 같은 결함이 있었다(500자 공지에서 목록이 356→104px 로 눌려 항목이 잘렸다).
-  await page.locator('[data-od-id="schedule-note-input"]').fill("공".repeat(500));
+  /* **긴 공지 압박은 더는 못 잰다**(2026-08-01). 여기서 500자 공지를 넣어 "7열 모양에서 목록이
+     356→104px 로 눌려 항목이 잘린다"는 회귀를 함께 잡고 있었는데, 공지 입력을 걷으면서(결정 35 짝)
+     화면에서 그 값을 만들 길이 사라졌다 — 픽스처에 공지가 있는 주를 심지 않는 한 e2e 로는 못
+     만든다(이 저장소는 D1 픽스처 하나를 모든 스펙이 공유해서, 관찰 가능한 상태를 늘리면 남의
+     스펙이 조용히 깨진다). **그 계약을 지키는 것은 이제 `.week-card__note` 의 line-clamp CSS
+     하나뿐이다** — 공지 입력을 되살리거나 그 clamp 를 건드리는 사람은 이 회귀를 손으로 확인해야
+     한다. 관리자가 새 공지를 못 만드는 동안은 위험이 낮다(이미 저장된 공지만 남는다). */
   await page.locator('[data-od-id="schedule-save"]').click();
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
   await publishNow(page);
@@ -622,7 +639,6 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
      여기까지 그대로 통과한다. 실제로 그런 상태로 살아 있었다(캡처 복제본에 걸린
      `position: fixed`가 SVG 안에서 카드를 화면 밖으로 밀었다, week-card-download.tsx).
      그래서 종이 색이 실제로 칠해졌는지 한 점을 찍는다: 카드 왼쪽 위 여백은 --thumb-paper 다. */
-  await expectListNotSquashed(page);
 
   const paper = await samplePng(page, buf, { x: 24 * 2, y: 24 * 2 });
   expect(paper[3]).toBe(255); // 불투명 — 빈 캡처면 여기서 0 이다
@@ -630,33 +646,6 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
     expect(Math.abs(paper[i]! - want)).toBeLessThanOrEqual(6);
   }
 });
-
-/* 긴 공지가 일정 목록을 누르지 않는지 — 두 모양이 같은 규칙(공지 두 줄 상한)을 쓴다.
-
-   **줄 수는 computed line-height 로 나눈다.** 상수로 나눴다가 헛발을 짚었다: 카드 공지는
-   페이지 본문의 `line-height: 1.6` 을 물려받아 한 줄이 35.2px 인데, 스크래치 목업은 그 값을
-   안 물려받아 28px 이었다 — 목업 수치를 그대로 옮기면 두 줄(70px)을 세 줄로 읽는다. 본문
-   높이 406 에서 공지 두 줄(70)과 그 위 여백(22)을 빼면 목록은 314px 이 남는다. */
-async function expectListNotSquashed(page: Page): Promise<void> {
-  const m = await page.evaluate(() => {
-    const root = document.querySelector('[data-od-id="week-card"]') as HTMLElement;
-    const note = root.querySelector(".week-card__note") as HTMLElement;
-    const days = root.querySelector(".week-card__days") as HTMLElement;
-    const first = root.querySelector(".week-card__day") as HTMLElement;
-    const entries = first.querySelector(".week-card__entries") as HTMLElement;
-    const lh = parseFloat(getComputedStyle(note).lineHeight);
-    return {
-      noteLines: Math.round(note.offsetHeight / lh),
-      noteOverflowsX: note.scrollWidth > note.clientWidth + 1,
-      daysH: days.offsetHeight,
-      entriesClipped: entries.scrollHeight > entries.clientHeight + 1,
-    };
-  });
-  expect(m.noteLines).toBeLessThanOrEqual(2);
-  expect(m.noteOverflowsX).toBe(false);
-  expect(m.daysH).toBeGreaterThanOrEqual(300);
-  expect(m.entriesClipped).toBe(false);
-}
 
 /* 받은 PNG 의 한 점을 읽는다. 압축된 PNG 를 Node 에서 직접 풀려면 필터 해제까지 손으로 해야
    하고 이미지 라이브러리는 이 저장소의 직접 의존이 아니라, 이미 열려 있는 브라우저에 맡긴다. */
@@ -707,10 +696,11 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("팬아트 카드 항목");
 
-  /* 공지도 **저장 상한(500자)까지** 채운다 — 줄 수 제한이 없으면 긴 공지가 본문 높이를 먹어
-     일정 목록을 누른다(실측: 팬아트 모양은 200자에서 이미 항목이 잘리고 500자면 목록 높이가
-     0 이 됐다 — GitHub codex 리뷰 P2). 아래 단언이 그 자리를 잡는다. */
-  await page.locator('[data-od-id="schedule-note-input"]').fill("공".repeat(500));
+  /* 여기서도 공지 500자를 함께 채웠다 — 줄 수 제한이 없으면 긴 공지가 본문 높이를 먹어 일정
+     목록을 눌렀다(실측: 팬아트 모양은 200자에서 이미 항목이 잘리고 500자면 목록 높이가 0 이
+     됐다 — GitHub codex 리뷰 P2). **공지 입력을 걷으며 그 조건을 못 만들게 됐다**(위 PNG 치수
+     스펙의 같은 자리 주석에 근거와 남는 위험을 적어 뒀다). 아래 픽셀 단언은 그대로 유효하다 —
+     그건 공지 길이가 아니라 "팬아트가 실제로 캡처에 담기는가"를 보는 것이다. */
   await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(SOLID_FANART);
   await expect(page.locator('[data-od-id="schedule-fanart-thumb"]')).toBeVisible();
   /* 표기를 **저장 상한(100자)까지** 채운다 — 짧은 표기로만 재면 사진지가 카드를 밀어내는
@@ -749,7 +739,6 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
   expect(fit.capLines).toBeLessThanOrEqual(2);
   expect(fit.capOverflowsX).toBe(false);
   expect(fit.figClipsContent).toBe(false);
-  await expectListNotSquashed(page);
 
   // 찍을 두 점(카드 좌표계) — 그림 중앙과 목록 첫 행 중앙.
   const points = await page.evaluate(() => {
@@ -817,8 +806,13 @@ test("관리자: 발행을 취소하면 공개만 꺼지고 항목은 남는다 
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
   await publishNow(page);
 
-  // 발행된 채로 다른 걸 고치는 중(dirty)이어도 비공개 전환 버튼은 활성이다.
-  await page.locator('[data-od-id="schedule-note-input"]').fill("아직 저장 안 한 공지");
+  /* 발행된 채로 다른 걸 고치는 중(dirty)이어도 비공개 전환 버튼은 활성이다. dirty 를 만드는
+     수단이 공지에서 **항목 추가**로 바뀌었다(결정 35 짝으로 공지 입력이 없어졌다) — 재는 사실은
+     그대로다. **첫 항목을 고치지 않고 새 항목을 더한다**: 아래에서 "발행 취소가 항목을 안
+     건드린다"를 그 첫 항목으로 재므로, 그걸 덮어쓰면 단언이 자기가 만든 값을 확인하는 꼴이 된다.
+     이 시점에 하루는 이미 펼쳐져 있다(위에서 항목을 만들었다). */
+  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+  await page.locator('[data-od-id^="schedule-entry-title-"]').nth(1).fill("아직 저장 안 한 항목");
   await expect(page.locator('[data-od-id="schedule-publish-toggle"]')).toBeEnabled();
   await page.locator('[data-od-id="schedule-publish-toggle"]').click();
   await expect(page.getByRole("heading", { name: "비공개로 전환하시겠습니까?" })).toBeVisible();

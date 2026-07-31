@@ -184,8 +184,15 @@ for (const theme of ["light", "dark"] as const) {
    **날짜가 바뀔 때마다 스냅샷이 달라진다**. 픽스처가 안 건드리는 먼 과거 주를 고정해 오늘이 그
    안에 절대 안 들어가게 한다 — 간헐 실패를 설계로 없앤다.
 
-   상태를 손으로 만든다(공지 · 항목 둘 · 휴방 하나): 빈 주를 찍으면 이번 개편이 바꾼 것들이
-   그림에 거의 안 나온다 — 항목 행도 잠금도 카드 내용도 전부 "무언가 들어 있을 때" 생긴다.
+   상태를 손으로 만든다(항목 둘 · 휴방 하나): 빈 주를 찍으면 이번 개편이 바꾼 것들이 그림에
+   거의 안 나온다 — 항목 행도 잠금도 카드 내용도 전부 "무언가 들어 있을 때" 생긴다. (한때
+   공지도 함께 채웠는데 그 입력이 없어졌다 — 결정 35 짝.)
+
+   **뷰포트는 1600 이다**(1400 에서 올렸다, 2026-08-01). 2열 진입폭이 결정 31 로 1300→1440 이
+   되면서 옛 1400 은 **1열**이 됐고, 그러면 이 베이스라인이 이 화면의 주 모양(폼 + 미리보기를
+   나란히 보는 2열)을 더는 안 담는다 — 실제로 높이가 1157→1893 으로 늘며 완전히 다른 그림이
+   됐다. 1600 은 편집 열이 상한(760)까지 벌어지는 첫 폭이라, 이 그림이 "가장 넓을 때의 배치"를
+   담는다. 2열 진입폭을 또 옮기면 이 값도 같이 옮긴다.
 
    **이 베이스라인이 담는 아코디언 상태(결정 28, 2026-07-31 후속) — 재생성 전에 꼭 읽는다:**
    한 번에 하나만 펼쳐지므로 월·화·수를 순서대로 열어 각자 항목을 채우면 앞서 연 날은 자동으로
@@ -203,7 +210,7 @@ for (const theme of ["light", "dark"] as const) {
       }
     }, theme);
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.setViewportSize({ width: 1400, height: 2200 });
+    await page.setViewportSize({ width: 1600, height: 2200 });
     await signIn(page.context(), baseURL!);
 
     // 다른 스펙이 안 읽는 먼 과거 주 — 오늘이 여기 들 일이 없다.
@@ -212,7 +219,8 @@ for (const theme of ["light", "dark"] as const) {
     await expectSignedIn(page);
     await page.evaluate(() => document.fonts.ready);
 
-    await page.locator('[data-od-id="schedule-note-input"]').fill("이번 주는 건축 위주로 갑니다");
+    /* 공지를 채우던 줄이 있었다 — 공지 입력을 걷으며(결정 35 짝) 사라졌고, 그래서 이 스냅샷의
+       카드에는 이제 공지 블록이 없다. 베이스라인을 갱신할 때 그 차이가 의도된 것이다. */
     const add = page.locator('[data-od-id^="schedule-day-add-"]');
     const titles = page.locator('[data-od-id^="schedule-entry-title-"]');
     // 한 번에 하나만 열리므로(결정 28) 날마다 openDay 로 편 뒤 그 안의 유일한 add·title 을

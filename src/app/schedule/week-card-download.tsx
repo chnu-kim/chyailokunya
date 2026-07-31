@@ -9,9 +9,11 @@
    모달만 닫아야 하는 계약, AGENTS "콤보박스·모달 히스토리" 지뢰). 이 화면엔 그 이득이 없다 —
    폼도 아니고 겹쳐 뜨는 다른 모달도 없어서, 인라인 섹션으로 충분하다.
 
-   미리보기는 aria-hidden 이다 — 카드 안 텍스트(요일·제목·시각)가 읽기 화면·편집기 본문과
-   그대로 겹쳐, 스크린리더가 같은 일정을 두 번 낭독하게 된다(적대적 리뷰 지적). 카드는
-   "다운로드될 그림"이지 새 정보가 아니므로 버튼 이름만 남긴다. */
+   카드 **내용**은 aria-hidden 이다 — 요일·제목·시각이 읽기 화면·편집기 본문과 그대로 겹쳐,
+   스크린리더가 같은 일정을 두 번 낭독하게 된다(적대적 리뷰 지적). 카드는 "다운로드될 그림"이지
+   새 정보가 아니므로 조작의 이름만 남긴다. **감추는 겹이 2026-08-01 에 한 단계 안으로
+   내려갔다**(결정 35) — 미리보기 상자 자신이 확대 트리거가 되면서 상자는 보여야 하고 내용만
+   감추면 되기 때문이다. 아래 렌더 부분의 같은 자리 주석에 자세히 있다. */
 
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { useMachine } from "@xstate/react";
@@ -258,27 +260,73 @@ async function capture(
    draft 를 그리게 되면서 편집기의 `card` 는 절대 null 이 아니게 됐고(schedule-editor.tsx),
    그러면 그 판정이 통째로 닿지 않는 가지가 된다 — **미발행인데 저장은 된 주에서 이유 없이
    잠긴 버튼**이 남는다(advisor 지적). 그건 이 PR 이 휴방에서 고친 것과 정확히 같은 부류다:
-   가드는 방어선이고 잠금은 표시다. 그래서 사유를 값으로 받아 각각 문장으로 말한다. */
+   가드는 방어선이고 잠금은 표시다. 그래서 사유를 값으로 받는다. */
 export type DownloadBlockedReason = "unpublished" | "unsaved";
 
-const BLOCKED_MESSAGE: Record<DownloadBlockedReason, string> = {
-  unpublished: "발행된 주만 카드로 내려받을 수 있습니다.",
-  /* **"지금 받으면 마지막 저장분이 나갑니다"에서 바뀌었다.** 그때는 받을 수 있었고 화면과 파일이
-     다를 뿐이었는데, 이제 그 차이 자체를 없앴다(미저장이면 못 받는다) — 문구도 경고가 아니라
-     "무엇을 하면 풀리는가"를 말한다. */
+/* 잠긴 이유를 **화면 문장**으로 말하는 것은 이제 하나뿐이다(결정 35, 2026-08-01).
+
+   "발행된 주만 카드로 내려받을 수 있습니다."는 걷었다 — 그 사실은 같은 화면 저장·발행 바의
+   칩("비공개"/"공개 중")이 이미 상시로 말한다. 카드 옆에서 한 번 더 말하면 같은 사실이 한
+   화면에 둘이고, 걷어 낸 자리만큼 카드와 폼이 가까워진다.
+
+   **미저장은 다르다.** 저장 바는 "저장 버튼이 눌린다"는 사실을 말하지만 *"그래서 이 카드를
+   못 받는다"* 는 인과는 아무 데서도 말하지 않는다 — 그건 여기서만 말할 수 있으므로 남긴다.
+   ("지금 받으면 마지막 저장분이 나갑니다"에서 바뀐 문구다: 그때는 받을 수 있었고 화면과
+   파일이 다를 뿐이었는데, 이제 그 차이 자체를 없앴다.)
+
+   대신 **두 사유 모두 버튼의 접근 가능한 이름에 싣는다**(아래 downloadLabel). 글자를 걷어
+   아이콘만 남은 버튼은 잠겨도 아무 설명이 없으므로, 화면 문장이 비운 자리를 이름이 받는다.
+   `title` 하나로 때우지 않는다 — hover 전용이라 터치·키보드엔 없는 것과 같다(AGENTS). */
+const BLOCKED_HINT: Partial<Record<DownloadBlockedReason, string>> = {
   unsaved: "저장하지 않은 변경이 있습니다. 저장하면 이 카드를 받을 수 있습니다.",
 };
+
+const BLOCKED_LABEL: Record<DownloadBlockedReason, string> = {
+  unpublished: "발행된 주만 받을 수 있습니다",
+  unsaved: "저장하면 받을 수 있습니다",
+};
+
+/* 다운로드 아이콘 — 아래로 향한 화살표 + 받침선. 불변식 8 대로 인라인 SVG 이고, 이 저장소의
+   기존 아이콘들(`.sched-day__add` 의 ＋, `.sched-row__del` 의 ✕)과 같은 문법이다:
+   16 뷰박스 · `currentColor` · stroke 1.6 · round 캡. 아이콘 라이브러리를 들이지 않은 이유는
+   이 한 자리를 위해 런타임 의존을 늘리는 셈이라서다(ADR-0010 의 JIT 원칙) — 같은 문법의
+   아이콘이 세 개를 넘고 그중 둘 이상이 같은 모양을 다시 그리게 되면 그때 다시 본다. */
+function DownloadIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16">
+      <path
+        d="M8 2.5v7M5 6.75L8 9.75l3-3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M3.25 13h9.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 export function WeekCardDownload({
   card,
   weekStartDate,
   blockedReason = null,
+  variant = "reader",
 }: {
   card: WeekCardData | null;
   weekStartDate: string;
   /* 편집기만 넘긴다. 읽기 화면은 발행된 주만 렌더하므로(`card` 가 null 이면 미발행) 이 값이
-     필요 없고, 넘기지 않으면 아래에서 `card === null` 이 그대로 "미발행"으로 읽힌다. */
+     필요 없다. */
   blockedReason?: DownloadBlockedReason | null;
+  /* 다운로드를 **아이콘으로 줄일지 글자로 남길지**를 가른다(결정 35, 2026-08-01). 확대(카드
+     클릭)는 두 변형이 공유하고 이 축은 다운로드에만 걸린다.
+
+     왜 가르나: 관리자는 매주 이 화면에 와서 같은 조작을 반복하므로 아이콘이 자리를 아끼는
+     쪽으로 정확히 남는다. 팬은 대개 한 번 오고 마는 사람이라 **"받을 수 있다"는 사실 자체가
+     발견되어야** 하고, 그건 글자만 할 수 있다 — 아이콘은 이미 그게 있다는 걸 아는 사람에게만
+     보인다. 같은 부품이 두 화면에서 다른 모양인 게 의도다(읽기 화면의 팬아트가 폴라로이드고
+     편집기가 아닌 것과 같은 결). */
+  variant?: "editor" | "reader";
 }) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const inFlightRef = useRef<InFlightMap | null>(null);
@@ -289,7 +337,10 @@ export function WeekCardDownload({
      에 걸린다(use-theme.ts 와 같은 함정) — 콜백 ref 로 우회한다. ResizeObserver 콜백은
      effect 본문의 동기 실행이 아니라 브라우저가 나중에 부르는 별도 콜백이라 그 규칙의
      대상이 아니다. */
-  const previewRef = useCallback((el: HTMLDivElement | null) => {
+  /* `HTMLElement` 로 넓게 받는다 — 이 콜백이 쓰는 건 `clientWidth` 하나뿐이고, 붙는 요소가
+     div 에서 button 으로 바뀐 전례가 이미 있다(결정 35). 태그를 좁게 박으면 그 상자의 태그가
+     바뀔 때마다 이 줄이 따라 바뀌어야 하는데, 여기서 알아야 할 사실은 태그가 아니라 "폭을 잰다"뿐이다. */
+  const previewRef = useCallback((el: HTMLElement | null) => {
     if (!el) return;
     const observer = new ResizeObserver(() => {
       setScale(Math.min(1, el.clientWidth / CARD_WIDTH));
@@ -318,46 +369,101 @@ export function WeekCardDownload({
   });
   const capturing = state.matches("submitting");
   const error = state.context.error;
-  /* 원본 크기로 보는 창. 미리보기가 열 폭에 맞춰 축소되므로(창 1300 에서 배율 0.633) 글자
-     수준 확인은 여기서 한다. **좁은 폭에서도 남긴다** — 그 폭에선 미리보기가 아예 감춰지므로
-     (아래 CSS) 이 창이 유일한 판독 수단이 된다. */
+  /* 원본 크기로 보는 창. 미리보기가 열 폭에 맞춰 축소되므로(2열에서 배율 0.633, 카드 항목
+     제목 10.13px) 글자 수준 확인은 여기서 한다. **좁은 폭일수록 더 필요하다** — 그 폭에선
+     배율이 0.285 까지 내려가 카드가 진입점 노릇만 하고 판독은 통째로 이 창이 맡는다. */
   const [zoomed, setZoomed] = useState(false);
 
-  /* 카드가 없으면(읽기 화면의 미발행 주) 그릴 것 자체가 없다 — 그 사정은 곧 "미발행"이다.
-     편집기는 카드를 항상 넘기므로 이 갈래를 안 탄다(`blockedReason` 이 대신 말한다). */
-  const blocked: DownloadBlockedReason | null = card === null ? "unpublished" : blockedReason;
+  /* **카드가 없으면 아무것도 안 그린다**(결정 35, 2026-08-01).
 
-  if (!card) {
-    return (
-      <div className="week-card-download" data-od-id="week-card-download">
-        <button
-          className="btn btn--secondary week-card-download__btn"
-          type="button"
-          disabled
-          data-od-id="week-card-download-btn"
-        >
-          PNG 다운로드
-        </button>
-        <p className="week-card-download__hint" data-od-id="week-card-download-blocked">
-          {BLOCKED_MESSAGE.unpublished}
-        </p>
-      </div>
-    );
-  }
+     전엔 여기서 잠긴 버튼 + "발행된 주만 카드로 내려받을 수 있습니다." 를 그렸다. 그 문장을
+     걷으면 이 가지에 남는 건 **아무 설명 없이 흐려진 버튼 하나**뿐이라, 화면에 있는 것이
+     정보가 0 이다. 이 갈래로 오는 유일한 호출자인 읽기 화면은 애초에 `week` 가 있을 때만 이
+     컴포넌트를 그리므로(schedule-read.tsx) 실전에선 안 닿고, 닿더라도 그 화면이 이미
+     "아직이야… 이번 주 일정은 아직 준비 중입니다." 빈 상태로 같은 사실을 말한다.
+     편집기는 카드를 항상 넘기므로 이 갈래를 안 탄다(`blockedReason` 이 대신 말한다). */
+  if (!card) return null;
+
+  const blocked: DownloadBlockedReason | null = blockedReason;
+  const blockedHint = blocked ? BLOCKED_HINT[blocked] : undefined;
+  /* 아이콘만 남은 버튼의 이름이 사유까지 진다 — 화면 문장을 걷은 자리(BLOCKED_HINT 주석).
+     `capturing` 이 먼저다: 그때는 잠긴 이유가 "지금 만드는 중"이지 발행·저장 상태가 아니다. */
+  const downloadLabel = capturing
+    ? "PNG 카드를 만드는 중"
+    : blocked
+      ? `PNG 다운로드 — ${BLOCKED_LABEL[blocked]}`
+      : "PNG 다운로드";
 
   return (
     <div className="week-card-download" data-od-id="week-card-download">
-      <div className="week-card-download__preview" ref={previewRef} aria-hidden="true">
-        <div className="week-card-download__scale" style={{ transform: `scale(${scale})` }}>
-          <WeekCard card={card} ref={nodeRef} />
-        </div>
+      {/* ── 카드 자체가 확대 트리거다(결정 35) ────────────────────────────────────
+          텍스트 버튼("원본 크기로 보기")을 걷고 그 일을 그림에 넘겼다.
+
+          **`aria-hidden` 이 한 겹 안으로 내려갔다.** 예전엔 이 미리보기 상자 전체가
+          `aria-hidden` 이었고(카드 안 요일·제목이 본문 목록과 그대로 겹쳐 두 번 낭독된다)
+          그래서 확대 버튼을 상자 **바깥**에 둬야 했다 — 감춰진 서브트리 안의 인터랙티브는
+          보조 기술에서 닿지 않으니까. 이제 트리거가 상자 자신이라 상자는 보여야 하고,
+          감출 것은 카드 **내용**뿐이다. `WeekCard` 안엔 포커스 가능한 요소가 하나도 없어
+          (순수 프레젠테이션 — 실측으로 확인) axe 의 `aria-hidden-focus` 에 안 걸린다.
+
+          `ref` 는 스케일 겹이 아니라 이 버튼에 붙는다 — ResizeObserver 가 재는 것은
+          "카드가 들어갈 상자의 폭"이고, 그 상자가 이제 이 버튼이다. */}
+      <div className="week-card-download__stage">
+        <button
+          type="button"
+          className="week-card-download__preview"
+          ref={previewRef}
+          aria-label="주간표 카드 — 원본 크기로 보기"
+          data-od-id="week-card-download-zoom"
+          onClick={() => setZoomed(true)}
+        >
+          <div
+            className="week-card-download__scale"
+            style={{ transform: `scale(${scale})` }}
+            aria-hidden="true"
+          >
+            <WeekCard card={card} ref={nodeRef} />
+          </div>
+        </button>
+
+        {/* 편집기에서만 아이콘이다(variant 주석). **확대 버튼의 자식이 아니라 형제다** —
+            button 안에 button 은 HTML 이 금지하고, 형제로 두면 클릭이 확대로 전파되지도
+            않는다(절대배치로 겹쳐 있을 뿐 DOM 상 부모가 다르다). */}
+        {variant === "editor" && (
+          <>
+            {/* 아이콘 버튼엔 "만드는 중…"을 실을 글자 자리가 없다 — 글자 버튼이 그 상태를
+                자기 라벨로 말하던 것을 이 칩이 대신 받는다. 캡처는 초 단위라 신호가 없으면
+                관리자는 눌리지 않았다고 읽는다(`role="status"` 라 보조 기술도 듣는다). */}
+            {capturing && (
+              <span
+                className="week-card-download__busy"
+                role="status"
+                data-od-id="week-card-download-busy"
+              >
+                만드는 중…
+              </span>
+            )}
+            <button
+              type="button"
+              className="week-card-download__icon"
+              disabled={capturing || blocked !== null}
+              aria-label={downloadLabel}
+              title={downloadLabel}
+              data-od-id="week-card-download-btn"
+              onClick={() => send({ type: "submit", values: { weekStartDate, card } })}
+            >
+              <DownloadIcon />
+            </button>
+          </>
+        )}
       </div>
 
-      {/* **잠긴 이유는 언제나 화면에 있다.** 버튼만 흐려 두면 "왜 안 눌리지"가 되고, 그건 이
-          PR 이 휴방에서 고친 것과 같은 부류다(가드는 방어선, 잠금은 표시). */}
-      {blocked && (
+      {/* **잠긴 이유 중 화면 문장이 남은 것만** 여기 뜬다(BLOCKED_HINT). 나머지는 버튼 이름이
+          진다 — 버튼만 흐려 두고 아무 데도 안 적으면 "왜 안 눌리지"가 되고, 그건 이 저장소가
+          휴방에서 고친 것과 같은 부류다(가드는 방어선, 잠금은 표시). */}
+      {blockedHint && (
         <p className="week-card-download__hint" data-od-id="week-card-download-blocked">
-          {BLOCKED_MESSAGE[blocked]}
+          {blockedHint}
         </p>
       )}
 
@@ -367,28 +473,24 @@ export function WeekCardDownload({
         </p>
       )}
 
-      {/* 조작 둘은 한 줄에 선다. **확대 버튼은 미리보기 바깥이다** — 미리보기는 `aria-hidden`
-          이라(카드 글자가 본문과 그대로 겹쳐 두 번 낭독된다) 그 안에 인터랙티브를 두면 보조
-          기술에서 닿지 않는 버튼이 된다. */}
-      <div className="week-card-download__acts">
-        <button
-          className="btn btn--secondary week-card-download__btn"
-          type="button"
-          data-od-id="week-card-download-zoom"
-          onClick={() => setZoomed(true)}
-        >
-          원본 크기로 보기
-        </button>
+      {variant === "reader" && (
         <button
           className="btn btn--secondary week-card-download__btn"
           type="button"
           disabled={capturing || blocked !== null}
+          /* **잠겼을 때만** 이름을 덮는다. 글자 버튼이라 평상시엔 보이는 글자가 곧 이름이고,
+             캡처 중엔 그 글자가 "만드는 중…"으로 바뀌어 스스로 말한다 — 덮을 이유가 없는
+             자리를 덮으면 보이는 글자와 들리는 이름이 갈린다. 잠긴 순간만 다르다: 화면 문장이
+             없는 사유(unpublished)에선 여기 말고 사유를 전할 통로가 없다. 실전에서 읽기 화면은
+             `blockedReason` 을 안 받지만(발행된 주만 그린다) 계약을 변형끼리 갈라 두면 나중에
+             그 전제가 바뀔 때 한쪽만 조용히 설명을 잃는다. */
+          aria-label={blocked ? downloadLabel : undefined}
           data-od-id="week-card-download-btn"
           onClick={() => send({ type: "submit", values: { weekStartDate, card } })}
         >
           {capturing ? "만드는 중…" : "PNG 다운로드"}
         </button>
-      </div>
+      )}
 
       {zoomed && (
         <WeekCardZoomDialog card={card} odId="week-card-zoom" onClose={() => setZoomed(false)} />
