@@ -706,17 +706,23 @@ test.describe("본문 터치 타깃 — 일정 편집기 sticky 바", () => {
 
          1. **44 는 label(`.sched-fanart__pick`)로 잰다.** 안의 file input 은 `.sr-only` 1px
             상자라 그걸 재면 늘 미달이고, 사람이 실제로 누르는 것도 label 이다(주입 셀렉터와
-            배포 셀렉터를 같게 — kunya-design §6).
+            배포 셀렉터를 같게 — kunya-design §6). 결정 36 이후 이 label 이 슬롯을 통째로
+            덮는 드롭존이라 하한을 한참 넘지만, 목록에서 빼지 않는다 — 이 스펙이 세는 것은
+            "지금 큰가"가 아니라 "이 조작이 검사에 들어 있나"다.
          2. **썸네일·내리기·표기 칸은 그림이 있을 때만 DOM 에 있다.** globalSetup 이 schedule
             테이블을 비우므로, 올리지 않고 셀렉터만 더하면 세 검사가 **0건을 재고 통과한다** —
-            이 저장소가 두 번 만든 그 초록이다. 그래서 먼저 실제로 올린다. */
+            이 저장소가 두 번 만든 그 초록이다. 그래서 먼저 실제로 올린다.
+         3. **✕ 는 호버 전엔 `opacity: 0` 이다**(결정 36). `boundingBox()` 는 opacity 를 안
+            보므로 안 띄워도 수치는 나오지만, **사람이 실제로 누를 수 있는 상태**에서 재야
+            이 검사가 뜻을 갖는다 — 슬롯에 호버를 걸고 잰다. */
       const pick = page.locator('[data-od-id="schedule-fanart"] .sched-fanart__pick');
-      await expectTouchTarget(pick, "팬아트 그림 올리기");
+      await expectTouchTarget(pick, "팬아트 드롭존");
       await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(FANART_PNG);
       await expect(page.locator('[data-od-id="schedule-fanart-thumb"]')).toBeVisible();
+      await page.locator('[data-od-id="schedule-fanart-slot"]').hover();
       await expectTouchTarget(
         page.locator('[data-od-id="schedule-fanart-remove"]'),
-        "팬아트 내리기",
+        "팬아트 내리기(✕)",
       );
       await expectTouchTarget(
         page.locator('[data-od-id="schedule-fanart-credit"]'),
