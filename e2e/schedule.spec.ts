@@ -21,7 +21,9 @@ async function publishNow(page: Page): Promise<void> {
 test("비로그인: 미발행 현재 주는 준비 중 빈 상태, 편집기는 없다", async ({ page }) => {
   await page.goto("/schedule");
   await expect(page.getByRole("heading", { level: 1, name: "주간 일정" })).toBeVisible();
-  // 픽스처엔 발행된 주가 없어(schedule_weeks 0행) 공개 읽기는 null → 준비 중.
+  /* 픽스처가 발행해 둔 주는 둘뿐이고(2030-06-03·2030-07-01 — 긴 공지 회귀용) **둘 다 먼
+     미래**라 "현재 주"엔 해당하지 않는다. 그래서 인자 없는 `/schedule` 은 여전히 null → 준비 중.
+     현재 주를 발행하는 픽스처를 나중에 더하면 이 스펙이 먼저 빨개진다. */
   await expect(page.locator('[data-od-id="schedule-empty"]')).toBeVisible();
   // 편집기는 쓰기 권한 뒤라 비로그인엔 안 뜬다(서버가 뷰 자체를 가른다).
   await expect(page.locator('[data-od-id="schedule-editor"]')).toHaveCount(0);
@@ -611,13 +613,9 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
   await openDay(page, 0);
   await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
   await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("PNG 검증 항목");
-  /* **긴 공지 압박은 더는 못 잰다**(2026-08-01). 여기서 500자 공지를 넣어 "7열 모양에서 목록이
-     356→104px 로 눌려 항목이 잘린다"는 회귀를 함께 잡고 있었는데, 공지 입력을 걷으면서(결정 35 짝)
-     화면에서 그 값을 만들 길이 사라졌다 — 픽스처에 공지가 있는 주를 심지 않는 한 e2e 로는 못
-     만든다(이 저장소는 D1 픽스처 하나를 모든 스펙이 공유해서, 관찰 가능한 상태를 늘리면 남의
-     스펙이 조용히 깨진다). **그 계약을 지키는 것은 이제 `.week-card__note` 의 line-clamp CSS
-     하나뿐이다** — 공지 입력을 되살리거나 그 clamp 를 건드리는 사람은 이 회귀를 손으로 확인해야
-     한다. 관리자가 새 공지를 못 만드는 동안은 위험이 낮다(이미 저장된 공지만 남는다). */
+  /* 여기서 500자 공지를 함께 넣어 목록 압박까지 잡고 있었는데, 공지 입력을 걷으면서(결정 35 짝)
+     화면에서 그 값을 만들 길이 사라졌다 — **그 계약은 바로 아래 두 스펙이 픽스처 주로 이어받는다**
+     (팬아트 없는 모양 · 팬아트 모양). 이 스펙은 원래 목적인 PNG 유효성·치수만 본다. */
   await page.locator('[data-od-id="schedule-save"]').click();
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
   await publishNow(page);
@@ -645,6 +643,66 @@ test("관리자: 발행된 주에서 받은 PNG 는 유효하고 2400×1260 이�
   for (const [i, want] of [244, 238, 233].entries()) {
     expect(Math.abs(paper[i]! - want)).toBeLessThanOrEqual(6);
   }
+});
+
+/* 긴 공지가 일정 목록을 누르지 않는지 — 두 카드 모양이 같은 규칙(공지 두 줄 상한)을 쓴다.
+
+   **줄 수는 computed line-height 로 나눈다.** 상수로 나눴다가 헛발을 짚었다: 카드 공지는
+   페이지 본문의 `line-height: 1.6` 을 물려받아 한 줄이 35.2px 인데, 스크래치 목업은 그 값을
+   안 물려받아 28px 이었다 — 목업 수치를 그대로 옮기면 두 줄(70px)을 세 줄로 읽는다. 본문
+   높이 406 에서 공지 두 줄(70)과 그 위 여백(22)을 빼면 목록은 314px 이 남는다.
+
+   **공지는 이제 픽스처가 심는다**(2026-08-01, 적대적 리뷰 지적). 편집기의 공지 입력을 걷으며
+   화면에서 500자 공지를 만들 길이 사라졌는데 앱은 여전히 기존 공지를 보존하고 그린다 — 그래서
+   이 회귀만 무방비가 될 뻔했다. `e2e/fixtures/games.sql` 이 발행된 주 둘(팬아트 없는 모양 ·
+   팬아트 모양)에 정확히 500자를 심고, 아래 두 스펙이 각자 한 모양씩 맡는다. */
+async function expectListNotSquashed(page: Page): Promise<void> {
+  const m = await page.evaluate(() => {
+    const root = document.querySelector('[data-od-id="week-card"]') as HTMLElement;
+    const note = root.querySelector(".week-card__note") as HTMLElement;
+    const days = root.querySelector(".week-card__days") as HTMLElement;
+    const first = root.querySelector(".week-card__day") as HTMLElement;
+    const entries = first.querySelector(".week-card__entries") as HTMLElement;
+    const lh = parseFloat(getComputedStyle(note).lineHeight);
+    return {
+      noteLines: Math.round(note.offsetHeight / lh),
+      noteOverflowsX: note.scrollWidth > note.clientWidth + 1,
+      daysH: days.offsetHeight,
+      entriesClipped: entries.scrollHeight > entries.clientHeight + 1,
+    };
+  });
+  expect(m.noteLines).toBeLessThanOrEqual(2);
+  expect(m.noteOverflowsX).toBe(false);
+  expect(m.daysH).toBeGreaterThanOrEqual(300);
+  expect(m.entriesClipped).toBe(false);
+}
+
+/* 팬아트 **없는** 모양의 긴 공지(2026-08-01). 픽스처가 이 주에 정확히 500자 공지 + 항목 하나를
+   발행된 채로 심어 둔다(games.sql) — 이 스펙은 아무것도 안 쓰고 그 상태를 그대로 읽는다.
+   저장·발행 단계가 없는 이유가 그것이다: 화면엔 공지를 만들 길이 없고, 만들 필요도 없다.
+
+   **미리보기에서 재고 끝내지 않는다.** 화면의 카드와 받아지는 PNG 는 같은 노드를 복제해 찍지만
+   (snapshotCard) 그 사실 자체가 이 회귀가 났던 자리라, 실제로 받아 픽셀까지 확인한다 — 목록이
+   눌리면 카드 아래쪽 항목 자리가 종이색으로 비어 버리므로 그 점이 신호가 된다. */
+test("관리자: 긴 공지가 있어도 팬아트 없는 카드의 목록이 안 눌린다", async ({ page, baseURL }) => {
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2030-06-03");
+  await expect(page.locator('[data-od-id="week-card"]')).toBeVisible();
+  // 픽스처가 심은 공지가 실제로 카드에 그려졌는지 먼저 못박는다 — 안 그러면 아래 검사가
+  // "공지 없는 카드"를 재고도 통과한다(검출력 0).
+  await expect(page.locator(".week-card__note")).toHaveCount(1);
+
+  await expectListNotSquashed(page);
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator('[data-od-id="week-card-download-btn"]').click(),
+  ]);
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const buf = readFileSync(path!);
+  expect(buf.readUInt32BE(16)).toBe(2400);
+  expect(buf.readUInt32BE(20)).toBe(1260);
 });
 
 /* 받은 PNG 의 한 점을 읽는다. 압축된 PNG 를 Node 에서 직접 풀려면 필터 해제까지 손으로 해야
@@ -690,17 +748,17 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
   baseURL,
 }) => {
   await signIn(page.context(), baseURL!);
-  // 다른 스펙이 안 읽는 먼 미래 주(D1 픽스처를 공유하므로 — AGENTS).
-  await page.goto("/schedule?week=2033-01-10");
-  await openDay(page, 0);
-  await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
-  await page.locator('[data-od-id^="schedule-entry-title-"]').first().fill("팬아트 카드 항목");
+  /* **픽스처가 긴 공지 + 항목을 발행된 채로 심어 둔 주**다(games.sql, 2026-08-01). 예전엔 빈
+     주(2033-01-10)에서 시작했는데, 공지 입력을 걷으면서 "긴 공지 + 팬아트" 조합을 화면에서
+     만들 수 없게 됐다 — 그 조합이 정확히 가장 빡빡한 자리다(실측: 팬아트 모양은 200자에서
+     이미 항목이 잘리고 500자면 목록 높이가 0 이 됐다, GitHub codex 리뷰 P2).
 
-  /* 여기서도 공지 500자를 함께 채웠다 — 줄 수 제한이 없으면 긴 공지가 본문 높이를 먹어 일정
-     목록을 눌렀다(실측: 팬아트 모양은 200자에서 이미 항목이 잘리고 500자면 목록 높이가 0 이
-     됐다 — GitHub codex 리뷰 P2). **공지 입력을 걷으며 그 조건을 못 만들게 됐다**(위 PNG 치수
-     스펙의 같은 자리 주석에 근거와 남는 위험을 적어 뒀다). 아래 픽셀 단언은 그대로 유효하다 —
-     그건 공지 길이가 아니라 "팬아트가 실제로 캡처에 담기는가"를 보는 것이다. */
+     이 주를 골라도 아래 저장이 공지를 안 지운다: 폼은 `draft.note` 를 baseline 에서 받아
+     그대로 되돌려 보낸다(schedule-editor.tsx — 입력만 걷고 값 통로는 남긴 이유가 이것이다). */
+  await page.goto("/schedule?week=2030-07-01");
+  /* **항목을 새로 안 만든다** — 픽스처가 이미 하나 심어 뒀다. 여기서 `＋` 를 누르면 빈 제목
+     항목이 생겨 저장이 막히고(firstBlankTitleEntry), 대신 첫 칸을 덮어쓰면 픽스처가 세워 둔
+     조건을 이 스펙이 스스로 지우는 꼴이 된다. 팬아트만 올려도 dirty 는 선다. */
   await page.locator('[data-od-id="schedule-fanart-file"]').setInputFiles(SOLID_FANART);
   await expect(page.locator('[data-od-id="schedule-fanart-thumb"]')).toBeVisible();
   /* 표기를 **저장 상한(100자)까지** 채운다 — 짧은 표기로만 재면 사진지가 카드를 밀어내는
@@ -710,13 +768,23 @@ test("관리자: 발행된 주에 팬아트가 있으면 받은 PNG 안에 그 �
 
   await page.locator('[data-od-id="schedule-save"]').click();
   await expect(page.locator('[data-od-id="schedule-save"]')).toHaveText("저장됨");
-  await publishNow(page);
+  /* **여기서 `publishNow` 를 안 부른다** — 픽스처가 이미 발행해 둔 주다. 그 헬퍼는 "발행하기"를
+     누르는데 이 상태에선 같은 버튼이 "비공개로 전환"이라, 부르면 정반대로 공개를 내려 다운로드가
+     잠긴다(실측: 다운로드 이벤트가 영영 안 와 30초 타임아웃). 저장은 발행 상태를 안 건드린다 —
+     `weekToDraft` 가 `published` 를 baseline 에서 받아 그대로 되돌려 보낸다. */
+  await expect(page.locator('[data-od-id="schedule-publish-chip"]')).toHaveText("공개 중");
 
   // 카드가 팬아트 모양으로 서고 표기까지 실린다(그림이 실제로 로드된 뒤에 찍는다).
   const card = page.locator('[data-od-id="week-card"]');
   await expect(card).toHaveClass(/week-card--art/);
   await expect(card).toContainText("그림 · @가");
   await expect(card.locator(".week-card__art-img")).toBeVisible();
+
+  /* **긴 공지가 이 모양에서 목록을 누르지 않는다.** 팬아트 모양이 가장 빡빡하다 — 그림이
+     가로 폭을 가져가 본문이 좁아진 채로 공지 두 줄까지 얹힌다. 픽스처 공지가 실제로 카드에
+     실렸는지 먼저 못박고(안 그러면 아래 검사가 공지 없는 카드를 재고도 통과한다) 잰다. */
+  await expect(card.locator(".week-card__note")).toHaveCount(1);
+  await expectListNotSquashed(page);
 
   /* **긴 표기가 사진지를 카드 밖으로 밀지 않는다.** 표기는 두 줄로 잠기고(CSS) 그림 상한이 그
      두 줄을 미리 빼 둔 값이라, 사진지 높이가 본문을 절대 안 넘는다 — 넘으면 카드가

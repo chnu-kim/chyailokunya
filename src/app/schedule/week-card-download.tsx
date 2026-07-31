@@ -396,27 +396,27 @@ export function WeekCardDownload({
 
   return (
     <div className="week-card-download" data-od-id="week-card-download">
-      {/* ── 카드 자체가 확대 트리거다(결정 35) ────────────────────────────────────
+      {/* ── 카드 전체가 확대 트리거다(결정 35) ────────────────────────────────────
           텍스트 버튼("원본 크기로 보기")을 걷고 그 일을 그림에 넘겼다.
 
-          **`aria-hidden` 이 한 겹 안으로 내려갔다.** 예전엔 이 미리보기 상자 전체가
-          `aria-hidden` 이었고(카드 안 요일·제목이 본문 목록과 그대로 겹쳐 두 번 낭독된다)
-          그래서 확대 버튼을 상자 **바깥**에 둬야 했다 — 감춰진 서브트리 안의 인터랙티브는
-          보조 기술에서 닿지 않으니까. 이제 트리거가 상자 자신이라 상자는 보여야 하고,
-          감출 것은 카드 **내용**뿐이다. `WeekCard` 안엔 포커스 가능한 요소가 하나도 없어
-          (순수 프레젠테이션 — 실측으로 확인) axe 의 `aria-hidden-focus` 에 안 걸린다.
+          **버튼이 카드를 감싸지 않고 그 위를 덮는다**(적대적 리뷰 지적, 2026-08-01). 처음엔
+          미리보기 상자 자체를 `<button>` 으로 만들고 그 안에 `WeekCard` 를 뒀는데, `button` 의
+          내용 모델은 **phrasing content** 이고 카드는 `div`·`h2`·`figure` 를 낸다 — 브라우저가
+          관대해 동작은 하지만 비준수 마크업이라 포커스·접근성 트리·파서에서 조용히 갈릴 수
+          있는 자리다. 형제로 두고 절대배치로 겹치면 "카드 아무 데나 눌러 확대"는 그대로이면서
+          마크업이 성립한다.
 
-          `ref` 는 스케일 겹이 아니라 이 버튼에 붙는다 — ResizeObserver 가 재는 것은
-          "카드가 들어갈 상자의 폭"이고, 그 상자가 이제 이 버튼이다. */}
+          **덮개는 미리보기 상자 안, `aria-hidden` 은 그 옆 스케일 겹에.** 덮개를 상자 밖(무대의
+          형제)에 두면 `inset: 0` 이 **무대 전체**를 덮는데, 좁은 폭에선 다운로드 아이콘이 무대
+          안 블록으로 내려오므로(schedule.css 의 560 미디어쿼리) 그 아이콘까지 덮개에 먹힌다.
+          상자 안에 두면 덮개가 정확히 카드 크기다. 그 대가로 상자에서 `aria-hidden` 을 뗄 수밖에
+          없는데(감춘 서브트리 안 인터랙티브는 보조 기술에서 못 닿는다 — `aria-hidden-focus`),
+          감춰야 할 것은 원래 카드 **내용**뿐이라 그 속성을 스케일 겹으로 한 칸 내리면 그만이다.
+          카드 글자가 본문 목록과 겹쳐 두 번 낭독되는 것은 그대로 막힌다.
+
+          `ref`(ResizeObserver)는 카드가 실제로 들어가는 상자, 즉 이 미리보기 div 에 붙는다. */}
       <div className="week-card-download__stage">
-        <button
-          type="button"
-          className="week-card-download__preview"
-          ref={previewRef}
-          aria-label="주간표 카드 — 원본 크기로 보기"
-          data-od-id="week-card-download-zoom"
-          onClick={() => setZoomed(true)}
-        >
+        <div className="week-card-download__preview" ref={previewRef}>
           <div
             className="week-card-download__scale"
             style={{ transform: `scale(${scale})` }}
@@ -424,11 +424,18 @@ export function WeekCardDownload({
           >
             <WeekCard card={card} ref={nodeRef} />
           </div>
-        </button>
+          {/* 덮개. 빈 버튼이라 이름은 `aria-label` 이 전부다. */}
+          <button
+            type="button"
+            className="week-card-download__zoom"
+            aria-label="주간표 카드 — 원본 크기로 보기"
+            data-od-id="week-card-download-zoom"
+            onClick={() => setZoomed(true)}
+          />
+        </div>
 
-        {/* 편집기에서만 아이콘이다(variant 주석). **확대 버튼의 자식이 아니라 형제다** —
-            button 안에 button 은 HTML 이 금지하고, 형제로 두면 클릭이 확대로 전파되지도
-            않는다(절대배치로 겹쳐 있을 뿐 DOM 상 부모가 다르다). */}
+        {/* 편집기에서만 아이콘이다(variant 주석). 위 덮개와 형제가 아니라 **한 겹 바깥**이라
+            좁은 폭에서 흐름으로 내려와도 덮개에 안 먹힌다(바로 위 주석). */}
         {variant === "editor" && (
           <>
             {/* 아이콘 버튼엔 "만드는 중…"을 실을 글자 자리가 없다 — 글자 버튼이 그 상태를

@@ -1578,26 +1578,37 @@ dialog.sched-confirm::backdrop {
   width: 100%;
   max-width: 1200px;
 }
-/* **미리보기가 곧 확대 버튼이다.** button 기본 크롬(패딩·테두리·배경·글꼴)을 전부 걷어
-   예전의 div 와 같은 상자로 되돌린다 — 그러지 않으면 ResizeObserver 가 재는 clientWidth 에
-   패딩이 껴 배율이 어긋난다. `zoom-in` 커서가 "눌리는 그림"이라는 사실을 포인터로 말한다
-   (글자 라벨을 걷은 자리라 이 신호가 전보다 중요해졌다). */
 .week-card-download__preview {
-  display: block;
   position: relative;
   width: 100%;
   aspect-ratio: 1200 / 630;
-  padding: 0;
   overflow: hidden;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: zoom-in;
-  background: transparent;
-  border: none;
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-card);
 }
+.week-card-download__scale {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+}
+/* 카드 전체를 덮는 확대 버튼(결정 35). **카드를 감싸지 않고 위를 덮는 이유**는
+   week-card-download.tsx 의 같은 자리 주석에 있다(`button` 의 내용 모델이 phrasing content 라
+   카드 서브트리를 담으면 비준수다). 빈 버튼이라 안에 그릴 것이 없고, 배경이 투명해 아래 카드가
+   그대로 보인다. `zoom-in` 커서가 "눌리는 그림"이라는 사실을 포인터로 말한다 — 글자 라벨을
+   걷은 자리라 이 신호가 전보다 중요해졌다. */
+.week-card-download__zoom {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  cursor: zoom-in;
+  background: transparent;
+  border: none;
+}
+/* **그림자·링은 감싸는 상자가 진다.** 덮개 자신에 걸면 그 상자의 `overflow: hidden` 이 바깥으로
+   나가는 그림자와 링을 잘라 먹는다(덮개는 그 안쪽 자식이다). 부모에 걸면 잘릴 것이 없고, 덮개가
+   부모를 정확히 채우므로 hover 판정도 같다 — 포커스는 `:has()` 로 자식의 상태를 부모가 읽는다
+   (이 저장소가 `.sched-fanart__pick:has(input:disabled)` 에서 이미 쓰는 수법). */
 @media (prefers-reduced-motion: no-preference) {
   .week-card-download__preview {
     transition: box-shadow var(--dur-base) var(--ease-paper);
@@ -1606,15 +1617,9 @@ dialog.sched-confirm::backdrop {
 .week-card-download__preview:hover {
   box-shadow: var(--shadow-lift);
 }
-.week-card-download__preview:focus-visible {
+.week-card-download__preview:has(.week-card-download__zoom:focus-visible) {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-}
-.week-card-download__scale {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: top left;
 }
 /* 카드 위 다운로드 아이콘(편집기 전용). **색을 테마 토큰이 아니라 브랜드 앵커로 쓴다** —
    이 버튼이 앉는 바닥은 카드이고, 카드는 라이트·다크 양쪽에서 크림 종이다(사진지 섬과 같은
