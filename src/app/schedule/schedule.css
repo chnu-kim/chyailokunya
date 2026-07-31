@@ -179,6 +179,14 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  /* narrow flow(1300 미만)에서 이 블록 바로 다음이 요일 목록(`.sched__days`)이다 — `.sched__days`
+     자신은 margin 이 0(읽기 화면과 공유하는 클래스라 여기서 못 건드린다, 아래) 이라 이 여백이
+     없으면 메타 박스가 첫 하루 카드에 그대로 붙는다(실측: 간격 0px, codex review 지적,
+     2026-07-31). 1300 이상(grid)에선 요일과 곁칸이 좌우로 나뉘어 이 여백이 안 보이지만, 있어도
+     해가 없다(곁칸 높이 계산에 32px 더할 뿐 — 아래 sched__grid 의 stretch 설명과 같은 여유).
+     값은 읽기 화면의 카드→목록 간격(`.week-card-download` 의 옛 margin-bottom)과 같은
+     --space-6 로 맞춰 두 화면의 리듬을 같게 한다. */
+  margin-bottom: var(--space-6);
 }
 /* `.week-card-download` 자신의 margin-top(공지 아래로 띄우던 값)·margin-bottom(요일 목록과
    가르던 값, 둘 다 읽기 화면·옛 편집기 순서를 위한 값이었다)은 이 곁칸 안에선 둘 다 군더더기다
