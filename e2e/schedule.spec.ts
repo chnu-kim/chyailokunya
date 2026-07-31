@@ -692,34 +692,31 @@ test("관리자: 공지가 없는 주엔 공지 칸이 아예 없다", async ({ 
   await expect(page.locator('[data-od-id="schedule-note-legacy"]')).toHaveCount(0);
 });
 
-test("관리자: 이미 적어 둔 공지는 비우고 저장해 내릴 수 있다", async ({ page, baseURL }) => {
+/* **여기서 저장까지 태우지 않는다**(적대적 리뷰 3라운드, 2026-08-01). 처음엔 이 스펙이 공지를
+   비우고 저장한 뒤 사라지는 것까지 봤는데, 그건 **재시도에 취약하다**: 이 저장소는 D1 픽스처
+   하나를 실행 시작에 한 번만 심고(globalSetup) Playwright 는 CI 에서 `retries: 2` 다. 저장이
+   커밋된 뒤 무엇이든 흔들리면 재시도는 **이미 비워진 주**를 열어 첫 단언에서 즉시 죽고, 그러면
+   진짜 회귀가 오염된 재시도 뒤에 숨는다.
+
+   다른 쓰기 스펙들이 괜찮은 이유와 대조하면 차이가 분명하다 — 그것들은 **빈 주에서 만들어**
+   내므로 재시도가 같은 자리에서 다시 만들면 그만이다. 이 스펙만 **미리 심어 둔 값을 소비**해서
+   한 번 쓰면 없어진다.
+
+   그래서 파괴적인 절반은 층을 옮겼다: "빈 값으로 덮으면 공지가 내려간다"는 saveWeek 라우터
+   테스트가 본다(workerd + 테스트마다 테이블 비움 — 격리 저장소가 있는 유일한 층이다).
+   여기 남는 것은 **읽기뿐**이라 몇 번을 다시 돌려도 같은 상태에서 시작한다. */
+test("관리자: 이미 적어 둔 공지가 있으면 그 값으로 정리용 칸이 뜬다", async ({ page, baseURL }) => {
   await signIn(page.context(), baseURL!);
   await page.goto("/schedule?week=2030-09-02");
 
   // 칸이 뜨고 저장된 값이 들어 있다.
-  const note = page.locator('[data-od-id="schedule-note-input"]');
-  await expect(note).toHaveValue("내려갈 옛 공지");
-  // 카드에도 그려져 있다 — 이게 "공개된 채 갇혀 있다"의 관찰 가능한 형태다.
+  await expect(page.locator('[data-od-id="schedule-note-input"]')).toHaveValue("내려갈 옛 공지");
+  // 카드에도 그려져 있다 — 이게 "공개된 채 갇혀 있다"의 관찰 가능한 형태이자, 칸을 남긴 이유다.
   await expect(page.locator(".week-card__note")).toHaveCount(1);
-
-  await note.fill("");
-  /* **비워도 칸은 남아 있어야 한다.** `draft.note` 로 조건을 걸면 여기서 칸이 사라져 그 편집을
-     저장할 수도 되돌릴 수도 없다 — 자기가 만든 상태에 자기가 갇힌다. baseline 으로 가르는
-     이유가 이것이라, 그 선택을 여기서 못박는다. */
-  await expect(note).toBeVisible();
-
-  const save = page.locator('[data-od-id="schedule-save"]');
-  await expect(save).toBeEnabled();
-  await save.click();
-  await expect(save).toHaveText("저장됨");
-
-  // 내려갔다: 카드에서 사라지고, baseline 이 비었으므로 칸 자체도 접힌다.
-  await expect(page.locator(".week-card__note")).toHaveCount(0);
-  await expect(page.locator('[data-od-id="schedule-note-legacy"]')).toHaveCount(0);
-
-  // 새로고침해도 그대로다 — 서버까지 갔다는 뜻이다(화면 상태만 바뀐 게 아니다).
-  await page.reload();
-  await expect(page.locator('[data-od-id="schedule-note-legacy"]')).toHaveCount(0);
+  // 지우는 법이 화면에 있다 — 없으면 "비워도 되나"를 확신 못 해 그대로 두게 된다.
+  await expect(page.locator('[data-od-id="schedule-note-legacy"]')).toContainText(
+    "비우고 저장하면",
+  );
 });
 
 /* 팬아트 **없는** 모양의 긴 공지(2026-08-01). 픽스처가 이 주에 정확히 500자 공지 + 항목 하나를
