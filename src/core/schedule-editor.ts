@@ -64,12 +64,17 @@ export function dayOf(draft: WeekDraft, date: string): DraftDay {
 /* 하루 속성의 부분 갱신. 기본값으로 되돌아간 날은 **키를 지운다** — 남겨 두면 dirty 비교가
    "{}" 와 "{날짜: 기본값}" 을 다르게 보아, 켰다 끈 휴방이 저장할 것 없는 변경으로 남는다.
 
-   **휴방을 켜는 전이에서 그날의 빈 제목 항목을 함께 지운다**(이슈 #56 결정 30). 휴방이면
-   입력칸이 잠겨 제목을 채울 길이 없는데, firstBlankTitleEntry 가드는 그 항목을 여전히
-   저장을 막는 사유로 본다 — 오류 문구가 안내하는 "제목을 채우거나"가 막다른 골목이 되어
-   라이브 저장이 통째로 막힌다. **이미 켜져 있던 날(day.rest 가 이미 true)엔 안 건드린다** —
-   지우는 건 "지금 막 잠긴" 항목뿐이고, 그렇지 않으면 같은 날에 rest:true 를 다시 보내는
-   호출마다 반복 삭제를 시도하게 된다(부작용은 없지만 전이의 뜻과 안 맞는다). */
+   **휴방을 켜는 전이에서 그날의 "아직 아무것도 아닌" 빈 항목을 함께 지운다**(이슈 #56 결정 30).
+   지우는 대상은 **제목도 없고 게임도 안 걸린** 항목뿐이다 — "+항목 추가"로 만든 뒤 손 안 댄
+   자리표시자가 정확히 이 모양이라, 휴방을 켜자마자 firstBlankTitleEntry 가드에 걸려 저장이
+   막히는 라이브 결함이 여기서 생겼다. **제목만 지웠지 게임은 걸려 있는 항목은 안 지운다** —
+   제목 입력은 title 필드만 patch 하므로(schedule-editor.tsx) 게임을 연결한 뒤 제목만 비우는
+   경로가 실제로 가능한데, title 만 보고 지우면 그 게임 연결이 화면 신호 없이 통째로 사라진다
+   (codex adversarial-review 지적). "빈 항목"의 뜻은 제목이 아니라 **내용**이 없는가다.
+
+   **이미 켜져 있던 날(day.rest 가 이미 true)엔 안 건드린다** — 지우는 건 "지금 막 잠긴"
+   항목뿐이고, 그렇지 않으면 같은 날에 rest:true 를 다시 보내는 호출마다 반복 삭제를 시도하게
+   된다(부작용은 없지만 전이의 뜻과 안 맞는다). */
 export function setDay(draft: WeekDraft, date: string, patch: Partial<DraftDay>): WeekDraft {
   const day = dayOf(draft, date);
   const next = { ...day, ...patch };
@@ -77,8 +82,9 @@ export function setDay(draft: WeekDraft, date: string, patch: Partial<DraftDay>)
   if (next.startTime === "" && !next.rest) delete days[date];
   else days[date] = next;
   const turningRestOn = next.rest && !day.rest;
+  const isEmptyPlaceholder = (e: DraftEntry) => e.title.trim() === "" && e.gameId === null;
   const entries = turningRestOn
-    ? draft.entries.filter((e) => e.scheduledDate !== date || e.title.trim() !== "")
+    ? draft.entries.filter((e) => e.scheduledDate !== date || !isEmptyPlaceholder(e))
     : draft.entries;
   return { ...draft, days, entries };
 }
@@ -159,15 +165,16 @@ export function entriesForDate(draft: WeekDraft, date: string): DraftEntry[] {
    처음 걸리는 항목 하나만 돌려준다(한 번에 하나씩 고치게 안내한다 — 여러 개를 한 문장에 나열하면
    어느 요일 이야기인지 흐려진다).
 
-   **휴방인 날은 건너뛴다**(이슈 #56 결정 30). setDay 가 휴방을 켜는 순간 그날의 빈 제목 항목을
-   지우므로 정상 경로로는 이 조합이 생기지 않지만, 잠금은 표시이고 가드가 방어선이다 — 둘의
-   조건이 갈리면 조용한 무시가 된다(AGENTS 지뢰). 휴방인 날은 입력칸이 잠겨 있어 제목을 채울
-   길이 없으므로, 그 항목이 저장을 막으면 오류 문구가 안내하는 "제목을 채우거나 삭제"가 막다른
-   골목이 된다. */
+   **휴방인 날도 건너뛰지 않는다**(이슈 #56 결정 30). 휴방을 켜는 순간 setDay 가 "아직 아무것도
+   아닌" 빈 항목(제목도 게임도 없는 자리표시자)은 이미 지우므로, 정상 경로로 휴방인 날에 남는
+   빈 제목 항목이 있다면 그건 **게임은 연결됐지만 제목만 지운** 항목뿐이다(제목 입력이 title
+   필드만 patch 하므로 이 조합이 가능하다) — 그 항목까지 조용히 통과시키면 저장 페이로드에서
+   `draftEntryInputs` 가 title 만 보고 걸러내 **게임 연결이 화면 신호 없이 사라진다**(codex
+   adversarial-review 지적, 처음엔 이 가드도 휴방을 건너뛰게 했다가 되돌렸다). 휴방이어도 제목
+   입력만 잠겨 있을 뿐 **삭제는 결정 27 부터 이미 열려 있다** — 그러니 여기서 막아도 막다른
+   골목이 아니라 "이 항목을 지워야 한다"는 정확한 안내가 된다. */
 export function firstBlankTitleEntry(draft: WeekDraft): DraftEntry | null {
-  return (
-    draft.entries.find((e) => e.title.trim() === "" && !dayOf(draft, e.scheduledDate).rest) ?? null
-  );
+  return draft.entries.find((e) => e.title.trim() === "") ?? null;
 }
 
 /* 저장 페이로드의 entries. 제목은 trim, 시각 '' 는 null 로 접는다(정규형). 제목이 빈 항목은
