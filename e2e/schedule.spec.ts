@@ -200,8 +200,16 @@ test("관리자: 2열에서 하루를 크게 확장해도 미리보기-메타 �
 /* 적대적 리뷰 지적(2026-07-31). 위 회귀를 고치며 미리보기·메타를 `.sched__aside` 로 감쌌는데,
    그 곁칸이 미리보기+메타 높이로만 자기 자신을 재기로 했다면(`align-items: start`) sticky 의
    포함 블록도 그만큼만 짧아져 요일 목록이 긴 세션에서 미리보기가 거의 못 붙어 있는다. 그래서
-   `align-items` 를 기본값(stretch)으로 되돌려 곁칸이 요일 목록과 같은 높이로 늘어나게 했다 —
-   이 스펙은 스크롤해도 미리보기가 nav 아래에 붙어 있는 것으로 그 고침을 못박는다. */
+   `align-items` 를 기본값(stretch)으로 되돌려 곁칸이 요일 목록과 같은 높이로 늘어나게 했다.
+
+   **4라운드 개정(2026-08-01)**: sticky 를 건 요소가 `.sched__preview` 단독에서
+   `.sched__aside-pin`(미리보기+메타 결합)으로 바뀌며 sticky 의 이동 여유(slack)가 줄었다 —
+   포함 블록(`.sched__aside`, 805px)은 그대로인데 sticky 요소 자신의 자연 높이가 메타만큼
+   (~163px) 늘어 여유가 261px→98px 로 좁아졌다(왜 결합했는지는 아래 두 번째 테스트 주석). 그
+   결과 "완전히 붙어 있는" 구간이 120~190px 스크롤로 좁아졌다(실측, 210부터 풀리기 시작).
+   이 스펙은 그 좁아진 구간 **안**에서 여전히 미리보기가 nav 아래에 붙어 있는 것으로 결합 전
+   고침(align-items: stretch)이 안 죽었음을 못박는다 — "완전히 안 풀린다"는 이제 이 스펙의
+   주장이 아니다(그건 아래 겹침 방지 테스트가 대신 본다). */
 test("관리자: 2열에서 요일 목록이 길어져도 미리보기가 스크롤을 따라 붙어 있는다(#56 결정 29 회귀)", async ({
   page,
   baseURL,
@@ -223,13 +231,12 @@ test("관리자: 2열에서 요일 목록이 길어져도 미리보기가 스크
     }
   }
 
-  /* 250px — 실측으로 보정한 값이다(요일 목록 837px 인 이 픽스처에서 150~350 은 sticky 가
-     nav 아래(85.5px)에 그대로 붙고 400 부터 풀려나기 시작한다 — `.sched__aside` 에 결정 29
-     P2 수정으로 margin-bottom(--space-6=32px)을 더한 뒤 경계가 이만큼 당겨졌다, 재보정
-     2026-07-31). daysHeight 비례가 아니라 고정값을 쓰는 이유: 비례식(예 daysHeight*0.6=502)은
-     풀려나는 경계에 걸려 근소한 렌더 차이로 간헐 실패한다(실측: 502 에서 -11.9px 로 이미 풀림).
-     250 은 그 경계에서 양쪽으로 100px 이상 여유를 둬 렌더 차이에 안 흔들린다. */
-  await page.mouse.wheel(0, 250);
+  /* 150px — 실측으로 보정한 값이다(요일 목록 837px 인 이 픽스처에서 120~190 은 sticky 가
+     nav 아래(85.5px)에 그대로 붙고 210 부터 풀려나기 시작한다, 재보정 2026-08-01). daysHeight
+     비례가 아니라 고정값을 쓰는 이유: 비례식은 풀려나는 경계에 걸려 근소한 렌더 차이로 간헐
+     실패한다(이 저장소가 이미 두 번 겪은 자리 — 위 커밋 이력 참고). 150 은 확인된 평탄 구간
+     (120~190) 의 중앙이라 양쪽으로 30px 이상씩 여유가 있다. */
+  await page.mouse.wheel(0, 150);
   await page.waitForTimeout(200);
 
   // sticky top 은 calc(--nav-h + --space-4) ≈ 85.5px. 그 근처에 붙어 있어야 "sticky 가 거의 못
@@ -238,6 +245,41 @@ test("관리자: 2열에서 요일 목록이 길어져도 미리보기가 스크
   const previewTop = (await page.locator(".sched__preview").boundingBox())!.y;
   expect(previewTop).toBeGreaterThan(50);
   expect(previewTop).toBeLessThan(120);
+});
+
+/* 적대적 리뷰 4라운드 지적(2026-08-01). 미리보기만 sticky 였을 때는 메타가 그냥 normal flow
+   형제라 스크롤을 계속 따라 올라가, 미리보기가 nav 아래 고정된 채로 있는 동안 메타가 그 밑을
+   지나쳐 위쪽 절반이 카드 뒤로 가려졌다(실측: 스크롤 200~800px 거의 전 구간 겹침). 미리보기·
+   메타를 `.sched__aside-pin` 한 겹으로 묶어 함께 sticky 시키면 서로 지나칠 길이 없어진다 — 이
+   스펙은 스크롤 전 구간(50~1000px)에서 메타 상단이 미리보기 하단보다 위로 올라오지 않는 것으로
+   그 고침을 못박는다. */
+test("관리자: 2열에서 스크롤해도 메타가 미리보기 아래로 가려지지 않는다(#56 결정 29 회귀)", async ({
+  page,
+  baseURL,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2034-07-10");
+  await expectSignedIn(page);
+
+  for (const idx of [0, 1, 2]) {
+    await openDay(page, idx);
+    for (let i = 0; i < 3; i++) {
+      await page.locator('[data-od-id^="schedule-day-add-"]').first().click();
+    }
+    const titles = page.locator('[data-od-id^="schedule-entry-title-"]');
+    for (let i = 0; i < 3; i++) {
+      await titles.nth(i).fill(`항목 ${idx}-${i}`);
+    }
+  }
+
+  for (const amt of [50, 100, 150, 200, 250, 300, 400, 500, 600, 800, 1000]) {
+    await page.mouse.wheel(0, amt - (await page.evaluate(() => window.scrollY)));
+    await page.waitForTimeout(100);
+    const previewBox = (await page.locator(".sched__preview").boundingBox())!;
+    const metaBox = (await page.locator(".sched__meta").boundingBox())!;
+    expect(metaBox.y, `scroll=${amt}`).toBeGreaterThanOrEqual(previewBox.y + previewBox.height);
+  }
 });
 
 test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({

@@ -426,42 +426,56 @@ export function ScheduleEditor({
             이 순서를 그대로 둔다. */}
         <div className="sched__grid">
           <div className="sched__aside">
-            {/* 넓은 폭에선 오른쪽 열 위 칸에 sticky 로 붙고, 1300 미만에선 요일 목록보다 **앞**에
-                그대로 흐른다(위 sched__grid 주석 참고) — 어떤 날을 펼쳐도(결정 28) 이 위치가
-                안 바뀐다. */}
-            <div className="sched__preview">
-              <WeekCardDownload
-                card={card}
-                weekStartDate={weekStartDate}
-                /* 사유의 **순서가 뜻을 갖는다** — 발행이 먼저다. 미발행 주는 저장을 아무리 해도
+            {/* **`sched__aside-pin` 이 왜 또 한 겹인가** — sticky 를 이 안쪽 겹에 걸어야
+                한다(2026-07-31, 적대적 리뷰가 잡은 회귀의 두 번째 원인). 처음엔 sticky 를
+                `.sched__aside`(이 바깥 겹, grid-area 를 가진 그 자체) 에 바로 걸었는데, 그러면
+                sticky 인 요소와 `align-items: stretch` 로 늘어나는 요소가 같아져 버려 늘어난
+                높이가 곧 sticky 의 포함 블록 높이와 같아진다 — 포함 블록보다 큰(또는 같은)
+                요소는 그 안에서 이동할 여유(slack)가 0이라 sticky 가 사실상 안 걸린다(실측:
+                스크롤해도 그냥 문서를 따라 그대로 밀려 올라간다, 100% 되돌려짐). 안쪽에 한
+                겹(`sched__aside-pin`)을 더 두면 그 안쪽 겹의 자연 높이(미리보기+메타, ~700px대)가
+                바깥 겹의 늘어난 높이(요일 목록과 같은 높이, 900px대일 수 있다)보다 작아 그
+                차이만큼 slack 이 생기고, sticky 가 그 여유 안에서 정상 작동한다 — 이게 결정 24
+                가 세운 "작은 sticky 요소를 큰 포함 블록 안에" 패턴이고, 이 겹이 없으면 그 패턴이
+                깨진다. */}
+            <div className="sched__aside-pin">
+              {/* 넓은 폭에선 오른쪽 열 위 칸에 sticky 로 붙고, 1300 미만에선 요일 목록보다 **앞**에
+                  그대로 흐른다(위 sched__grid 주석 참고) — 어떤 날을 펼쳐도(결정 28) 이 위치가
+                  안 바뀐다. 미리보기·메타가 이 안쪽 겹에서 함께 sticky 로 붙어야(아래 sched__grid
+                  주석의 겹침 회귀 참고) 메타가 스크롤 중 미리보기 밑으로 들어가지 않는다. */}
+              <div className="sched__preview">
+                <WeekCardDownload
+                  card={card}
+                  weekStartDate={weekStartDate}
+                  /* 사유의 **순서가 뜻을 갖는다** — 발행이 먼저다. 미발행 주는 저장을 아무리 해도
                    못 받으므로 "저장하면 받을 수 있습니다"가 거짓이 된다. */
-                blockedReason={!baseline.published ? "unpublished" : dirty ? "unsaved" : null}
-              />
-            </div>
+                  blockedReason={!baseline.published ? "unpublished" : dirty ? "unsaved" : null}
+                />
+              </div>
 
-            {/* ── 주 메타: 공지 · 팬아트(결정 29, 2026-07-31 개정) ──────────────────────
+              {/* ── 주 메타: 공지 · 팬아트(결정 29, 2026-07-31 개정) ──────────────────────
                 둘 다 미리보기 카드에만 그려지는 값이라 그 카드 바로 다음, 카드의 좌우 배치와
                 맞춘 2박스로 세운다 — 카드에서 공지는 하단 왼쪽 글, 그림은 오른쪽이다
                 (week-card.tsx 의 .week-card__main·.week-card__art). 폭이 좁아지면(flex-wrap)
                 공지 → 팬아트 순으로 쌓인다 — 읽기 화면의 공지 → 카드 순서와 같은 방향이다. */}
-            <div className="sched__meta">
-              <div className="paper sched-meta__note-box">
-                <label className="sched-note" htmlFor="sched-note-input">
-                  <span className="sched-note__label">이번 주 공지 (선택)</span>
-                  <input
-                    id="sched-note-input"
-                    className="sched-field"
-                    type="text"
-                    maxLength={500}
-                    placeholder="예: 이번 주는 젤다 위주로 달립니다"
-                    value={draft.note}
-                    data-od-id="schedule-note-input"
-                    onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
-                  />
-                </label>
-              </div>
+              <div className="sched__meta">
+                <div className="paper sched-meta__note-box">
+                  <label className="sched-note" htmlFor="sched-note-input">
+                    <span className="sched-note__label">이번 주 공지 (선택)</span>
+                    <input
+                      id="sched-note-input"
+                      className="sched-field"
+                      type="text"
+                      maxLength={500}
+                      placeholder="예: 이번 주는 젤다 위주로 달립니다"
+                      value={draft.note}
+                      data-od-id="schedule-note-input"
+                      onChange={(e) => send({ type: "NOTE_CHANGED", note: e.target.value })}
+                    />
+                  </label>
+                </div>
 
-              {/* 팬아트(ADR-0028) — **한 상자다**: 썸네일·버튼·그린이·형식 힌트가 전부 이 안에
+                {/* 팬아트(ADR-0028) — **한 상자다**: 썸네일·버튼·그린이·형식 힌트가 전부 이 안에
             있다(결정 29 — DOM 은 전부터 한 div 였고, 이번엔 그 div 자체에 테두리를 준다).
             **입력 컨트롤이 있으므로 사진지 섬(.polaroid)을 쓰지 않는다**: 그 섬은 다크에서
             라이트 토큰을 국소 재선언한 크림 종이라 폼 컨트롤의 테두리·포커스 대비가 거기서
@@ -472,94 +486,99 @@ export function ScheduleEditor({
 
             미리보기는 **실제 서빙 경로**(/api/fanart/…)로 그린다. objectURL 이 아니라 그걸 쓰면
             "저장하면 팬이 볼 그림" 그대로를 보고, 서빙 라우트까지 이 화면에서 함께 검증된다. */}
-              <div
-                className="paper sched-fanart"
-                role="group"
-                aria-labelledby="sched-fanart-label"
-                data-od-id="schedule-fanart"
-              >
-                <span className="sched-note__label" id="sched-fanart-label">
-                  팬아트 (선택)
-                </span>
+                <div
+                  className="paper sched-fanart"
+                  role="group"
+                  aria-labelledby="sched-fanart-label"
+                  data-od-id="schedule-fanart"
+                >
+                  <span className="sched-note__label" id="sched-fanart-label">
+                    팬아트 (선택)
+                  </span>
 
-                <div className="sched-fanart__row">
-                  {draft.fanartImageKey && (
-                    /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
+                  <div className="sched-fanart__row">
+                    {draft.fanartImageKey && (
+                      /* 96×96 고정 슬롯 + contain. 편집기에서 알고 싶은 건 "무엇을 올렸나"이지 정확한
                  비율이 아니다(읽기 화면은 반대로 실제 치수로 예약한다). */
-                    <img
-                      className="sched-fanart__thumb"
-                      src={`/api/fanart/${draft.fanartImageKey}`}
-                      alt="올린 팬아트"
-                      width={96}
-                      height={96}
-                      data-od-id="schedule-fanart-thumb"
-                    />
-                  )}
-                  <div className="sched-fanart__acts">
-                    {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
+                      <img
+                        className="sched-fanart__thumb"
+                        src={`/api/fanart/${draft.fanartImageKey}`}
+                        alt="올린 팬아트"
+                        width={96}
+                        height={96}
+                        data-od-id="schedule-fanart-thumb"
+                      />
+                    )}
+                    <div className="sched-fanart__acts">
+                      {/* 파일 input 은 스타일이 안 먹어 label 로 감싼다 — 클릭·키보드 포커스는 여전히
                   input 이 받고(sr-only 는 clip 이라 포커스가 살아 있다), 링은 아래 CSS 의
                   :focus-within 이 label 에 그린다. */}
-                    <label className="btn btn--secondary sched-fanart__pick">
-                      {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
-                      <input
-                        type="file"
-                        className="sr-only"
-                        accept={FANART_ACCEPT}
-                        disabled={fanartLocked}
-                        data-od-id="schedule-fanart-file"
-                        onChange={onPickFanart}
-                      />
-                    </label>
-                    {draft.fanartImageKey && (
-                      <button
-                        type="button"
-                        className="btn btn--secondary sched-fanart__del"
-                        disabled={fanartLocked}
-                        data-od-id="schedule-fanart-remove"
-                        onClick={() => send({ type: "FANART_REMOVED" })}
-                      >
-                        내리기
-                      </button>
-                    )}
+                      <label className="btn btn--secondary sched-fanart__pick">
+                        {draft.fanartImageKey ? "바꾸기" : "그림 올리기"}
+                        <input
+                          type="file"
+                          className="sr-only"
+                          accept={FANART_ACCEPT}
+                          disabled={fanartLocked}
+                          data-od-id="schedule-fanart-file"
+                          onChange={onPickFanart}
+                        />
+                      </label>
+                      {draft.fanartImageKey && (
+                        <button
+                          type="button"
+                          className="btn btn--secondary sched-fanart__del"
+                          disabled={fanartLocked}
+                          data-od-id="schedule-fanart-remove"
+                          onClick={() => send({ type: "FANART_REMOVED" })}
+                        >
+                          내리기
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
+                  {/* 제약을 관리자에게 보여 준다 — 서버 변환을 안 하기로 한 대가라(ADR-0028) 원본이 큰
               그림은 미리 줄여 올려야 한다. 값 칸이라 문장이 아니라 표기다(AGENTS). */}
-                <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
+                  <p className="sched-fanart__hint">PNG · JPEG · WebP · 5MB 이하</p>
 
-                {uploading && (
-                  <p className="sched-fanart__busy" role="status" data-od-id="schedule-fanart-busy">
-                    올리는 중…
-                  </p>
-                )}
-                {fanartError && (
-                  <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
-                    {fanartError}
-                  </p>
-                )}
+                  {uploading && (
+                    <p
+                      className="sched-fanart__busy"
+                      role="status"
+                      data-od-id="schedule-fanart-busy"
+                    >
+                      올리는 중…
+                    </p>
+                  )}
+                  {fanartError && (
+                    <p className="sched-err" role="alert" data-od-id="schedule-fanart-error">
+                      {fanartError}
+                    </p>
+                  )}
 
-                {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
+                  {/* 표기 칸은 **그림이 있을 때만** 연다 — 그림 없이 표기만 있는 조합은 서버 Zod·DB
               CHECK 가 둘 다 거절하므로, 화면이 애초에 못 만들게 하는 게 가장 조용한 방어다.
               업로드 중에는 잠근다: 성공하면 표기가 비워지므로(새 그림에 옛 이름을 안 붙인다)
               그 사이 타이핑한 값이 사라져 보인다. */}
-                {draft.fanartImageKey && (
-                  <label className="sched-note sched-fanart__credit">
-                    <span className="sched-note__label">작가 표기 (선택)</span>
-                    <input
-                      className="sched-field"
-                      type="text"
-                      maxLength={100}
-                      placeholder="그린 사람"
-                      value={draft.fanartCredit}
-                      disabled={uploading}
-                      data-od-id="schedule-fanart-credit"
-                      onChange={(e) =>
-                        send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })
-                      }
-                    />
-                  </label>
-                )}
+                  {draft.fanartImageKey && (
+                    <label className="sched-note sched-fanart__credit">
+                      <span className="sched-note__label">작가 표기 (선택)</span>
+                      <input
+                        className="sched-field"
+                        type="text"
+                        maxLength={100}
+                        placeholder="그린 사람"
+                        value={draft.fanartCredit}
+                        disabled={uploading}
+                        data-od-id="schedule-fanart-credit"
+                        onChange={(e) =>
+                          send({ type: "FANART_CREDIT_CHANGED", credit: e.target.value })
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
               </div>
             </div>
           </div>

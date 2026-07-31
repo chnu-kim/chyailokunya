@@ -67,33 +67,62 @@
     gap: 0 var(--space-6);
     /* **`align-items` 는 기본값(stretch)을 그대로 둔다 — 일부러 안 건드린다.** 처음엔
        `align-items: start` 로 각 열을 자기 콘텐츠 높이에 맞춰 세웠는데, 그러면 `.sched__aside`
-       가 미리보기+메타 높이(~700px대)로 짧게 굳어 sticky 미리보기가 `days` 열을 거의 못
+       가 미리보기+메타 높이(~700px대)로 짧게 굳어 그 안 sticky 요소가 `days` 열을 거의 못
        따라간다(적대적 리뷰 지적). **`stretch`(기본값)를 쓰면 `.sched__aside` 가 `days` 와 같은
-       높이로 늘어나 sticky 가 훨씬 더 오래 붙어 있는다**(실측: 600px 스크롤 시 카드 상단이
-       start 에선 -144px(완전히 사라짐), stretch 에선 -15px(거의 그대로 보임) — 144px 차이).
-       단일 행 grid 라 이 stretch 가 예전(다중 행에서 겪은 트랙 배분) 버그를 안 되살린다는 것도
-       같이 확인했다 — 미리보기-메타 간격은 stretch 로 바꿔도 24px(--space-5) 그대로다(아래
-       `.sched__aside` 가 여전히 flex 로 내부를 쌓기 때문). `.sched__days`(`<ol>`, 테두리 없음)가
-       `.sched__aside` 보다 짧을 때 늘어나도 마지막 카드 아래 안 보이는 여백만 생길 뿐이다. */
+       높이로 늘어난다** — 이 늘어난 높이가 아래 `.sched__aside-pin`(실제 sticky 요소)에게
+       이동할 여유(slack)를 주는 것이 지금 이 sticky 가 작동하는 핵심 전제다(실측: 600px 스크롤
+       시 카드 상단이 start 에선 -144px(완전히 사라짐), stretch 에선 -15px(거의 그대로 보임) —
+       144px 차이). `.sched__days`(`<ol>`, 테두리 없음)가 `.sched__aside` 보다 짧을 때 늘어나도
+       마지막 카드 아래 안 보이는 여백만 생길 뿐이다. */
   }
   .sched--edit .sched__days {
     grid-area: days;
   }
-  /* 곁칸 자신은 grid-area 하나일 뿐이고, 그 **안**에서 미리보기·메타를 세로로 쌓는 건 flex 다
-     (기본 규칙, media 쿼리 밖 — narrow flow 에서도 같은 flex 라 간격 값이 갈리지 않는다). flex
-     자식의 배치는 grid 트랙 크기 계산과 완전히 무관하므로 `days` 열이 아무리 길어져도 메타는
-     항상 미리보기 바로 아래다 — 위 `sched__grid` 주석이 잡은 회귀의 실제 해법은 여기 있다. */
+  /* 곁칸(`.sched__aside`) 자신은 grid-area 하나일 뿐이고 sticky 도 아니다 — 위 stretch 로
+     `days` 와 같은 높이(요일이 길면 900px 대)까지 늘어나는 **포함 블록** 역할만 한다. 그
+     **안**에서 미리보기·메타를 실제로 쌓고 sticky 로 붙잡는 건 한 겹 더 안쪽인
+     `.sched__aside-pin`(기본 규칙, media 쿼리 밖 — narrow flow 에서도 같은 flex 라 간격 값이
+     갈리지 않는다) 이다. flex 자식의 배치는 grid 트랙 크기 계산과 완전히 무관하므로 `days`
+     열이 아무리 길어져도 메타는 항상 미리보기 바로 아래다 — 위 `sched__grid` 주석이 잡은
+     회귀(간격 163.77px)의 실제 해법은 여기 있다. */
   .sched--edit .sched__aside {
     grid-area: aside;
   }
-  /* `top` 은 nav(sticky, 실측 69px)를 비켜야 카드 윗변이 그 아래로 안 들어간다. **메타는 sticky
-     가 아니다** — 미리보기까지 붙여 두면 짧은 창에서 메타 아래가 잘린다(결정 29). sticky 의
-     포함 블록은 `.sched__aside`(flex 컨테이너)다 — 위에서 stretch 로 늘어난 그 블록의 콘텐츠
-     높이만큼 미리보기가 "떠 있을" 여유를 갖는다(적대적 리뷰가 잡은 회귀의 실제 해법은
-     `align-items` 자리에 있다, 이 규칙이 아니라). */
-  .sched--edit .sched__preview {
+  /* **sticky 를 `.sched__aside`(바깥, stretch 로 늘어나는 그 자체)가 아니라 안쪽 겹
+     `.sched__aside-pin`에 건다** — 왜 이 겹이 필요한지는 schedule-editor.tsx 의 같은 자리
+     주석(**"sched__aside-pin 이 왜 또 한 겹인가"**)에 있다. 요약: sticky 요소 자신이
+     stretch 로 포함 블록과 같은 높이까지 늘어나면 이동할 여유(slack)가 0이 되어 sticky 가
+     사실상 안 걸린다(2026-07-31 실측: 스크롤해도 그냥 문서를 따라 100% 밀려 올라갔다) — 안쪽에
+     작은 sticky 요소, 바깥에 큰 포함 블록이 있어야 한다.
+
+     **sticky 는 미리보기 혼자가 아니라 이 안쪽 겹 전체(미리보기+메타)에 건다**(2026-07-31,
+     적대적 리뷰 4라운드가 잡은 또 다른 회귀). 처음엔 미리보기만 sticky 였는데, 그러면 메타는
+     그냥 normal flow 형제라 미리보기가 nav 아래 고정된 채 메타는 스크롤을 따라 계속 올라가
+     미리보기 카드 뒤로(정확히는 카드가 나중에 그려져 메타 위로) 들어간다 — sticky 는 자기
+     자신만 붙잡을 뿐 뒤따르는 형제가 그 밑을 지나가는 걸 안 막는다. 실측: 스크롤 200px부터
+     800px까지(이 픽스처가 낼 수 있는 스크롤 범위 거의 전부) 메타 윗부분이 미리보기 밑에 가려
+     있었다 — 팬아트·공지 컨트롤이 편집 내내 거의 못 눌린다는 뜻이라 넘어갈 수 없는 결함이다.
+     미리보기·메타를 **한 덩어리로 같이 sticky** 시키면 이 문제가 원천적으로 없다 — 둘이 항상
+     같은 flex 열 안에서 붙어 함께 움직이므로 서로를 지나칠 길이 없다. */
+  .sched--edit .sched__aside-pin {
     position: sticky;
+    /* `top` 은 nav(sticky, 실측 69px)를 비켜야 곁칸 윗변이 그 아래로 안 들어간다. */
     top: calc(var(--nav-h) + var(--space-4));
+    /* **짧은 창에서 이 안쪽 겹 전체(미리보기+메타)가 뷰포트보다 커지면 내부 스크롤로 받는다.**
+       이 한도가 없으면 두 가지 중 하나로 나빠진다 — sticky 인 채 그냥 넘치면 메타 아래가
+       뷰포트 밖으로 나가 갇히고(짧은 창에서 결정 29 가 원래 우려하던 그 증상), 그렇다고 메타를
+       sticky 밖으로 다시 빼면 위에서 고친 겹침 회귀가 되돌아온다. `max-height` + `overflow-y:
+       auto` 는 그 둘 다를 피한다 — 넘치는 만큼만 이 안에서 따로 스크롤되고 겹치는 일이 없다.
+       900px 창처럼 여유가 있으면 preview(544)+gap(24)+meta(139)=707px 가 이 상한(약 798px)
+       안에 들어가 스크롤바가 아예 안 뜬다 — overflow-y: auto 는 필요할 때만 나타난다.
+
+       **이 한도 자체를 지키는 전용 e2e 는 없다** — 짧은 창에서 "특정 컨트롤이 못 닿는다"를
+       재현하려 했지만 그 컨트롤이 곁칸 안 어디에 있냐에 따라 막힘 여부가 갈려(공지 입력칸은
+       메타 맨 위라 이 상한 없이도 자주 닿았다) 이빨 증명(일부러 되돌려 빨개지는지 확인)에
+       실패했다 — 검출력 없는 단언을 박아 두는 대신 뺐다(AGENTS "조용한 no-op" 교훈). 겹침
+       방지(위 sched__grid 주석의 진짜 회귀)는 아래 e2e 가 정상 못박는다. */
+    max-height: calc(100vh - var(--nav-h) - var(--space-4) * 2);
+    overflow-y: auto;
   }
 }
 
@@ -171,21 +200,25 @@
   border-radius: var(--radius-sm);
 }
 
-/* ── 편집기 오른쪽 곁칸: 미리보기 + 주 메타(결정 29 개정, 2026-07-31 회귀 수정) ─────
-   `.sched__aside` 가 미리보기·메타를 `flex-direction: column` 으로 쌓는다 — narrow flow
-   (1300 미만)·wide grid(1300 이상) 양쪽에서 이 규칙 하나만 적용돼 간격이 갈리지 않는다(위
-   sched__grid 의 @media 주석 참고 — 왜 메타를 별도 grid-area 가 아니라 이 flex 로 감쌌는지). */
-.sched__aside {
+/* ── 편집기 오른쪽 곁칸: 미리보기 + 주 메타(결정 29 개정, 2026-07-31 회귀 수정 ×2) ───
+   곁칸이 두 겹이다 — `.sched__aside`(바깥, grid-area 만 갖고 1300 이상에서 stretch 로
+   `days` 와 같은 높이까지 늘어나는 포함 블록)와 `.sched__aside-pin`(안쪽, 미리보기·메타를
+   `flex-direction: column` 으로 쌓고 sticky 도 여기서 건다). 왜 겹이 둘로 갈렸는지(sticky
+   요소 자신이 포함 블록과 같은 높이로 늘어나면 이동 여유가 0이 된다)는 위 `sched__grid` 의
+   @media 주석과 schedule-editor.tsx 의 같은 자리 주석에 있다. 이 flex 규칙은 narrow flow
+   (1300 미만)·wide grid(1300 이상) 양쪽에서 그대로 적용돼 간격이 갈리지 않는다. */
+.sched__aside-pin {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  /* narrow flow(1300 미만)에서 이 블록 바로 다음이 요일 목록(`.sched__days`)이다 — `.sched__days`
-     자신은 margin 이 0(읽기 화면과 공유하는 클래스라 여기서 못 건드린다, 아래) 이라 이 여백이
-     없으면 메타 박스가 첫 하루 카드에 그대로 붙는다(실측: 간격 0px, codex review 지적,
-     2026-07-31). 1300 이상(grid)에선 요일과 곁칸이 좌우로 나뉘어 이 여백이 안 보이지만, 있어도
-     해가 없다(곁칸 높이 계산에 32px 더할 뿐 — 아래 sched__grid 의 stretch 설명과 같은 여유).
-     값은 읽기 화면의 카드→목록 간격(`.week-card-download` 의 옛 margin-bottom)과 같은
-     --space-6 로 맞춰 두 화면의 리듬을 같게 한다. */
+}
+/* narrow flow(1300 미만)에서 이 블록(바깥 겹) 바로 다음이 요일 목록(`.sched__days`)이다 —
+   `.sched__days` 자신은 margin 이 0(읽기 화면과 공유하는 클래스라 여기서 못 건드린다, 아래)
+   이라 이 여백이 없으면 메타 박스가 첫 하루 카드에 그대로 붙는다(실측: 간격 0px, codex
+   review 지적, 2026-07-31). 1300 이상(grid)에선 요일과 곁칸이 좌우로 나뉘어 이 여백이 안
+   보이지만, 있어도 해가 없다. 값은 읽기 화면의 카드→목록 간격(`.week-card-download` 의 옛
+   margin-bottom)과 같은 --space-6 로 맞춰 두 화면의 리듬을 같게 한다. */
+.sched__aside {
   margin-bottom: var(--space-6);
 }
 /* `.week-card-download` 자신의 margin-top(공지 아래로 띄우던 값)·margin-bottom(요일 목록과
