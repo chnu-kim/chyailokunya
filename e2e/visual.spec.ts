@@ -231,12 +231,19 @@ for (const theme of ["light", "dark"] as const) {
     await openDay(page, 1);
     await add.first().click();
     await titles.first().fill("저챗");
-    // 휴방 잠금(점선 + 흐림 + 안내)이 그림에 들도록 항목이 있는 날을 쉬게 하고, 이 날을 편
-    // 채로 찍는다(위 파일 상단 주석 참고).
+    /* 휴방 잠금(점선 + 흐림 + 안내)이 그림에 들도록 항목이 있는 날을 쉬게 하고, 이 날을 편
+       채로 찍는다(위 파일 상단 주석 참고).
+
+       **날짜를 명시해 짚는다**(결정 32, 2026-08-01). 전엔 `.first()` 로 잡아도 맞았다 —
+       휴방 체크박스가 펼친 패널 안에만 있어 화면에 **하나뿐**이었기 때문이다. 머리 줄로
+       올라가면서 일곱 개가 늘 DOM 에 있고, `.first()` 는 이제 **월요일**을 짚는다: 그러면
+       월요일 항목이 카드에서 빠져 아래 `toContainText` 가 빨개진다(실제로 그렇게 걸렸다).
+       옆의 `add`·`titles` 는 여전히 패널 안이라 `.first()` 가 그대로 유효하다 — 같은 파일
+       안에서 규칙이 갈리므로 여기만 다른 이유를 적어 둔다. */
     await openDay(page, 2);
     await add.first().click();
     await titles.first().fill("이 항목은 안 나갑니다");
-    await page.locator('[data-od-id^="schedule-day-rest-"]').first().check();
+    await page.locator('[data-od-id="schedule-day-rest-2019-04-03"]').check();
 
     /* 카드가 입력을 실제로 따라왔는지 보고 찍는다 — 안 기다리면 옛 상태가 구워져, 이 장이
        지키려는 계약("미리보기가 편집 중인 값을 그린다")을 정작 스냅샷이 안 담는다. */

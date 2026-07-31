@@ -104,6 +104,29 @@ describe("ScheduleEditor — 하루 칸 아코디언", () => {
     expect(err).toHaveTextContent("제목이 없습니다");
   });
 
+  /* 결정 32 — **접힘↔펼침이 같은 값을 두 번 말하지 않는다.** 옛 골격은 접힌 줄이 `19:00` 을
+     읽기 전용으로 보여주고 펼치면 같은 값이 별도 줄의 입력으로 다시 나타났다. 시각·휴방을
+     머리 줄로 올리면서 그 이중성이 사라졌는데, **패널에 옛 줄을 남긴 채 머리 줄만 더하면**
+     화면은 그럴듯한데 같은 값을 조작하는 컨트롤이 둘이 된다(하나를 고치면 다른 하나가 안
+     따라가는 것처럼 보이는 종류의 버그다). 개수로 못박는다. */
+  it("펼쳐도 시각·휴방은 하루에 하나씩뿐이다 — 패널에 옛 줄이 남지 않는다", () => {
+    const { container, pick } = renderEmptyWeek();
+    const countIn = (odId: string) => container.querySelectorAll(`[data-od-id="${odId}"]`).length;
+
+    expect(countIn(`schedule-day-time-${WEEK_START}`)).toBe(1);
+    expect(countIn(`schedule-day-rest-${WEEK_START}`)).toBe(1);
+
+    fireEvent.click(pick<HTMLButtonElement>(`schedule-day-toggle-${WEEK_START}`)!);
+
+    expect(pick(`schedule-day-panel-${WEEK_START}`)).not.toBeNull();
+    expect(countIn(`schedule-day-time-${WEEK_START}`)).toBe(1);
+    expect(countIn(`schedule-day-rest-${WEEK_START}`)).toBe(1);
+    // 그 하나가 패널이 아니라 머리 줄에 있다 — 개수만 세면 "둘 다 패널로 내려갔다"도 통과한다.
+    const panel = pick(`schedule-day-panel-${WEEK_START}`)!;
+    expect(panel.querySelector(`[data-od-id="schedule-day-time-${WEEK_START}"]`)).toBeNull();
+    expect(panel.querySelector(`[data-od-id="schedule-day-rest-${WEEK_START}"]`)).toBeNull();
+  });
+
   it("패널이 열린 채로도 접힌 요약이 타이핑을 그대로 따라간다", () => {
     const { pick } = renderEmptyWeek();
 

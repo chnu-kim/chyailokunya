@@ -446,10 +446,12 @@
    못 들어간다. 접힌 요약 64px(표지 40 + 패딩 12×2) × 7 = 448 로, 여전히 366 을 넘지만
    (남는 스크롤은 결정 29 의 메타 재배치가 마저 흡수한다) 옛 1279px 합계보다 압도적으로 줄었다.
 
-   **머리 줄엔 폼 컨트롤을 두지 않는다.** 시각 입력·휴방 체크박스를 여기 두면 이 요소가
-   접힘/펼침에 따라 "button" 과 "input 을 낀 div"로 갈려 aria-expanded 를 가진 요소 자체가
-   바뀐다 — 그래서 `.sched-day__summary` 는 **항상 button** 이고, 시각·휴방은 `.sched-day__panel`
-   안으로 내렸다(구분선 아래가 조작 영역이라는 옛 골격의 원칙은 그대로 잇는다).
+   **머리 줄은 컨테이너이고 그 안의 토글만 button 이다**(결정 32 가 개정한 자리). 초판은 줄
+   전체를 하나의 button 으로 만들고 시각·휴방을 패널로 내렸는데, 그 근거는 "폼 컨트롤을 여기
+   두면 이 요소가 접힘/펼침에 따라 button ↔ input 을 낀 div 로 갈린다"였다. 갈리지 않게 하는
+   방법이 컨트롤을 치우는 것 하나뿐은 아니다 — **줄을 div 로 두고 button 을 그 안에 넣으면**
+   `aria-expanded` 를 가진 요소는 어느 상태에서도 그 button 하나다. 그래서 지금은 시각·휴방이
+   `.sched-day__when` 으로 머리 줄에 서고 패널은 항목 편집 전용이다.
 
    **읽기 화면은 안 바꾼다**(위 `.sched-day` 주석). 그래서 이 블록은 전부 `.sched--edit` 스코프다.
 
@@ -480,45 +482,63 @@
   gap: 6px;
   padding-top: 0;
 }
-/* 접힌 줄. 표지 30×40 이 세로 크기를 정한다(40 + 패딩 12×2 = 64, 위 골격 주석의 실측 그대로) —
-   포스터가 없는 날도 줄 높이가 흔들리면 안 되므로 min-height 로 못박는다. */
-.sched-day__summary {
+/* ── 머리 줄(결정 32, 2026-08-01) ─────────────────────────────────────────────
+   **접힌 채로 시각·휴방을 조작한다.** 결정 28 은 이 줄을 통째로 하나의 button 으로 만들고
+   폼 컨트롤을 전부 패널로 내렸는데, 그러면 접힘↔펼침이 같은 값을 다른 모양으로 두 번 말하고
+   "수·목만 휴방" 같은 흔한 작업이 펼치기 7번을 요구했다. 이제 줄은 **컨테이너**이고 그 안에
+   토글 button 과 폼 컨트롤이 **형제**로 선다 — 결정 28 이 지키려던 것(`aria-expanded` 를 가진
+   요소가 접힘/펼침에 따라 안 바뀐다)은 button 이 여전히 요약만 담으므로 그대로 유효하다.
+
+   **높이 예산은 64px 그대로다.** 시각 입력이 `.sched-field` 라 44px 을 세우므로 상하 패딩을
+   12 → 10 으로 내려 10+44+10 = 64 를 맞췄다(결정 28 의 표지 40 + 12×2 와 같은 값). 여기를
+   12 로 두면 68×7 = 476 이 되어 그 결정이 잡은 366px 예산에서 한 걸음 더 멀어진다.
+
+   **좌우 패딩 16 이 포커스 링의 버퍼다.** `.sched--edit .sched-day` 의 `overflow: hidden`(둥근
+   모서리 클립)이 카드 밖으로 나가는 링을 자르는데, 이 줄의 컨트롤은 이제 카드 가장자리에서
+   16px 안쪽이라 `.sched-field:focus` 의 2px box-shadow 도 `.sched-day__rest-toggle:focus-within`
+   의 2px outline 도 잘리지 않는다. 그래서 옛 button 이 쓰던 안쪽(-2px) 오프셋을 안 물려받는다 —
+   그건 카드 가장자리까지 꽉 채우던 그 button 하나만의 사정이었다. */
+.sched-day__head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
   min-height: 64px;
-  padding: 12px var(--space-4);
+  padding: 10px var(--space-4);
+}
+/* 요약 토글 — 남는 폭 전부를 갖는다. 배경이 이 상자에만 깔리므로 "어디까지가 펼치기인가"가
+   호버에서 그대로 보인다(옛 골격은 줄 전체가 버튼이라 그 경계를 물을 일이 없었다). */
+.sched-day__summary {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0;
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
 }
 .sched-day__summary:hover {
   background: var(--surface-2);
 }
-/* **안쪽(-2px) 오프셋** — 위 `.sched--edit .sched-day` 의 overflow:hidden 이 카드 모서리 밖으로
-   나가는 기본 오프셋(2px)을 잘라 먹는다. 이 버튼만 예외인 이유: 카드 가장자리까지 차지하는
-   유일한 인터랙티브 요소라서다(패널 안 컨트롤은 패딩 버퍼가 있어 기본 오프셋으로도 안 잘린다). */
 .sched-day__summary:focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
-/* 휴방이면 시각 대신 이 칩이 선다 — 읽기 화면 .sched-day__off/.sched-day__time 의 상호배타
-   규칙과 같다(쉬는 날의 시작 시각은 뜻이 안 맞는다). chip--ink(오늘 칩과 같은 값)를 안 쓰는
-   이유는 오늘 칩과 한 줄에 같이 설 수 있어서다 — 둘 다 잉크 채움이면 서로 구분이 안 간다.
-   chip--warn 은 이 표면(--surface)에서 라이트 6.20:1·다크 9.01:1(스크립트 계산)로 대비가
-   넉넉하고, 지금까지 앱에서 쓰인 적 없는 값이라 이 자리에서만 쓰는 근거를 남겨 둔다. */
-.sched-day__rest-chip {
+/* 시각 + 휴방. **한 겹으로 묶는 이유는 감축 경로 때문이다** — 560 이하에서 둘이 *함께* 다음
+   줄로 내려가야 하는데, 감싸지 않으면 flex 가 줄바꿈을 flex-basis(늘어나기 전 크기)로 계산해
+   토글의 basis 0 이 첫 줄에 자리를 안 차지하고 시각(128)만 첫 줄에 남는다. 아래 감축 경로
+   블록이 이 겹에 `flex-basis: 100%` 를 줘 결과를 결정론적으로 만든다. */
+.sched-day__when {
   flex: none;
-}
-.sched-day__summary-time {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 /* 표지 최대 2개 + 제목. 표지는 `.sched-entry__poster` 를 그대로 쓴다(읽기 화면과 같은 30×40 —
    "표지를 남기는 이유"가 그 두 화면이 같은 언어가 되는 것이므로 클래스도 하나다). */
@@ -559,8 +579,9 @@
   transform: rotate(180deg);
 }
 
-/* 펼친 패널 — 시각·휴방·항목·＋ 가 전부 여기 있다. 위 요약 줄과의 경계선이 "하루가 무엇인가"와
-   "그날 무엇을 하나"를 가른다(옛 머리 줄/항목 구분선과 같은 자리, 값만 옮겨 왔다). */
+/* 펼친 패널 — **항목 편집 전용이다**(결정 32). 시각·휴방은 머리 줄로 올라갔으므로 여기 남는
+   것은 항목 행·＋·휴방 안내뿐이다. 위 머리 줄과의 경계선이 "하루가 무엇인가"와 "그날 무엇을
+   하나"를 가른다(옛 골격의 구분선과 같은 자리). */
 .sched-day__panel {
   padding: var(--space-3) var(--space-4) var(--space-4);
   border-top: 1px solid var(--border);
@@ -599,31 +620,42 @@
   color: var(--fg);
 }
 
-/* 하루의 속성 줄(편집기) — 시작 시각 + 휴방. 항목 행 위에 한 번만 선다(이슈 #117). */
-.sched-day__meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-.sched-day__time {
+/* 편집기의 시각 입력. **읽기 화면의 `.sched-day__time`(문단)과 이름을 갈랐다**(결정 32) —
+   한때 두 화면이 같은 클래스를 쓰면서 이 파일 안에 같은 이름의 블록이 둘 있었고, 뒤에 오는
+   쪽이 앞을 덮어 "어느 화면을 고치는 중인지"가 셀렉터로 안 읽혔다.
+
+   128px 은 **앱이 못 줄이는 값이다** — `type="time"` 의 표기 형식을 브라우저 UI 언어가 정하기
+   때문이다(2026-07-20 확인, 결정 31 의 진입폭 유도가 이 값 위에 서 있다). `0 1` 이라 줄어들
+   수는 있지만 그 아래로는 네이티브 컨트롤이 제 글자를 잘라 먹으므로, 감축 경로는 폭을 줄이는
+   대신 줄을 바꾼다(아래 560 블록). */
+.sched-day__time-field {
   flex: 0 1 128px;
   min-width: 0;
 }
 /* 체크박스는 라벨과 함께 44 를 세운다 — 네이티브 체크박스 자체는 16px 안팎이라, 라벨을 감싸
-   히트 영역을 넓히지 않으면 터치 타깃이 조용히 미달한다(kunya-design §4·§5 의 상습범). */
+   히트 영역을 넓히지 않으면 터치 타깃이 조용히 미달한다(kunya-design §4·§5 의 상습범).
+   `flex: none` + `nowrap` 은 머리 줄에서 두 글자가 세로로 접히지 않게 한다 — 접히면 이 컨트롤
+   혼자 줄 높이를 밀어 올려 64px 예산이 깨진다. */
 .sched-day__rest-toggle {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   min-height: 44px;
   padding: 0 var(--space-2);
   font-size: var(--text-sm);
   font-weight: 700;
+  white-space: nowrap;
   color: var(--fg-muted);
   cursor: pointer;
 }
 .sched-day__rest-toggle:hover {
+  color: var(--fg);
+}
+/* 켜져 있으면 이름도 또렷해진다 — 체크 표시 하나는 옛 `chip--warn 휴방` 칩이 하던 "이 주 어느
+   날이 쉬나"를 못 이어받는다. --fg 는 이 줄이 앉는 두 표면(--surface · 아래 --rest 톤) 모두에서
+   14px 게이트(4.5:1)를 크게 넘는다. */
+.sched-day__rest-toggle:has(input:checked) {
   color: var(--fg);
 }
 .sched-day__rest-toggle input {
@@ -636,6 +668,46 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
+}
+
+/* 휴방인 하루 — **줄 전체가 톤으로 말한다**(결정 32). 옛 접힌 줄엔 `chip--warn 휴방` 칩이 서서
+   "이번 주 어느 날이 쉬나"를 한눈에 말했는데, 그 자리가 조작 가능한 체크박스로 바뀌며 신호가
+   체크 표시 하나로 줄었다. 칩을 체크박스 옆에 나란히 두는 길은 안 택했다 — 같은 사실을 한 줄에서
+   두 번 말하게 되고 그게 정확히 이 개편이 없애는 중복이다.
+
+   머리 줄에만 깔고 패널엔 안 깐다 — 펼친 패널은 `.sched-day__items--rest` 가 이미 같은 톤 +
+   점선으로 잠금을 말하고 있어, 겹쳐 깔면 그 경계가 사라진다. `--surface-2` 위 `--fg-muted` 는
+   라이트 5.78:1 · 다크 7.23:1(스크립트 계산)로 14px 게이트를 넘는다. */
+.sched-day--rest .sched-day__head {
+  background: var(--surface-2);
+}
+
+/* ── 감축 경로: 560 이하에서 머리 줄이 두 줄이 된다 ──────────────────────────────
+   고정분이 338.44px 든다(요일·날짜 56 + 시각 128 + 휴방 67.89 + chevron 20.55 + gap·패딩·테두리,
+   결정 31 의 실측) — 320px 뷰포트의 카드 안쪽 폭은 238px 라 **한 줄에 구조적으로 못 들어간다.**
+   시각 입력을 줄여서 맞출 수도 없다(위 `.sched-day__time-field` 주석: 표기 형식이 브라우저
+   UI 언어 소관이라 앱이 못 줄인다).
+
+   **접힌 줄의 읽기 전용 시각 표기로 되돌아가는 길은 안 택했다.** 그러면 좁은 폭에서만 접힘↔펼침이
+   다시 다른 언어가 되어, 결정 32 가 없앤 바로 그 이중성이 폭에 따라 되살아난다. 좁은 화면은
+   어차피 세로로 스크롤하는 화면이라 하루 칸이 64 → 116px 로 늘어나는 값을 치른다.
+
+   **`flex-basis: 100%` 를 `.sched-day__when` 에 준다 — 줄바꿈 지점을 결정론적으로 못박는 것이
+   이 한 줄의 일이다.** 그냥 `flex-wrap: wrap` 만 켜면 flex 가 줄바꿈을 늘어나기 전 크기로
+   계산하므로 토글(basis 0)이 첫 줄에서 자리를 안 차지해 `[요일 시각] / [휴방] / [요약]` 처럼
+   세 줄로 흩어진다(실측 아님 — flex 명세의 line-breaking 정의). 100% 를 주면 `when` 이 항상
+   제 줄을 차지해 `[요약] / [시각 휴방]` 두 줄로 고정된다.
+
+   **DOM 순서를 안 건드린다** — `order` 로 시각만 돌리면 탭 순서가 화면과 갈린다(#137 이 곁칸에서
+   감수한 그 불일치를 여기선 안 만든다). 560 은 이 저장소에서 셋이 공유하는 유일한 폭이라
+   새 값을 만들지 않는다(kunya-design §5 의 표). */
+@media (max-width: 560px) {
+  .sched-day__head {
+    flex-wrap: wrap;
+  }
+  .sched-day__when {
+    flex-basis: 100%;
+  }
 }
 
 /* ── 읽기 항목: 시각 · 표지 · 제목 ─────────────────────────────────────────── */
@@ -704,15 +776,56 @@
   gap: var(--space-2);
 }
 
-/* 한 줄에 셋이 **고정 배분**으로 선다 — 게임 44, 삭제 44, 남는 전부가 제목(2026-07-31).
-   전엔 flex-basis 가 140/160/128 로 흩어진 채 셋 다 grow 라, 같은 칸이 항목마다·주마다 다른
-   폭으로 섰다(사용자가 "중구난방"이라 부른 것 중 하나). wrap 도 뺐다: 고정 88 + gap 16 을
-   뺀 나머지를 제목이 가져가고 그 칸이 min-width:0 이라, 320px 에서도 접을 필요 없이 줄어든다
-   (접히면 한 항목이 두 줄이 되어 7일 목록의 리듬이 항목 수에 따라 흔들린다). */
+/* ── 항목 한 줄 = 한 상자(결정 33, 2026-08-01) ────────────────────────────────
+   **테두리는 이 상자 하나가 진다.** 전엔 표지·제목·삭제가 각자 `.sched-field` 의 1.5px
+   `--border-strong` 을 그려, 하루 카드(1px) 안에서 같은 무게의 상자가 셋 나란히 서고 그 위에
+   패널 구분선까지 얹혔다 — 사용자가 "구조화되지 않고 흩뿌려졌다"고 부른 자리 중 하나다.
+   이제 안쪽 컨트롤은 테두리를 안 그리고(아래 `.sched-row .sched-field`) 44×44 히트 영역만
+   유지한다 — **시각 테두리가 사라져도 누를 수 있는 넓이는 그대로다.**
+
+   `gap` 도 0 이다. 컨트롤끼리 붙어야 한 상자로 읽힌다 — 표지(3:4)의 제 모서리와 제목 칸의
+   좌우 패딩 10 이 그 사이를 가른다.
+
+   폭 배분은 옛 규칙 그대로 — 게임 44, 삭제 44, 남는 전부가 제목. wrap 은 안 쓴다: 제목 칸이
+   `min-width: 0` 이라 320px 에서도 접을 필요 없이 줄어든다(접히면 한 항목이 두 줄이 되어 7일
+   목록의 리듬이 항목 수에 따라 흔들린다). */
 .sched-row {
   display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  /* 안쪽 컨트롤은 모서리가 각져 있다(테두리를 잃으며 radius 도 0 이 됐다) — 포커스 배경 톤이
+     상자의 둥근 모서리 밖으로 삐져나오지 않게 자른다. 자기 `:focus-within` box-shadow 는 제
+     요소의 것이라 이 클립에 안 걸린다. */
+  overflow: hidden;
+}
+/* 포커스 링은 **행 전체**에 선다(결정 33) — 안쪽 컨트롤이 테두리를 잃었으니 링도 상자 것이다.
+   어느 컨트롤에 있는지는 아래 배경 톤이 따로 말한다(링만으론 셋 중 어디인지 안 갈린다). */
+.sched-row:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px var(--focus);
+}
+.sched-row__main {
+  display: flex;
   align-items: center;
-  gap: var(--space-2);
+}
+/* 안쪽 컨트롤은 상자를 안 그린다. 배경도 투명이라 휴방 잠금의 톤(`.sched-day__items--rest`)이
+   행 안까지 그대로 비친다. */
+.sched-row .sched-field {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+.sched-row .sched-field:focus {
+  box-shadow: none;
+}
+/* **지금 어느 칸에 있나**는 배경이 말한다. 행 링 하나만으론 표지→제목→삭제로 탭이 옮겨 다녀도
+   화면이 똑같아, 링이 있다는 사실 말고는 아무것도 안 알려 준다. `--surface-2` 위 `--fg` 는
+   라이트 16.06:1 · 다크 15.41:1, `--fg-muted` 는 5.78:1 / 7.23:1(스크립트 계산). */
+.sched-row .sched-field:focus-visible,
+.sched-row__del:focus-visible {
+  background: var(--surface-2);
 }
 /* 게임 연결 트리거 — 옛 <select> 자리(결정 11·19). **44×44 아이콘 버튼이다**(2026-07-31):
    연결 전엔 돋보기, 연결되면 그 게임 표지가 이 자리에 앉는다. 전엔 게임명까지 담느라
@@ -766,25 +879,30 @@
   color: var(--fg);
   background-color: var(--surface-2);
 }
+/* 검색 패널이 열린 표지 자리. 테두리가 없어졌으므로 안쪽 윤곽으로 말한다 — 바깥 오프셋을 쓰면
+   행 테두리와 겹쳐 두 줄이 된다. */
 .sched-row__game-trigger[aria-expanded="true"] {
-  border-color: var(--focus);
+  outline: 1.5px solid var(--focus);
+  outline-offset: -1.5px;
 }
 .sched-row__title {
   flex: 1 1 0;
   min-width: 0;
 }
 /* 제목이 게임명과 다를 때만 뜨는 연결 표기(적대적 리뷰, schedule-editor.tsx 주석에 근거).
-   행 아래 한 줄이라 폭을 안 먹고, 왼쪽 들여쓰기(44+8)로 표지 버튼 오른쪽에 맞춰 서서 "이
-   항목에 딸린 사실"임이 자리로 읽힌다. --fg-muted 는 하루 카드 표면 위 라이트 6.39:1 ·
-   다크 6.69:1. */
+   **상자 안 둘째 행이다**(결정 33) — 밖에 있던 시절엔 다음 항목과 같은 gap 으로 떨어져 있어
+   "누구에게 딸린 사실인가"가 자리로 안 읽혔다. 왼쪽 들여쓰기 54 = 표지 칸 44 + 제목 칸의 좌우
+   패딩 10 이라 제목 글자와 시작선이 정확히 맞는다. --fg-muted 는 하루 카드 표면 위 라이트
+   6.39:1 · 다크 6.69:1. */
 .sched-row__linked {
-  margin: 4px 0 0;
-  padding-left: calc(44px + var(--space-2));
+  margin: 0;
+  padding: 0 10px 8px calc(44px + 10px);
   font-size: var(--text-sm);
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
-/* 삭제는 44×44 아이콘 버튼. 잉크 테두리로 항목 행의 다른 컨트롤과 같은 종족으로 읽힌다. */
+/* 삭제는 44×44 아이콘 버튼. 테두리는 행 상자가 지므로 여기선 안 그린다(결정 33) — 히트 영역은
+   그대로 44×44 다. */
 .sched-row__del {
   flex: 0 0 auto;
   width: 44px;
@@ -795,8 +913,8 @@
   padding: 0;
   cursor: pointer;
   color: var(--fg-muted);
-  background: var(--surface);
-  border: 1.5px solid var(--border-strong);
+  background: transparent;
+  border: none;
   border-radius: var(--radius-sm);
 }
 .sched-row__del svg {
@@ -805,11 +923,6 @@
 }
 .sched-row__del:hover:not(:disabled) {
   color: var(--danger);
-  border-color: var(--danger);
-}
-.sched-row__del:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
 }
 /* ── 휴방인 날의 잠긴 항목 덩어리(2026-07-31) ─────────────────────────────────
    점선 테두리를 **평소에도 투명으로 깔아 둔다** — 휴방을 켤 때만 테두리를 만들면 그 순간
