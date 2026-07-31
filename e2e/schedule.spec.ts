@@ -134,6 +134,33 @@ test("관리자: 미리보기가 타이핑을 따라오고, 미저장이면 다�
   await expect(page.locator(".week-card__note")).toHaveCount(0);
 });
 
+/* #56 결정 29 회귀(적대적 리뷰 지적, 2026-07-31). narrow flow(1300 미만)는 DOM 순서 그대로
+   흐르는데, 결정 29 초판은 그 순서를 `요일 → 미리보기 → 메타`로 뒤집으며 "하루 카드가 접힘
+   요약(결정 28)이라 이 순서에서도 미리보기가 첫 화면 안에 든다"고 가정했다. 그 가정은 **모든
+   날이 접혀 있을 때만** 참이다 — 실제 편집은 최소 하루를 펼쳐야 하고, 펼치는 순간 요일 목록
+   높이가 늘어 미리보기가 밀린다(결정 24 가 막으려던 "한참 내려야 보인다"의 재발). 그래서
+   순서를 `미리보기 → 메타 → 요일`로 고쳤다 — 이 스펙은 그 고침을 못박는다: 되돌리면(요일이
+   먼저 오면) 하루를 펼치는 순간 미리보기 위치가 밀려 이 단언이 빨개진다. */
+test("관리자: 1열 폭에서 하루를 펼쳐도 미리보기 위치가 안 바뀐다(#56 결정 29 회귀)", async ({
+  page,
+  baseURL,
+}) => {
+  // 1300 미만이라 grid 가 안 걸리고 DOM 순서 그대로 흐른다 — 이 스펙의 전제.
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await signIn(page.context(), baseURL!);
+  await page.goto("/schedule?week=2031-06-09");
+  await expectSignedIn(page);
+
+  const preview = page.locator('[data-od-id="week-card-download"]');
+  const topOf = () => preview.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+
+  const before = await topOf();
+  await openDay(page, 0);
+  await expect(page.locator('[data-od-id^="schedule-day-panel-"]')).toBeVisible();
+  const after = await topOf();
+  expect(after).toBeCloseTo(before, 0);
+});
+
 test("관리자: 주를 이동하면 편집기가 새 주로 리셋된다(draft 이월 없음)", async ({
   page,
   baseURL,
