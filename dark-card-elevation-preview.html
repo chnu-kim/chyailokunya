@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>다크 카드 높이 — 변경 전후 비교</title>
+
+    <!-- 토큰 정본을 그대로 건다. 값을 이 파일에 베끼면 globals.css 가 바뀔 때 조용히
+         어긋난다 — 이 페이지의 "이후" 열은 항상 저장소의 현재 값을 그린다.
+         chrome.css 는 카드 부품을 쓰려고 함께 건다. -->
+    <link rel="stylesheet" href="src/app/globals.css" />
+    <link rel="stylesheet" href="src/app/chrome.css" />
+
+    <style>
+      /* 이 페이지는 **다크 전용**이다. 라이트 그림자는 globals.css 의 Tailwind at-rule
+         블록 안에 있어 브라우저가 그 블록을 통째로 건너뛴다 — 값을 여기 옮겨 적으면
+         정본이 둘이 되므로 안 옮긴다. 이번 변경도 다크만 건드렸다. 같은 이유로
+         테마 토글을 안 둔다: 라이트로 뒤집으면 그림자가 빠진 채로 보여 없는 결함을
+         있는 것처럼 말한다.
+
+         폰트도 at-rule 안이라 안 잡히므로 여기서 본문 스택만 세운다. 이 페이지에서
+         보려는 건 표면과 경계이지 서체가 아니다. */
+
+      /* ── 토큰이 죽었을 때의 경고 ──────────────────────────────────────────────
+         스타일시트 링크가 끊기면 모든 var() 가 무효가 되는데, 아래 "변경 전" 열은
+         자기 값을 로컬로 재선언해서 **혼자 살아남는다** — 화면은 멀쩡해 보이는데
+         비교는 거짓이 된다. 조용히 틀리느니 크게 실패해야 한다.
+         이 배너만은 토큰을 못 쓰므로 생 색을 쓴다(브랜드 색이 아니라 고장 신호다).
+         흰 글자 대비 8.9:1. */
+      .token-alert {
+        display: none;
+        background: #7f1d1d;
+        color: #ffffff;
+        padding: 14px 18px;
+        font:
+          500 14px/1.5 system-ui,
+          sans-serif;
+        letter-spacing: 0.01em;
+      }
+      [data-tokens="missing"] .token-alert {
+        display: block;
+      }
+      [data-tokens="missing"] .cols,
+      [data-tokens="missing"] .metrics-scroll {
+        opacity: 0.35;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family:
+          "Pretendard",
+          system-ui,
+          -apple-system,
+          "Apple SD Gothic Neo",
+          sans-serif;
+        line-height: 1.6;
+      }
+      .wrap {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 40px 24px 72px;
+      }
+
+      /* 위계는 세 단계다 — 문서 제목 32, 구역 제목 19, 패널 이름 14. 앞 판에는 h1 과
+         13~15px 본문뿐이라 구역이 어디서 갈리는지 글자가 말하지 않았다.
+
+         음수 트래킹은 32px 부터 건다 — 앞 판은 28px h1 에 걸어 두고 19px h2 에도 걸었는데,
+         그 크기대에서 자간을 좁히면 한글 낱자가 서로 붙는다. h1 을 32 로 올려 트래킹과
+         크기를 맞추고, h2 는 0 으로 되돌렸다. */
+      h1 {
+        font-size: 32px;
+        line-height: 1.2;
+        letter-spacing: -0.015em;
+        margin: 0 0 8px;
+      }
+      h2 {
+        font-size: 19px;
+        line-height: 1.3;
+        margin: 0 0 6px;
+      }
+      .lede {
+        color: var(--fg-muted);
+        font-size: 15px;
+        margin: 0 0 12px;
+        max-width: 62ch;
+      }
+      .section {
+        margin-top: 44px;
+      }
+      .section > .lede {
+        margin-bottom: 18px;
+      }
+
+      /* min() 이 없으면 뷰포트 320 에서 트랙이 340 을 요구해 페이지가 가로로 넘친다
+         (320 − 좌우 패딩 48 = 272 가 실제 폭이다). */
+      .cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+        gap: 28px;
+      }
+
+      .panel {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        min-width: 0;
+      }
+      .panel__head {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      /* 패널 이름에 수치를 안 적는다 — 표가 같은 값을 말하므로 두 곳에 두면 한쪽만
+         고쳐질 자리가 생긴다. 여기선 어느 쪽 값인지만 말하고 수치는 표가 정본이다. */
+      .panel__name {
+        font-size: 14px;
+        font-weight: 550;
+        letter-spacing: 0.02em;
+        margin: 0;
+      }
+      .panel__sub {
+        font-size: 12px;
+        letter-spacing: 0.015em;
+        color: var(--fg-muted);
+        margin: 2px 0 0;
+      }
+
+      /* 각 열이 페이지 배경을 자기 안에서 재현한다 — 줄노트는 토큰으로 그리므로
+         값 복사가 아니다(globals.css 의 body 규칙과 같은 유도식). */
+      .panel__stage {
+        background-color: var(--bg);
+        background-image: repeating-linear-gradient(var(--bg) 0 31px, var(--bg-rule) 31px 32px);
+        padding: 20px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      /* ── 왼쪽 열: 변경 전 값 ────────────────────────────────────────────────
+         비교하려면 옛 값이 이 페이지 안에 있어야 한다. 이건 정본의 사본이 아니라
+         **되돌아온 적 없는 과거 기록**이라 드리프트 대상이 아니다 — 저장소가 다시
+         이 값으로 갈 일이 없기 때문이다. 출처는 fix/dark-card-elevation 직전 커밋. */
+      .panel--before .panel__stage {
+        --surface: #1f1a17;
+        --surface-2: #161210;
+        --border: #f1e8e21a;
+        --shadow-card: 0 6px 18px rgba(96, 72, 48, 0.16);
+      }
+
+      /* 편집기의 하루 줄을 골격만 옮겨 온 정지 모형. 카드 부품은 chrome.css 것 그대로다.
+         입력·체크박스·펼치기처럼 보이지만 아무것도 조작되지 않으므로, 그 사실을 패널
+         부제가 글자로 말한다(모양만 보고 눌러 보게 두지 않는다). */
+      .day {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 64px;
+        padding: 10px 16px;
+      }
+      .day__label {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+        flex: none;
+        width: 52px;
+      }
+      .day__dow {
+        font-size: 15px;
+        font-weight: 550;
+      }
+      .day__md {
+        font-size: 12px;
+        color: var(--fg-muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .day__time {
+        flex: none;
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        background: var(--surface);
+        color: var(--fg);
+        padding: 8px 10px;
+        font-size: 14px;
+        font-variant-numeric: tabular-nums;
+      }
+      .day__time--empty {
+        color: var(--fg-muted);
+      }
+      .day__rest {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        color: var(--fg-muted);
+      }
+      .day__box {
+        width: 15px;
+        height: 15px;
+        border: 1px solid var(--border-strong);
+        border-radius: 3px;
+      }
+      .day__title {
+        flex: 1 1 0;
+        min-width: 0;
+        font-size: 14px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .day__title--empty {
+        color: var(--fg-muted);
+      }
+      .day__chev {
+        flex: none;
+        color: var(--fg-muted);
+        font-size: 13px;
+      }
+
+      /* 카드 안의 낮은 층이 두 값에서 어떻게 다른지도 한 줄 보여준다. */
+      .nested {
+        margin: 0 16px 14px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 13px;
+        color: var(--fg-muted);
+      }
+
+      /* 표는 네 열이라 좁은 폭에서 반드시 넘친다. 열을 숨기면 판정이 사라지므로
+         감추지 않고 가로 스크롤 상자에 넣는다 — 키보드로도 밀 수 있게 초점을 받고
+         (W3C 의 스크롤 영역 패턴), 이름은 표 제목이 준다. */
+      .metrics-scroll {
+        overflow-x: auto;
+        margin-top: 4px;
+      }
+      .metrics-scroll:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 3px;
+        border-radius: 4px;
+      }
+      table.metrics {
+        width: 100%;
+        min-width: 520px;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      table.metrics th,
+      table.metrics td {
+        text-align: left;
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      /* 13px 이하는 자간을 조금 벌린다 — 좁히는 게 아니라 벌리는 쪽이 이 크기대의 규칙이다. */
+      table.metrics th {
+        font-weight: 550;
+        font-size: 13px;
+        letter-spacing: 0.015em;
+        color: var(--fg-muted);
+      }
+      table.metrics td.num,
+      table.metrics th.num {
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      .verdict {
+        color: var(--ok);
+        font-size: 13px;
+        letter-spacing: 0.015em;
+      }
+      .note {
+        font-size: 14px;
+        color: var(--fg-muted);
+        max-width: 68ch;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <p class="token-alert" role="status" data-od-id="token-alert">
+      스타일시트를 못 읽었습니다. 이 화면의 비교는 지금 신뢰할 수 없습니다 — 왼쪽 열만 자기 값을
+      갖고 있어 오른쪽이 빈 채로 그려집니다. 저장소 루트에서 연 것이 맞는지 확인해 주십시오.
+    </p>
+
+    <main class="wrap" data-od-id="dark-elevation-preview">
+      <h1 data-od-id="preview-title">다크 카드 높이 — 변경 전후</h1>
+      <p class="lede" data-od-id="preview-lede">
+        일정 편집기의 하루 줄을 골격만 옮겨 온 모형입니다. 왼쪽은 변경 전 토큰, 오른쪽은 저장소의
+        현재 값을 그대로 읽습니다. 두 열 모두 같은 줄노트 배경 위에 섭니다.
+      </p>
+
+      <section class="section" aria-labelledby="cmp-heading" data-od-id="section-compare">
+        <h2 id="cmp-heading">나란히 보기</h2>
+        <p class="lede">
+          카드가 배경에서 떨어져 보이는지, 그리고 배경의 줄보다 위에 있는 것으로 읽히는지를 봅니다.
+        </p>
+
+        <div class="cols">
+          <section
+            class="panel panel--before"
+            aria-labelledby="pn-before"
+            data-od-id="panel-before"
+          >
+            <div class="panel__head">
+              <p class="panel__name" id="pn-before">변경 전</p>
+              <p class="panel__sub">직전 커밋의 값 · 정지 모형입니다</p>
+            </div>
+            <div class="panel__stage">
+              <article class="paper day" data-od-id="before-day-mon">
+                <span class="day__label"
+                  ><b class="day__dow">월</b><span class="day__md">4.1</span></span
+                >
+                <span class="day__time">19:00</span>
+                <span class="day__rest"><span class="day__box" aria-hidden="true"></span>휴방</span>
+                <span class="day__title">마인크래프트 — 건축 계속</span>
+                <span class="day__chev" aria-hidden="true">▾</span>
+              </article>
+              <article class="paper" data-od-id="before-day-tue">
+                <div class="day">
+                  <span class="day__label"
+                    ><b class="day__dow">화</b><span class="day__md">4.2</span></span
+                  >
+                  <span class="day__time">19:00</span>
+                  <span class="day__rest"
+                    ><span class="day__box" aria-hidden="true"></span>휴방</span
+                  >
+                  <span class="day__title">저챗</span>
+                  <span class="day__chev" aria-hidden="true">▴</span>
+                </div>
+                <div class="nested">카드 안의 낮은 층입니다</div>
+              </article>
+              <article class="paper day" data-od-id="before-day-wed">
+                <span class="day__label"
+                  ><b class="day__dow">수</b><span class="day__md">4.3</span></span
+                >
+                <span class="day__time day__time--empty">--:--</span>
+                <span class="day__rest"><span class="day__box" aria-hidden="true"></span>휴방</span>
+                <span class="day__title day__title--empty">—</span>
+                <span class="day__chev" aria-hidden="true">▾</span>
+              </article>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="pn-after" data-od-id="panel-after">
+            <div class="panel__head">
+              <p class="panel__name" id="pn-after">변경 후</p>
+              <p class="panel__sub">저장소의 현재 값 · 정지 모형입니다</p>
+            </div>
+            <div class="panel__stage">
+              <article class="paper day" data-od-id="after-day-mon">
+                <span class="day__label"
+                  ><b class="day__dow">월</b><span class="day__md">4.1</span></span
+                >
+                <span class="day__time">19:00</span>
+                <span class="day__rest"><span class="day__box" aria-hidden="true"></span>휴방</span>
+                <span class="day__title">마인크래프트 — 건축 계속</span>
+                <span class="day__chev" aria-hidden="true">▾</span>
+              </article>
+              <article class="paper" data-od-id="after-day-tue">
+                <div class="day">
+                  <span class="day__label"
+                    ><b class="day__dow">화</b><span class="day__md">4.2</span></span
+                  >
+                  <span class="day__time">19:00</span>
+                  <span class="day__rest"
+                    ><span class="day__box" aria-hidden="true"></span>휴방</span
+                  >
+                  <span class="day__title">저챗</span>
+                  <span class="day__chev" aria-hidden="true">▴</span>
+                </div>
+                <div class="nested">카드 안의 낮은 층입니다</div>
+              </article>
+              <article class="paper day" data-od-id="after-day-wed">
+                <span class="day__label"
+                  ><b class="day__dow">수</b><span class="day__md">4.3</span></span
+                >
+                <span class="day__time day__time--empty">--:--</span>
+                <span class="day__rest"><span class="day__box" aria-hidden="true"></span>휴방</span>
+                <span class="day__title day__title--empty">—</span>
+                <span class="day__chev" aria-hidden="true">▾</span>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="mt-heading" data-od-id="section-metrics">
+        <h2 id="mt-heading">실측 대비</h2>
+        <p class="lede">
+          전부 다크 테마에서 스크립트로 계산한 값입니다. 아래 표는 이 수치들의 정본이라 다른 곳에
+          같은 값을 옮겨 적지 않습니다.
+        </p>
+        <div class="metrics-scroll" tabindex="0" role="region" aria-labelledby="mt-heading">
+          <table class="metrics" data-od-id="metrics-table">
+            <thead>
+              <tr>
+                <th scope="col">재는 것</th>
+                <th scope="col" class="num">변경 전</th>
+                <th scope="col" class="num">변경 후</th>
+                <th scope="col">판정</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">카드 표면 vs 페이지 배경</th>
+                <td class="num">1.09</td>
+                <td class="num">1.29</td>
+                <td class="verdict">경계가 생김</td>
+              </tr>
+              <tr>
+                <th scope="row">카드 테두리 vs 카드</th>
+                <td class="num">1.30</td>
+                <td class="num">1.69</td>
+                <td class="verdict">윤곽이 섬</td>
+              </tr>
+              <tr>
+                <th scope="row">카드 테두리 vs 배경</th>
+                <td class="num">1.42</td>
+                <td class="num">2.19</td>
+                <td class="verdict">경계가 생김</td>
+              </tr>
+              <tr>
+                <th scope="row">카드가 배경 줄노트보다 밝은가</th>
+                <td class="num">아니오</td>
+                <td class="num">예</td>
+                <td class="verdict">층위 복원</td>
+              </tr>
+              <tr>
+                <th scope="row">그림자가 배경보다 어두운가</th>
+                <td class="num">아니오</td>
+                <td class="num">예</td>
+                <td class="verdict">후광 제거</td>
+              </tr>
+              <tr>
+                <th scope="row">본문 글자 (14px 게이트 4.5:1)</th>
+                <td class="num">6.69</td>
+                <td class="num">5.64</td>
+                <td class="verdict">통과 유지</td>
+              </tr>
+              <tr>
+                <th scope="row">nav 밑줄 (UI 게이트 3:1)</th>
+                <td class="num">3.99</td>
+                <td class="num">3.64</td>
+                <td class="verdict">통과 유지</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="wy-heading" data-od-id="section-why">
+        <h2 id="wy-heading">그림자가 아닌 이유</h2>
+        <p class="note" data-od-id="preview-note">
+          그림자는 이번 변경에서 카드를 띄우지 못합니다. 다크 배경이 명도 바닥이라 어떤 알파를 써도
+          배경 대비가 1.08:1을 못 넘습니다 — 검정으로 뒤집은 건 그림자가 배경보다 밝아지던 결함을
+          없애기 위해서이고, 카드를 띄우는 일은 표면 밝기와 테두리가 맡습니다.
+        </p>
+      </section>
+    </main>
+
+    <script>
+      // 토큰이 실제로 잡혔는지 확인한다. 링크가 죽으면 var() 가 전부 무효가 되는데,
+      // 그때 화면이 그럴듯하게 남는 것이 이 페이지의 가장 큰 위험이라 크게 실패시킨다.
+      var probe = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+      if (!probe) document.documentElement.setAttribute("data-tokens", "missing");
+    </script>
+  </body>
+</html>

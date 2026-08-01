@@ -393,7 +393,7 @@ dialog.composer[open]::backdrop {
 /* 라벨이 placeholder 를 대신한다 — placeholder 는 글자를 치는 순간 사라져 도움이 필요한
    시점에 없다. 크기·색은 .datefield__label 과 같은 값이다(같은 종류의 필드 이름이라
    보드 전체에서 한 어휘여야 한다): 11px 라 4.5:1 게이트, --fg-muted 는 .paper 위
-   라이트 6.39:1 / 다크 6.69:1. */
+   라이트 6.39:1 / 다크 5.64:1. */
 .composer__searchlabel {
   display: block;
   font-family: var(--font-mono);
@@ -494,7 +494,7 @@ dialog.composer[open]::backdrop {
    채 ↓ 로 7행까지 내려가면 두 줄이 동시에 칠해져 "지금 Enter 로 뭐가 들어가나"에 화면이 두
    답을 준다. 그래서 마우스 이동은 스타일이 아니라 **활성 인덱스를 옮기는 입력**으로 처리하고
    (포인터가 지나간 줄이 곧 커서), 칠하는 규칙은 이 하나만 남긴다.
-   면(--surface-2)만으로는 상태가 안 보인다 — 표면 대비 라이트 1.11:1 / 다크 1.08:1 이다.
+   면(--surface-2)만으로는 상태가 안 보인다 — 표면 대비 라이트 1.11:1 / 다크 1.12:1 이다.
    이 표시를 성립시키는 건 1.5px --border-strong 테두리고, 그건 줄 면 위 16.06:1 / 15.41:1,
    카드 표면 위 17.76:1 / 14.27:1 이라 UI 컴포넌트 3:1 을 크게 넘는다. 면은 거들 뿐이라
    테두리를 지우면 이 줄은 키보드 사용자에게 사실상 사라진다. */
@@ -686,7 +686,7 @@ dialog.composer[open]::backdrop {
   gap: 6px var(--space-4);
 }
 /* 라벨은 필드 이름과 같은 어휘다(.datefield__label·.composer__searchlabel 과 한 벌) —
-   11px 라 4.5:1 게이트, --fg-muted 는 .paper 위 라이트 6.39:1 / 다크 6.69:1. */
+   11px 라 4.5:1 게이트, --fg-muted 는 .paper 위 라이트 6.39:1 / 다크 5.64:1. */
 .detail__facts dt {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
@@ -718,7 +718,7 @@ dialog.composer[open]::backdrop {
 /* 삭제는 .btn--secondary 의 모양(면 --surface + 1.5px 테두리)에 색만 파괴로 바꾼다.
    빨간 **면**(.composer__btn--danger)은 확인 모달의 확정 버튼 자리다 — 여기선 아직 확인으로
    가는 진입점이라 같은 무게를 주면 이 화면이 삭제하러 여는 화면처럼 읽힌다.
-   --danger 는 .paper/--surface 위 라이트 6.38:1 / 다크 6.92:1 — 14px 글자 4.5:1, 테두리 3:1
+   --danger 는 .paper/--surface 위 라이트 6.38:1 / 다크 5.83:1 — 14px 글자 4.5:1, 테두리 3:1
    둘 다 넘긴다. hover 는 면을 채우고 글자를 --bg 로 뒤집는다(.composer__btn--danger 와 같은
    수: 라이트 6.38:1 / 다크 7.54:1 — --bg 가 --danger 와 정확히 같은 방향으로 뒤집힌다). */
 .detail__del {
@@ -738,7 +738,7 @@ dialog.composer[open]::backdrop {
 /* 제안이 무엇을 바꾸자는 건지 판단하려면 출발점이 보여야 한다. 값 목록 자체는 상세와 같은
    부품을 그대로 입고(GameFacts → .detail__facts), 여기선 그걸 담는 상자만 만든다 — 면을 한
    겹 낮춰 "읽는 값"과 아래 "고치는 입력"이 눈으로 갈린다. --fg 는 --surface-2 위 라이트
-   16.06:1 / 다크 15.41:1, 라벨의 --fg-muted 는 5.78:1 / 7.23:1 로 11px 4.5:1 게이트를 넘는다. */
+   16.06:1 / 다크 13.42:1, 라벨의 --fg-muted 는 5.78:1 / 6.30:1 로 11px 4.5:1 게이트를 넘는다. */
 .suggest__current {
   margin-top: var(--space-4);
   padding: var(--space-4);
@@ -807,7 +807,7 @@ dialog.composer[open]::backdrop {
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
-/* 누가·언제. 11px 라 4.5:1 게이트 — --fg-muted 는 .paper 위 라이트 6.39:1 / 다크 6.69:1. */
+/* 누가·언제. 11px 라 4.5:1 게이트 — --fg-muted 는 .paper 위 라이트 6.39:1 / 다크 5.64:1. */
 .inbox__meta {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
@@ -860,7 +860,7 @@ dialog.composer[open]::backdrop {
   font-weight: 700;
 }
 /* 팬이 쓴 글. 우리가 쓴 문구와 갈리게 면을 한 겹 낮춘다 — --fg 는 --surface-2 위 라이트
-   16.06:1 / 다크 15.41:1. 줄바꿈을 보존하는 건 그게 쓴 사람의 문단 구분이기 때문이고,
+   16.06:1 / 다크 13.42:1. 줄바꿈을 보존하는 건 그게 쓴 사람의 문단 구분이기 때문이고,
    anywhere 가 함께 있어야 긴 단어 하나가 상자를 넘지 않는다. */
 .inbox__note {
   margin: var(--space-3) 0 0;
@@ -897,7 +897,7 @@ dialog.composer[open]::backdrop {
 .composer__detail > .datefield {
   margin-top: var(--space-5);
 }
-/* 라벨은 11px 라 4.5:1 게이트 — .paper 표면 위 --fg-muted 는 라이트 6.39:1 / 다크 6.69:1. */
+/* 라벨은 11px 라 4.5:1 게이트 — .paper 표면 위 --fg-muted 는 라이트 6.39:1 / 다크 5.64:1. */
 .datefield__label {
   display: block;
   font-family: var(--font-mono);
