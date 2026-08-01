@@ -18,6 +18,10 @@ on:
       - "e2e/visual.spec.ts"
       - "e2e/schedule-helpers.ts"
       - "e2e/session.ts"
+      # 캡처하는 페이지들이 이 안의 파일을 직접 <img src> 로 참조한다(홈의 snap-*.jpg, 랜딩의
+      # 마스코트·인물사진 등) — 이미지 하나만 바꿔도 화면은 바뀌는데 src/app 은 안 바뀌므로
+      # 이걸 빼면 그 PR 은 아무 경고 없이 이 워크플로를 못 켠다(codex 리뷰 지적).
+      - "public/assets/**"
       # 이 도구 자신을 고치는 PR 도 스스로 돌아 봐야 한다 — 안 넣으면 이 워크플로·스크립트를
       # 바꾸는 PR 위에서 이 워크플로가 한 번도 안 돌아 본다(자기관찰 불가).
       - ".github/workflows/visual-diff.yml"
@@ -34,10 +38,19 @@ concurrency:
 #
 # **절대 트리거를 `pull_request_target` 으로 바꾸지 마라.** 지금은 `pull_request` 라 포크 PR
 # 에서 GITHUB_TOKEN 이 GitHub 자체에 의해 강제로 read-only 로 내려간다(이 permissions: 블록이
-# 뭘 요청하든 무시된다) — 그래서 diff-and-comment 잡이 PR 의 코드(scripts/*.mjs, npm ci 의
-# postinstall 포함)를 실행해도 안전하다. `pull_request_target` 으로 바꾸면 그 캡이 사라지고
-# 포크가 보낸 코드가 이 저장소에 쓰기 권한이 있는 토큰을 들고 실행된다 — 이 잡을 통째로 다시
-# 설계하지 않는 한 바꾸지 마라.
+# 뭘 요청하든 무시된다). `pull_request_target` 으로 바꾸면 그 캡이 사라지고 포크가 보낸 코드가
+# 이 저장소에 쓰기 권한이 있는 토큰을 들고 실행된다 — 이 잡을 통째로 다시 설계하지 않는 한
+# 바꾸지 마라.
+#
+# **같은 저장소 PR 은 그 캡이 안 걸린다** — diff-and-comment 는 여전히 PR 의 코드(체크아웃한
+# scripts/*.mjs, npm ci 가 설치하는 의존성)를 실행한다(codex 리뷰 지적: 이건 저장소 소유자만
+# PR 을 여는 지금도 실제 위험이다 — 악의적 기여자뿐 아니라 **정상적인 PR 에 딸려 온 손상된
+# 전이 의존성의 postinstall 이 CI 토큰을 훔치는 공급망 공격**이 실제 사례가 많은 패턴이라서다).
+# 그래서 GH_TOKEN 을 여기 job-level env 에 두지 않는다 — git push·gh api 를 실제로 실행하는
+# 마지막 두 스텝에만 스텝 단위로 준다. npm ci 도 --ignore-scripts 로 설치 시점 코드 실행 자체를
+# 막는다(pixelmatch·pngjs 둘 다 install 스크립트가 없어 안전 — package.json 의 scripts 필드로
+# 확인함). 이렇게 해도 "PR 이 체크아웃한 scripts/*.mjs 자체를 실행한다"는 사실은 안 없어지지만,
+# 그 실행 시점엔 훔칠 토큰이 애초에 환경에 없다.
 permissions:
   contents: read
 
@@ -122,7 +135,10 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       REPO: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # GH_TOKEN 은 여기(job-level env) 두지 않는다 — 아래 npm ci·pixelmatch 대조·코멘트 본문
+      # 생성 스텝은 전부 PR 이 체크아웃한 코드(scripts/*.mjs, package.json 의 의존성)를 실행
+      # 한다. job-level 로 두면 그 코드들이 process.env 로 write 토큰을 그대로 읽을 수 있다 —
+      # 실제로 쓰는 마지막 두 스텝(브랜치 push·PR 코멘트)에만 스텝 단위로 준다.
     steps:
       # 이 체크아웃은 diff-and-comment 자신의 스크립트(scripts/*.mjs)를 읽는 용도일 뿐 push 는
       # 별도 임시 git repo(아래)로 한다 — 그 앰비언트 자격증명이 이 잡 안에서 도는 다른 코드
@@ -134,7 +150,11 @@ jobs:
         with:
           node-version: 26
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: 이 잡은 pixelmatch·pngjs(둘 다 install 스크립트 없음, package.json
+      # 확인함)만 있으면 되고 next build·wrangler 같은 네이티브 바이너리가 전혀 필요 없다.
+      # PR 이 package.json/lockfile 에 손상된 전이 의존성을 끼워 넣어도(공급망 공격의 흔한
+      # 형태 — postinstall 이 CI 토큰을 훔치는 패턴) 설치 시점 코드 실행 자체가 안 된다.
+      - run: npm ci --ignore-scripts
       # 캡처가 이전 단계 실패로 아티팩트 자체를 못 올렸을 가능성이 있다 — 그래도 죽지 않고
       # 다음 스텝(visual-diff.mjs)이 빈 디렉터리로 fail-closed 하게 넘어간다.
       - uses: actions/download-artifact@v4
@@ -168,6 +188,8 @@ jobs:
       # 푸시의 스크린샷을 계속 보여줄 수 있다. 커밋마다 경로 자체가 달라지면 그 위험이
       # 구조적으로 없어진다.
       - name: 결과 이미지를 visual-diffs/pr-<번호> 브랜치에 커밋
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="visual-diffs/pr-${PR_NUMBER}"
           REPO_DIR=/tmp/visual-diff-repo
@@ -186,6 +208,8 @@ jobs:
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" \
             "HEAD:refs/heads/$BRANCH"
       - name: PR 코멘트 갱신 (마커로 기존 코멘트 찾아 덮어쓴다)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # 마커(<!-- visual-diff-bot -->)는 소스에 그대로 공개돼 있다 — 공개 저장소라 누구든
           # 그 마커로 시작하는 코멘트를 먼저 달 수 있고, 작성자를 안 가리면 그 코멘트를 우리
