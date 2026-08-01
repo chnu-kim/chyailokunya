@@ -82,7 +82,21 @@ jobs:
           # 오브젝트 자체는 브랜치가 갈라진 지점에 따라 그 히스토리에 없을 수 있어 명시적으로
           # 받아 둔다.
           git fetch --no-tags origin "$BASE_SHA"
-          echo "sha=$(git merge-base "$BASE_SHA" "$HEAD_SHA")" >> "$GITHUB_OUTPUT"
+          # `sha=$(cmd)` 대입문은 cmd 자체가 실패하면 그 실패를 그대로 물려받아 set -e 로 죽는다
+          # (반면 `echo "sha=$(cmd)"` 였다면 cmd 가 실패해도 echo 가 성공해 스텝 전체가 초록으로
+          # 남고, 빈 문자열이 그대로 $GITHUB_OUTPUT 에 실린다). merge-base 가 빈 값으로 새면
+          # capture 잡의 before matrix 가 `checkout ref: ""` 를 받는데, actions/checkout 은
+          # 빈 문자열을 falsy 로 보고 자체 기본값(github.ref, PR 이벤트에선 사실상 head)으로
+          # 폴백한다 — "before" 라 이름 붙여 놓고 실제로는 head 를 캡처하는 조용한 오표기가
+          # 된다(advisor 지적). 그래서 빈 값을 만나면 이 스텝을 명시적으로 실패시켜 capture 를
+          # 통째로 건너뛰게 한다 — diff-and-comment 는 `!cancelled()` 라 그래도 돌아 "캡처
+          # 불완전" 이라고 정직하게 보고한다.
+          sha=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          if [ -z "$sha" ]; then
+            echo "merge-base 계산 실패 — base/head 공통 조상을 못 찾았다" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   # 같은 e2e:visual 시나리오(e2e/visual.spec.ts)를 merge-base·헤드 두 커밋에서 각각 찍는다.
   # `--update-snapshots` 는 베이스라인과 비교해 실패시키지 않고 실제 캡처를 그대로 저장하는
