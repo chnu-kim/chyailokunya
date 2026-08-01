@@ -1,0 +1,282 @@
+name: Visual Diff
+
+# PR 의 UI 변경을 베이스 브랜치와 비교한 before/after 스크린샷을 코멘트로 단다. **정보성이다** —
+# 이 저장소는 이미 시각 스냅샷(e2e:visual)을 OS 별 베이스라인 불일치 이유로 CI 게이트에서 뺐고
+# 로컬 dev 회귀·사람의 육안 판단용으로만 쓴다(AGENTS.md). 여기서도 같은 이유로 실패해도 머지를
+# 막지 않는다 — 목적은 정답 대조가 아니라 "무엇이 달라 보이는지" 참고 자료를 붙이는 것뿐이다.
+#
+# **정보성이라도 "아무 일도 안 일어난 것처럼 보이는 실패"는 안 된다.** capture 잡의 체크아웃·
+# npm ci·Playwright 설치가(캡처 스텝 자체가 아니라 그 *이전* 단계가) 실패하면 뒤따르는 잡·
+# 스텝이 전부 암묵적 success() 조건으로 스킵돼 PR 에 아무 흔적도 안 남을 뻔했다 — 아래
+# always()/`!cancelled()` 가 그걸 막는다.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      # src/app·src/components 뿐 아니라 캡처 대상 페이지가 렌더에 실제로 끌어오는 건 src 전체다
+      # — 예를 들어 nav·footer 링크는 src/features/routes.ts, 일정 카드 문구 조합은
+      # src/features/schedule/card.ts 가 정하는데 둘 다 src/app 밖이다(codex 리뷰 지적, import
+      # 확인함: site-nav.tsx·site-footer.tsx 가 routes.ts 를, week-card.tsx 가 card.ts 를 쓴다).
+      # "너무 자주 돈다"보다 "조용히 안 돈다"가 이 도구의 목적을 더 크게 배반하므로 넓게 잡는다.
+      - "src/**"
+      - "e2e/visual.spec.ts"
+      - "e2e/schedule-helpers.ts"
+      - "e2e/session.ts"
+      # 캡처하는 페이지들이 이 안의 파일을 직접 <img src> 로 참조한다(홈의 snap-*.jpg, 랜딩의
+      # 마스코트·인물사진 등) — 이미지 하나만 바꿔도 화면은 바뀌는데 src 는 안 바뀌므로 이걸
+      # 빼면 그 PR 은 아무 경고 없이 이 워크플로를 못 켠다(codex 리뷰 지적).
+      - "public/assets/**"
+      # 이 도구 자신을 고치는 PR 도 스스로 돌아 봐야 한다 — 안 넣으면 이 워크플로·스크립트를
+      # 바꾸는 PR 위에서 이 워크플로가 한 번도 안 돌아 본다(자기관찰 불가).
+      - ".github/workflows/visual-diff.yml"
+      - "scripts/visual-diff.mjs"
+      - "scripts/build-visual-diff-comment.mjs"
+
+concurrency:
+  group: visual-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# 워크플로 전체가 아니라 실제로 쓰는 잡에만 준다(최소 권한) — capture 는 체크아웃·빌드만 하고
+# 아무것도 안 쓰므로 기본값(read-only)에 둔다. contents:write·pull-requests:write 는
+# diff-and-comment 잡에만 건다.
+#
+# **절대 트리거를 `pull_request_target` 으로 바꾸지 마라.** 지금은 `pull_request` 라 포크 PR
+# 에서 GITHUB_TOKEN 이 GitHub 자체에 의해 강제로 read-only 로 내려간다(이 permissions: 블록이
+# 뭘 요청하든 무시된다). `pull_request_target` 으로 바꾸면 그 캡이 사라지고 포크가 보낸 코드가
+# 이 저장소에 쓰기 권한이 있는 토큰을 들고 실행된다 — 이 잡을 통째로 다시 설계하지 않는 한
+# 바꾸지 마라.
+#
+# **같은 저장소 PR 은 그 캡이 안 걸린다** — diff-and-comment 는 여전히 PR 의 코드(체크아웃한
+# scripts/*.mjs, npm ci 가 설치하는 의존성)를 실행한다(codex 리뷰 지적: 이건 저장소 소유자만
+# PR 을 여는 지금도 실제 위험이다 — 악의적 기여자뿐 아니라 **정상적인 PR 에 딸려 온 손상된
+# 전이 의존성의 postinstall 이 CI 토큰을 훔치는 공급망 공격**이 실제 사례가 많은 패턴이라서다).
+# 그래서 GH_TOKEN 을 여기 job-level env 에 두지 않는다 — git push·gh api 를 실제로 실행하는
+# 마지막 두 스텝에만 스텝 단위로 준다. npm ci 도 --ignore-scripts 로 설치 시점 코드 실행 자체를
+# 막는다(pixelmatch·pngjs 둘 다 install 스크립트가 없어 안전 — package.json 의 scripts 필드로
+# 확인함). 이렇게 해도 "PR 이 체크아웃한 scripts/*.mjs 자체를 실행한다"는 사실은 안 없어지지만,
+# 그 실행 시점엔 훔칠 토큰이 애초에 환경에 없다.
+permissions:
+  contents: read
+
+jobs:
+  # "before" 를 base.sha(그 시점의 베이스 브랜치 끝)로 그대로 쓰면, PR 을 연 뒤 main 이 더
+  # 움직였을 때 "이 PR 과 무관한 main 변경"까지 before/after 차이로 잡혀 리뷰어를 오도한다
+  # (codex 리뷰 지적, 재현 가능한 실제 결함으로 판단해 반영). merge-base(PR 이 갈라진 지점)를
+  # 따로 계산해 그 지점을 "before" 로 쓴다 — 그러면 diff 가 정확히 "이 PR 이 바꾼 것"만 담는다.
+  prepare:
+    name: merge-base 계산
+    runs-on: ubuntu-latest
+    outputs:
+      merge_base: ${{ steps.mb.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - id: mb
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # head 쪽 히스토리는 위 체크아웃(fetch-depth:0)이 이미 다 갖고 있지만, base 커밋
+          # 오브젝트 자체는 브랜치가 갈라진 지점에 따라 그 히스토리에 없을 수 있어 명시적으로
+          # 받아 둔다.
+          git fetch --no-tags origin "$BASE_SHA"
+          # `sha=$(cmd)` 대입문은 cmd 자체가 실패하면 그 실패를 그대로 물려받아 set -e 로 죽는다
+          # (반면 `echo "sha=$(cmd)"` 였다면 cmd 가 실패해도 echo 가 성공해 스텝 전체가 초록으로
+          # 남고, 빈 문자열이 그대로 $GITHUB_OUTPUT 에 실린다). merge-base 가 빈 값으로 새면
+          # capture 잡의 before matrix 가 `checkout ref: ""` 를 받는데, actions/checkout 은
+          # 빈 문자열을 falsy 로 보고 자체 기본값(github.ref, PR 이벤트에선 사실상 head)으로
+          # 폴백한다 — "before" 라 이름 붙여 놓고 실제로는 head 를 캡처하는 조용한 오표기가
+          # 된다(advisor 지적). 그래서 빈 값을 만나면 이 스텝을 명시적으로 실패시켜 capture 를
+          # 통째로 건너뛰게 한다 — diff-and-comment 는 `!cancelled()` 라 그래도 돌아 "캡처
+          # 불완전" 이라고 정직하게 보고한다.
+          sha=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          if [ -z "$sha" ]; then
+            echo "merge-base 계산 실패 — base/head 공통 조상을 못 찾았다" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  # 같은 e2e:visual 시나리오(e2e/visual.spec.ts)를 merge-base·헤드 두 커밋에서 각각 찍는다.
+  # `--update-snapshots` 는 베이스라인과 비교해 실패시키지 않고 실제 캡처를 그대로 저장하는
+  # 용도로만 쓴다 — 여기선 회귀 판정이 아니라 "지금 이 커밋이 뭘 그리는가"가 필요하다.
+  capture:
+    name: 캡처 · ${{ matrix.side }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [before, after]
+        include:
+          - side: before
+            ref: ${{ needs.prepare.outputs.merge_base }}
+          - side: after
+            ref: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Playwright 브라우저 설치
+        run: npx playwright install --with-deps chromium
+      # 커밋된 macOS 베이스라인(-darwin.png)이 작업 트리에 그대로 있다 — 이번 잡이 새로 찍은
+      # linux 캡처만 아티팩트로 올리기 위해 미리 비운다(둘 다 같은 디렉터리에 산다).
+      - name: 기존 베이스라인 제거 (이 잡이 새로 찍은 것만 남긴다)
+        run: rm -rf e2e/visual.spec.ts-snapshots
+      # continue-on-error 라 일부 시나리오가 타임아웃·assert 실패로 못 찍혀도 이 스텝은 초록
+      # 이다(찍은 것만이라도 건지려고) — 그 진짜 성패를 잃지 않으려고 steps.capture.outcome
+      # (continue-on-error 적용 *전* 의 결과)을 다음 스텝이 파일로 남긴다. 이게 없으면
+      # diff 스크립트가 "캡처 실패로 안 찍힘"과 "이 시나리오가 진짜 삭제됨"을 못 갈라
+      # 실패를 삭제로 잘못 보고한다.
+      - name: 시각 캡처 (비교 없이 찍기만)
+        id: capture
+        run: npx playwright test --project=visual --update-snapshots
+        continue-on-error: true
+      # 위 스텝뿐 아니라 그 *이전* 스텝(checkout·npm ci·playwright install)이 실패해도 always()
+      # 라 이 스텝은 돈다(그땐 steps.capture.outcome 이 "skipped" 다).
+      - name: 캡처 결과 기록
+        if: always()
+        run: |
+          mkdir -p e2e/visual.spec.ts-snapshots
+          printf '{"outcome":"%s"}' "${{ steps.capture.outcome }}" \
+            > e2e/visual.spec.ts-snapshots/_capture-status.json
+      # always() 가 필수다 — 이게 없으면(암묵적 success()) capture 스텝보다 *앞* 의 스텝이
+      # 실패했을 때 이 스텝이 스킵되고, 방금 만든 상태 파일조차 업로드가 안 돼 diff-and-comment
+      # 가 "아티팩트 없음"으로 죽는다. always() 로 무조건 시도해야 최소한 상태 파일은 올라간다.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-${{ matrix.side }}
+          path: |
+            e2e/visual.spec.ts-snapshots/*.png
+            e2e/visual.spec.ts-snapshots/_capture-status.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  diff-and-comment:
+    name: 대조 · 코멘트
+    needs: capture
+    # 기본 조건(암묵적 success())이면 capture 의 두 matrix 조합 중 하나라도 실패했을 때(잡
+    # 전체 결론이 failure 로 집계된다) 이 잡이 통째로 스킵돼 PR 에 아무 흔적도 안 남는다 —
+    # "정보성이라 실패해도 안내는 한다"는 의도와 정반대다. cancelled() 만 거른다: 새 push 가
+    # concurrency 로 이전 실행을 취소한 경우엔(실패가 아니라 취소) 안 돈다.
+    #
+    # **포크 PR 은 여기서 의도적으로 스킵한다.** 포크에서 온 GITHUB_TOKEN 은 GitHub 이 강제로
+    # read-only 로 내리므로 아래 브랜치 push·PR 코멘트가 무조건 403 이다(codex 리뷰 지적) —
+    # 스킵 없이 그냥 두면 "시도했다 실패했다"는 지저분한 실패로 보인다. 이 조건으로 애초에
+    # 안 돌게 해 깔끔한 skip 으로 만든다. 포크 기여자에게도 코멘트를 달아 주려면 별도
+    # `workflow_run` 발행 잡(PR 코드를 안 실행하는)으로 다시 설계해야 하는데, 지금은 사실상
+    # 1인 저장소라 그 비용을 안 들인다 — fork PR 이 실제로 늘면 그때 다시 본다.
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # visual-diffs/pr-<번호> 브랜치 push
+      pull-requests: write # PR 코멘트 생성·수정
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # GH_TOKEN 은 여기(job-level env) 두지 않는다 — 아래 npm ci·pixelmatch 대조·코멘트 본문
+      # 생성 스텝은 전부 PR 이 체크아웃한 코드(scripts/*.mjs, package.json 의 의존성)를 실행
+      # 한다. job-level 로 두면 그 코드들이 process.env 로 write 토큰을 그대로 읽을 수 있다 —
+      # 실제로 쓰는 마지막 두 스텝(브랜치 push·PR 코멘트)에만 스텝 단위로 준다.
+    steps:
+      # 이 체크아웃은 diff-and-comment 자신의 스크립트(scripts/*.mjs)를 읽는 용도일 뿐 push 는
+      # 별도 임시 git repo(아래)로 한다 — 그 앰비언트 자격증명이 이 잡 안에서 도는 다른 코드
+      # (예: npm ci 의 postinstall)에 노출될 이유가 없어 꺼 둔다.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      # --ignore-scripts: 이 잡은 pixelmatch·pngjs(둘 다 install 스크립트 없음, package.json
+      # 확인함)만 있으면 되고 next build·wrangler 같은 네이티브 바이너리가 전혀 필요 없다.
+      # PR 이 package.json/lockfile 에 손상된 전이 의존성을 끼워 넣어도(공급망 공격의 흔한
+      # 형태 — postinstall 이 CI 토큰을 훔치는 패턴) 설치 시점 코드 실행 자체가 안 된다.
+      - run: npm ci --ignore-scripts
+      # 캡처가 이전 단계 실패로 아티팩트 자체를 못 올렸을 가능성이 있다 — 그래도 죽지 않고
+      # 다음 스텝(visual-diff.mjs)이 빈 디렉터리로 fail-closed 하게 넘어간다.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: visual-before
+          path: /tmp/visual-before
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: visual-after
+          path: /tmp/visual-after
+      - name: 픽셀 대조 (pixelmatch)
+        run: node scripts/visual-diff.mjs /tmp/visual-before /tmp/visual-after /tmp/visual-diff-out
+      - name: PR 코멘트 본문 생성
+        run: |
+          BRANCH="visual-diffs/pr-${PR_NUMBER}"
+          node scripts/build-visual-diff-comment.mjs \
+            /tmp/visual-diff-out/summary.json "$REPO" "$BRANCH" "$HEAD_SHA" \
+            > /tmp/visual-diff-comment.md
+      # PR 전용 브랜치에 결과 이미지를 커밋해 raw.githubusercontent.com 링크로 PR 코멘트에
+      # 인라인 표시한다(공개 저장소). **체크아웃한 저장소 트리는 안 건드린다** — 완전히 새
+      # /tmp 디렉터리에 별도 git repo 를 만들어 그 안에서만 add -A 를 쓴다. (orphan 브랜치로
+      # 전환하는 방식은 git rm -rf . 가 .gitignore 까지 지워 add -A 가 node_modules 를 통째로
+      # 주워 담을 위험이 있었다 — 처음부터 그 파일들이 없는 디렉터리를 쓰면 그 위험 자체가
+      # 없다.) 매 실행마다 force-push 해 브랜치 히스토리를 한 커밋으로 유지하고, PR 이 닫히면
+      # visual-diff-cleanup.yml 이 이 브랜치를 지운다.
+      #
+      # 파일을 브랜치 루트가 아니라 $HEAD_SHA 하위 디렉터리에 둔다 — 브랜치명이 안 바뀐 채
+      # 같은 파일명을 매번 덮어쓰면 그 URL 을 캐싱하는 프록시(PR 코멘트 이미지의 camo)가 이전
+      # 푸시의 스크린샷을 계속 보여줄 수 있다. 커밋마다 경로 자체가 달라지면 그 위험이
+      # 구조적으로 없어진다.
+      - name: 결과 이미지를 visual-diffs/pr-<번호> 브랜치에 커밋
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="visual-diffs/pr-${PR_NUMBER}"
+          REPO_DIR=/tmp/visual-diff-repo
+          OUT_DIR="$REPO_DIR/$HEAD_SHA"
+          rm -rf "$REPO_DIR"
+          mkdir -p "$OUT_DIR"
+          # -P(no-dereference): visual-diff.mjs 는 PR 이 체크아웃한 코드다 — 손상된 버전이
+          # 실제 PNG 대신 `leak.png -> /proc/self/environ` 같은 심볼릭 링크를 만들면, 이 cp 가
+          # 그걸 따라가 이 스텝의 GH_TOKEN 이 든 환경을 파일 내용으로 읽어 공개 브랜치에
+          # 그대로 커밋할 수 있다(codex 리뷰 지적, 실제 벡터). -P 는 심볼릭 링크를 있는 그대로
+          # (링크로) 복사해 내용을 절대 안 따라간다 — 평범한 파일엔 아무 영향 없다.
+          cp -P /tmp/visual-diff-out/*.png "$OUT_DIR"/ 2>/dev/null || true
+          cp -P /tmp/visual-diff-out/summary.json "$OUT_DIR"/
+          cd "$REPO_DIR"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "visual diff: PR #${PR_NUMBER} (${HEAD_SHA})"
+          # GITHUB_TOKEN 은 Actions 러너가 로그에서 자동으로 마스킹한다 — URL 에 실려도 노출 안 됨.
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" \
+            "HEAD:refs/heads/$BRANCH"
+      - name: PR 코멘트 갱신 (마커로 기존 코멘트 찾아 덮어쓴다)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 마커(<!-- visual-diff-bot -->)는 소스에 그대로 공개돼 있다 — 공개 저장소라 누구든
+          # 그 마커로 시작하는 코멘트를 먼저 달 수 있고, 작성자를 안 가리면 그 코멘트를 우리
+          # 워크플로가 "기존 코멘트"로 착각해 남의 코멘트를 덮어쓴다. github-actions[bot] 이
+          # 쓴 것만 후보로 본다.
+          existing_id=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --paginate \
+            --jq '.[] | select(.body | startswith("<!-- visual-diff-bot -->")) | select(.user.login == "github-actions[bot]") | .id' \
+            | head -n1)
+          # -f(raw-field)엔 @파일 문법이 없다 — 파일 내용을 읽으려면 -F(field)를 써야 한다
+          # (gh api --help: "-F... if the value starts with @, ... read from filename").
+          if [ -n "$existing_id" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${existing_id}" \
+              -F body=@/tmp/visual-diff-comment.md
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+              -F body=@/tmp/visual-diff-comment.md
+          fi

@@ -1,0 +1,29 @@
+name: Visual Diff Cleanup
+
+# visual-diff.yml 이 PR 마다 만드는 visual-diffs/pr-<번호> 브랜치를 PR 이 닫히면 지운다 — 공개
+# 저장소라 그대로 두면 스크린샷 브랜치가 계속 쌓인다. paths 필터를 안 둔다: 마지막 커밋이 UI
+# 경로를 안 건드려도(예: 되돌리는 커밋) 그 전에 브랜치가 이미 만들어졌을 수 있어, 존재 여부는
+# 여기서 직접 확인한다.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: visual-diffs 브랜치 삭제 (있으면)
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          BRANCH="visual-diffs/pr-${PR_NUMBER}"
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+            git push origin --delete "$BRANCH"
+            echo "삭제: $BRANCH"
+          else
+            echo "브랜치 없음 — 이 PR 은 visual-diff 워크플로가 안 돌았다: $BRANCH"
+          fi
