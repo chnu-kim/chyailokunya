@@ -13,14 +13,18 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - "src/app/**"
-      - "src/components/**"
+      # src/app·src/components 뿐 아니라 캡처 대상 페이지가 렌더에 실제로 끌어오는 건 src 전체다
+      # — 예를 들어 nav·footer 링크는 src/features/routes.ts, 일정 카드 문구 조합은
+      # src/features/schedule/card.ts 가 정하는데 둘 다 src/app 밖이다(codex 리뷰 지적, import
+      # 확인함: site-nav.tsx·site-footer.tsx 가 routes.ts 를, week-card.tsx 가 card.ts 를 쓴다).
+      # "너무 자주 돈다"보다 "조용히 안 돈다"가 이 도구의 목적을 더 크게 배반하므로 넓게 잡는다.
+      - "src/**"
       - "e2e/visual.spec.ts"
       - "e2e/schedule-helpers.ts"
       - "e2e/session.ts"
       # 캡처하는 페이지들이 이 안의 파일을 직접 <img src> 로 참조한다(홈의 snap-*.jpg, 랜딩의
-      # 마스코트·인물사진 등) — 이미지 하나만 바꿔도 화면은 바뀌는데 src/app 은 안 바뀌므로
-      # 이걸 빼면 그 PR 은 아무 경고 없이 이 워크플로를 못 켠다(codex 리뷰 지적).
+      # 마스코트·인물사진 등) — 이미지 하나만 바꿔도 화면은 바뀌는데 src 는 안 바뀌므로 이걸
+      # 빼면 그 PR 은 아무 경고 없이 이 워크플로를 못 켠다(codex 리뷰 지적).
       - "public/assets/**"
       # 이 도구 자신을 고치는 PR 도 스스로 돌아 봐야 한다 — 안 넣으면 이 워크플로·스크립트를
       # 바꾸는 PR 위에서 이 워크플로가 한 번도 안 돌아 본다(자기관찰 불가).
@@ -55,23 +59,45 @@ permissions:
   contents: read
 
 jobs:
-  # 같은 e2e:visual 시나리오(e2e/visual.spec.ts)를 베이스·헤드 두 커밋에서 각각 찍는다.
+  # "before" 를 base.sha(그 시점의 베이스 브랜치 끝)로 그대로 쓰면, PR 을 연 뒤 main 이 더
+  # 움직였을 때 "이 PR 과 무관한 main 변경"까지 before/after 차이로 잡혀 리뷰어를 오도한다
+  # (codex 리뷰 지적, 재현 가능한 실제 결함으로 판단해 반영). merge-base(PR 이 갈라진 지점)를
+  # 따로 계산해 그 지점을 "before" 로 쓴다 — 그러면 diff 가 정확히 "이 PR 이 바꾼 것"만 담는다.
+  prepare:
+    name: merge-base 계산
+    runs-on: ubuntu-latest
+    outputs:
+      merge_base: ${{ steps.mb.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - id: mb
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # head 쪽 히스토리는 위 체크아웃(fetch-depth:0)이 이미 다 갖고 있지만, base 커밋
+          # 오브젝트 자체는 브랜치가 갈라진 지점에 따라 그 히스토리에 없을 수 있어 명시적으로
+          # 받아 둔다.
+          git fetch --no-tags origin "$BASE_SHA"
+          echo "sha=$(git merge-base "$BASE_SHA" "$HEAD_SHA")" >> "$GITHUB_OUTPUT"
+
+  # 같은 e2e:visual 시나리오(e2e/visual.spec.ts)를 merge-base·헤드 두 커밋에서 각각 찍는다.
   # `--update-snapshots` 는 베이스라인과 비교해 실패시키지 않고 실제 캡처를 그대로 저장하는
   # 용도로만 쓴다 — 여기선 회귀 판정이 아니라 "지금 이 커밋이 뭘 그리는가"가 필요하다.
   capture:
     name: 캡처 · ${{ matrix.side }}
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         side: [before, after]
         include:
-          # base.sha 는 "PR 이 마지막으로 갱신된 시점의 베이스 브랜치 끝" 이다 — 실제 merge-base
-          # 와 다를 수 있다(그 뒤 main 이 UI 를 더 고쳤다면 그 변경까지 "before" 에 들어가
-          # diff 가 이 PR 것이 아닌 걸 보여줄 수 있다). 1인 저장소에서 드문 경합이라 merge-base
-          # 계산 스텝을 더하지 않고 알고 넘어간다 — 재발하면 그때 git merge-base 로 바꾼다.
           - side: before
-            ref: ${{ github.event.pull_request.base.sha }}
+            ref: ${{ needs.prepare.outputs.merge_base }}
           - side: after
             ref: ${{ github.event.pull_request.head.sha }}
     steps:
@@ -126,7 +152,14 @@ jobs:
     # 전체 결론이 failure 로 집계된다) 이 잡이 통째로 스킵돼 PR 에 아무 흔적도 안 남는다 —
     # "정보성이라 실패해도 안내는 한다"는 의도와 정반대다. cancelled() 만 거른다: 새 push 가
     # concurrency 로 이전 실행을 취소한 경우엔(실패가 아니라 취소) 안 돈다.
-    if: ${{ !cancelled() }}
+    #
+    # **포크 PR 은 여기서 의도적으로 스킵한다.** 포크에서 온 GITHUB_TOKEN 은 GitHub 이 강제로
+    # read-only 로 내리므로 아래 브랜치 push·PR 코멘트가 무조건 403 이다(codex 리뷰 지적) —
+    # 스킵 없이 그냥 두면 "시도했다 실패했다"는 지저분한 실패로 보인다. 이 조건으로 애초에
+    # 안 돌게 해 깔끔한 skip 으로 만든다. 포크 기여자에게도 코멘트를 달아 주려면 별도
+    # `workflow_run` 발행 잡(PR 코드를 안 실행하는)으로 다시 설계해야 하는데, 지금은 사실상
+    # 1인 저장소라 그 비용을 안 들인다 — fork PR 이 실제로 늘면 그때 다시 본다.
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # visual-diffs/pr-<번호> 브랜치 push
@@ -196,8 +229,13 @@ jobs:
           OUT_DIR="$REPO_DIR/$HEAD_SHA"
           rm -rf "$REPO_DIR"
           mkdir -p "$OUT_DIR"
-          cp /tmp/visual-diff-out/*.png "$OUT_DIR"/ 2>/dev/null || true
-          cp /tmp/visual-diff-out/summary.json "$OUT_DIR"/
+          # -P(no-dereference): visual-diff.mjs 는 PR 이 체크아웃한 코드다 — 손상된 버전이
+          # 실제 PNG 대신 `leak.png -> /proc/self/environ` 같은 심볼릭 링크를 만들면, 이 cp 가
+          # 그걸 따라가 이 스텝의 GH_TOKEN 이 든 환경을 파일 내용으로 읽어 공개 브랜치에
+          # 그대로 커밋할 수 있다(codex 리뷰 지적, 실제 벡터). -P 는 심볼릭 링크를 있는 그대로
+          # (링크로) 복사해 내용을 절대 안 따라간다 — 평범한 파일엔 아무 영향 없다.
+          cp -P /tmp/visual-diff-out/*.png "$OUT_DIR"/ 2>/dev/null || true
+          cp -P /tmp/visual-diff-out/summary.json "$OUT_DIR"/
           cd "$REPO_DIR"
           git init -q
           git config user.name "github-actions[bot]"
