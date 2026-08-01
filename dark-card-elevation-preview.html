@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>다크 카드 높이 — 변경 전후 비교</title>
+    <title>다크 카드 경계, 변경 전후 비교</title>
 
     <!-- 토큰 정본을 그대로 건다. 값을 이 파일에 베끼면 globals.css 가 바뀔 때 조용히
          어긋난다 — 이 페이지의 "이후" 열은 항상 저장소의 현재 값을 그린다.
@@ -229,9 +229,10 @@
         color: var(--fg-muted);
       }
 
-      /* 표는 네 열이라 좁은 폭에서 반드시 넘친다. 열을 숨기면 판정이 사라지므로
-         감추지 않고 가로 스크롤 상자에 넣는다 — 키보드로도 밀 수 있게 초점을 받고
-         (W3C 의 스크롤 영역 패턴), 이름은 표 제목이 준다. */
+      /* 세 열(재는 것 · 전 · 후)이라 440px 아래에서 넘친다. 열을 숨기면 비교가 사라지므로
+         감추지 않고 가로 스크롤 상자에 넣는다. 키보드로도 밀 수 있게 초점을 받고
+         (W3C 의 스크롤 영역 패턴), 이름은 표 제목이 준다. 판정 열이 있던 시절엔 520 이
+         필요했는데, 그 열을 걷어내며 하한이 내려가 대부분의 폭에서 스크롤이 안 생긴다. */
       .metrics-scroll {
         overflow-x: auto;
         margin-top: 4px;
@@ -243,7 +244,7 @@
       }
       table.metrics {
         width: 100%;
-        min-width: 520px;
+        min-width: 440px;
         border-collapse: collapse;
         font-size: 14px;
       }
@@ -266,11 +267,6 @@
         font-variant-numeric: tabular-nums;
         text-align: right;
       }
-      .verdict {
-        color: var(--ok);
-        font-size: 13px;
-        letter-spacing: 0.015em;
-      }
       .note {
         font-size: 14px;
         color: var(--fg-muted);
@@ -281,22 +277,19 @@
   </head>
   <body>
     <p class="token-alert" role="status" data-od-id="token-alert">
-      스타일시트를 못 읽었습니다. 이 화면의 비교는 지금 신뢰할 수 없습니다 — 왼쪽 열만 자기 값을
-      갖고 있어 오른쪽이 빈 채로 그려집니다. 저장소 루트에서 연 것이 맞는지 확인해 주십시오.
+      스타일시트를 못 읽었습니다. 지금 이 비교는 신뢰할 수 없습니다. 왼쪽 열만 자기 값을 갖고 있어
+      오른쪽이 빈 채로 그려집니다. 저장소 루트에서 연 것이 맞는지 확인해 주십시오.
     </p>
 
     <main class="wrap" data-od-id="dark-elevation-preview">
-      <h1 data-od-id="preview-title">다크 카드 높이 — 변경 전후</h1>
+      <h1 data-od-id="preview-title">다크 카드 경계, 변경 전후</h1>
       <p class="lede" data-od-id="preview-lede">
-        일정 편집기의 하루 줄을 골격만 옮겨 온 모형입니다. 왼쪽은 변경 전 토큰, 오른쪽은 저장소의
-        현재 값을 그대로 읽습니다. 두 열 모두 같은 줄노트 배경 위에 섭니다.
+        일정 편집기의 하루 줄을 골격만 옮겨 온 정지 모형입니다. 두 열은 같은 줄노트 배경 위에 서고
+        토큰만 다릅니다.
       </p>
 
       <section class="section" aria-labelledby="cmp-heading" data-od-id="section-compare">
-        <h2 id="cmp-heading">나란히 보기</h2>
-        <p class="lede">
-          카드가 배경에서 떨어져 보이는지, 그리고 배경의 줄보다 위에 있는 것으로 읽히는지를 봅니다.
-        </p>
+        <h2 id="cmp-heading">카드가 배경에서 떨어지는가</h2>
 
         <div class="cols">
           <section
@@ -306,7 +299,7 @@
           >
             <div class="panel__head">
               <p class="panel__name" id="pn-before">변경 전</p>
-              <p class="panel__sub">직전 커밋의 값 · 정지 모형입니다</p>
+              <p class="panel__sub">직전 커밋의 값</p>
             </div>
             <div class="panel__stage">
               <article class="paper day" data-od-id="before-day-mon">
@@ -315,7 +308,7 @@
                 >
                 <span class="day__time">19:00</span>
                 <span class="day__rest"><span class="day__box" aria-hidden="true"></span>휴방</span>
-                <span class="day__title">마인크래프트 — 건축 계속</span>
+                <span class="day__title">마인크래프트 건축 편</span>
                 <span class="day__chev" aria-hidden="true">▾</span>
               </article>
               <article class="paper" data-od-id="before-day-tue">
@@ -347,7 +340,7 @@
           <section class="panel" aria-labelledby="pn-after" data-od-id="panel-after">
             <div class="panel__head">
               <p class="panel__name" id="pn-after">변경 후</p>
-              <p class="panel__sub">저장소의 현재 값 · 정지 모형입니다</p>
+              <p class="panel__sub">저장소의 현재 값</p>
             </div>
             <div class="panel__stage">
               <article class="paper day" data-od-id="after-day-mon">
@@ -356,7 +349,7 @@
                 >
                 <span class="day__time">19:00</span>
                 <span class="day__rest"><span class="day__box" aria-hidden="true"></span>휴방</span>
-                <span class="day__title">마인크래프트 — 건축 계속</span>
+                <span class="day__title">마인크래프트 건축 편</span>
                 <span class="day__chev" aria-hidden="true">▾</span>
               </article>
               <article class="paper" data-od-id="after-day-tue">
@@ -390,8 +383,8 @@
       <section class="section" aria-labelledby="mt-heading" data-od-id="section-metrics">
         <h2 id="mt-heading">실측 대비</h2>
         <p class="lede">
-          전부 다크 테마에서 스크립트로 계산한 값입니다. 아래 표는 이 수치들의 정본이라 다른 곳에
-          같은 값을 옮겨 적지 않습니다.
+          다크 테마에서 스크립트로 계산했습니다. 대비는 높을수록 잘 분리되고, 게이트가 적힌 줄은 그
+          값을 넘어야 합니다.
         </p>
         <div class="metrics-scroll" tabindex="0" role="region" aria-labelledby="mt-heading">
           <table class="metrics" data-od-id="metrics-table">
@@ -400,7 +393,6 @@
                 <th scope="col">재는 것</th>
                 <th scope="col" class="num">변경 전</th>
                 <th scope="col" class="num">변경 후</th>
-                <th scope="col">판정</th>
               </tr>
             </thead>
             <tbody>
@@ -408,43 +400,36 @@
                 <th scope="row">카드 표면 vs 페이지 배경</th>
                 <td class="num">1.09</td>
                 <td class="num">1.29</td>
-                <td class="verdict">경계가 생김</td>
               </tr>
               <tr>
                 <th scope="row">카드 테두리 vs 카드</th>
                 <td class="num">1.30</td>
                 <td class="num">1.69</td>
-                <td class="verdict">윤곽이 섬</td>
               </tr>
               <tr>
                 <th scope="row">카드 테두리 vs 배경</th>
                 <td class="num">1.42</td>
                 <td class="num">2.19</td>
-                <td class="verdict">경계가 생김</td>
               </tr>
               <tr>
                 <th scope="row">카드가 배경 줄노트보다 밝은가</th>
                 <td class="num">아니오</td>
                 <td class="num">예</td>
-                <td class="verdict">층위 복원</td>
               </tr>
               <tr>
                 <th scope="row">그림자가 배경보다 어두운가</th>
                 <td class="num">아니오</td>
                 <td class="num">예</td>
-                <td class="verdict">후광 제거</td>
               </tr>
               <tr>
-                <th scope="row">본문 글자 (14px 게이트 4.5:1)</th>
+                <th scope="row">본문 글자 (14px, 게이트 4.5)</th>
                 <td class="num">6.69</td>
                 <td class="num">5.64</td>
-                <td class="verdict">통과 유지</td>
               </tr>
               <tr>
-                <th scope="row">nav 밑줄 (UI 게이트 3:1)</th>
+                <th scope="row">nav 밑줄 (UI, 게이트 3)</th>
                 <td class="num">3.99</td>
                 <td class="num">3.64</td>
-                <td class="verdict">통과 유지</td>
               </tr>
             </tbody>
           </table>
@@ -455,7 +440,7 @@
         <h2 id="wy-heading">그림자가 아닌 이유</h2>
         <p class="note" data-od-id="preview-note">
           그림자는 이번 변경에서 카드를 띄우지 못합니다. 다크 배경이 명도 바닥이라 어떤 알파를 써도
-          배경 대비가 1.08:1을 못 넘습니다 — 검정으로 뒤집은 건 그림자가 배경보다 밝아지던 결함을
+          배경 대비가 1.08:1을 못 넘습니다. 검정으로 뒤집은 건 그림자가 배경보다 밝아지던 결함을
           없애기 위해서이고, 카드를 띄우는 일은 표면 밝기와 테두리가 맡습니다.
         </p>
       </section>
