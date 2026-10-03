@@ -29,7 +29,7 @@ export function SiteFooter() {
           ))}
         </nav>
         <small>
-          © <span>{year}</span> Chyailo Kunya · 비공식 팬 사이트 · 쿠냥이 환영
+          © <span>{year}</span> Chyailo Kunya · 비공식 팬 사이트
         </small>
         <img
           className="foot__mascot"

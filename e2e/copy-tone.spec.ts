@@ -29,32 +29,8 @@ function stripComments(src: string): string {
   return noBlock.replace(/\/\/[^\n]*/g, "");
 }
 
-/* 예외는 **문장 단위**다. 한때 `app/landing/page.tsx` 를 파일째 건너뛰었는데, 그러면 그 페이지에
-   새 문구가 들어와도 영영 안 걸린다 — 규칙을 세워 놓고 뒷문을 같이 낸 셈이다(적대적 리뷰가 잡았다).
-
-   여기 있는 다섯은 구 정적 사이트에서 이식된 **소개 산문**이다(Phase 2). landing 은 페이지
-   전체가 하나의 소개 글이라("어디서 만날까냥" 같은 제목까지 그 문체다) 그 안에서 "이건 UI,
-   저건 산문"을 가르는 건 자의적이고, 어투를 규칙으로 눌러 고치면 글맛이 죽는다. 대신 **목록에
-   적힌 문장만** 통과시켜 새 문구는 반드시 걸리게 한다.
-
-   새 문장을 여기 더할 땐 그게 정말 사용자가 쓴 글인지 먼저 묻는다 — 안내문·오류·버튼이면
-   합쇼체로 고칠 자리이지 여기 넣을 자리가 아니다. */
-// 이식된 소개 산문이 사는 유일한 파일. 다른 곳에 같은 문장이 생기면 그건 예외가 아니다.
-const LEGACY_COPY_FILE = "app/landing/page.tsx";
-
-const KEPT_COPY = new Set(
-  [
-    "오늘도 방송에서 쿠냥이들을 기다려요.",
-    "천천히 놀다 가요",
-    "오늘도 방송에서 만나요",
-    "온도차가 쿠냐예요.",
-    "치지직에서 방송하고, 유튜브에 클립 올리고, X로 소식 전해요.",
-    /* **파일까지 묶는다.** 문장만 보면 같은 문장을 다른 화면의 힌트·버튼에 복사해 쓰는 순간
-       그것도 통과한다 — 유일한 기계 강제에 우회로가 생긴다(적대적 리뷰가 잡았다). 예외는
-       "이 파일의 이 문장"이지 "이 문장"이 아니다. */
-  ].map((text) => `${LEGACY_COPY_FILE}\u0000${text}`),
-);
-
+/* 예외는 없다. 한때 구 정적 사이트에서 옮긴 소개 문장 다섯을 "사용자가 쓴 글"로 보고 통과시켰는데,
+   그 문장들도 에이전트가 지어낸 것이었다(2026-10-03 사용자 지적으로 삭제). */
 function sourceFiles(dir: string = SRC_DIR): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -74,15 +50,11 @@ test("사용자 노출 문구에 해요체가 남아 있지 않다", () => {
     lines.forEach((line, i) => {
       for (const m of line.matchAll(HAEYO)) {
         const text = m[0].trim();
-        if (KEPT_COPY.has(`${rel}\u0000${text}`)) continue;
         offenders.push(`${rel}:${i + 1}  ${text}`);
       }
     });
   }
   /* 빈 배열과 대조한다 — 개수를 세면 "몇 개까지는 괜찮다"로 읽히고, 실패 메시지에 어느 줄인지가
      안 남아 고치는 사람이 다시 찾아야 한다. */
-  expect(
-    offenders,
-    "합쇼체로 고친다(AGENTS.md 톤 규칙). 이식된 소개 산문이면 KEPT_COPY 에 그 문장을 적는다",
-  ).toEqual([]);
+  expect(offenders, "합쇼체로 고친다(AGENTS.md 톤 규칙)").toEqual([]);
 });

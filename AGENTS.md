@@ -84,6 +84,8 @@ npm run format:check && npm run lint && npm run typecheck && npm run boundaries 
 
 - 사용자에게 보이는 문구는 한국어 합쇼체로 쓴다(`e2e/copy-tone.spec.ts`). 값과 상태를 적는 칸은
   문장이 아니라 표기(`2026.03.01`·`완료`)로 쓴다. 사이트에 없는 고유명사는 지어내지 않는다.
+- 문구에는 사실만 쓴다. 꾸밈말, 의성어, 고양이 말투, 이모티콘, 쿠냐가 하지 않은 말, 확인하지 않은
+  방송 내용을 지어 넣지 않는다. 사실이 확인되지 않으면 쓰지 말고 묻는다.
 - 주석에는 무엇을 하는지가 아니라 왜 이 값이어야 하는지를 적는다.
 - 사용자가 가리킬 요소에는 `data-od-id="kebab-case"` 를 붙인다.
 - 날짜 컬럼은 `_date`(TEXT `YYYY-MM-DD`), 시각은 `_time`(TEXT `HH:MM`), 순간은 `_at`(epoch ms)으로

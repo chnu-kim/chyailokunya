@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     images: [OG_IMAGE],
     url: "/",
     title: "챠이로 쿠냐 — 팬 사이트",
-    description: "갈색 고양이 버추얼 스트리머 챠이로 쿠냐의 작은 다꾸 노트. 어서오냥, 쿠냥이 ♡",
+    description: "버추얼 스트리머 챠이로 쿠냐 비공식 팬 사이트.",
   },
 };
 
@@ -134,7 +134,7 @@ export default function Home() {
                 <path d="M12 16.5c-.6 1.1-2.2 1.1-2.6-.2M12 16.5c.6 1.1 2.2 1.1 2.6-.2" />
               </svg>
               <h2>소개</h2>
-              <p>영원한 20살 INFP 고양이. 프로필과 저챗·게임·노래 이야기, 그리고 채널 세 곳.</p>
+              <p>프로필, 방송 컨텐츠, 채널.</p>
             </Link>
 
             <Link className="paper navcard" href="/games" data-od-id="nav-card-games">
