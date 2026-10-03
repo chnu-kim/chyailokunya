@@ -8,6 +8,7 @@ import { WeekCard } from "./week-card";
    화면의 어느 자리에 어떤 모양으로 나오는지만 확인하면 된다. */
 
 const CARD: WeekCardData = {
+  heading: "이번 주 방송",
   rangeLabel: "7.20 – 7.26",
   note: "임시 휴방 있습니다",
   days: [

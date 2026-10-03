@@ -915,7 +915,7 @@ test.describe("하루 머리 줄 — 탭 순서", () => {
    저장을 요구한다(그래야 "보이는 것 = 받는 것"이 성립한다). 다른 스펙이 안 읽는 먼 주를 쓴다
    (AGENTS 의 "e2e 스펙은 D1 픽스처 하나를 공유한다"). */
 test.describe("감축 경로 — 주간표 카드 조작", () => {
-  test("560 아래에서도 미리보기는 남고 다운로드 아이콘만 카드 밖으로 내려온다", async ({
+  test("미리보기는 어느 폭에서나 남고 다운로드 아이콘은 늘 카드 아래에 선다", async ({
     page,
     baseURL,
   }) => {
@@ -952,17 +952,19 @@ test.describe("감축 경로 — 주간표 카드 조작", () => {
     const preview = page.locator(".week-card-download__preview");
     const button = page.locator('[data-od-id="week-card-download-btn"]');
 
-    /* 아이콘이 카드 **위에 얹혀 있나**. 절대배치일 땐 카드 상자 안(윗변 기준)에 들고,
-       static 으로 내려오면 카드 아랫변보다 아래에 선다 — 그 한 줄이 이 감축의 전부다. */
+    /* 아이콘이 카드 **위에 얹혀 있나**. 한때 넓은 폭에선 카드 오른쪽 위에 얹혔는데, 곁칸이 좁은
+       편집기에서 주 범위 표기를 덮어(2026-10-03 리뷰) 이제 어느 폭에서나 카드 아래에 선다. */
     const iconOverlapsCard = async () => {
       const card = (await preview.boundingBox())!;
       const icon = (await button.boundingBox())!;
       return icon.y < card.y + card.height;
     };
 
-    await page.setViewportSize({ width: 561, height: 800 });
-    await expect(preview).toBeVisible();
-    expect(await iconOverlapsCard()).toBe(true);
+    for (const width of [1600, 1440, 561]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect(preview).toBeVisible();
+      expect(await iconOverlapsCard(), `${width}px`).toBe(false);
+    }
 
     await page.setViewportSize({ width: 560, height: 800 });
     // **미리보기는 남는다** — 이 단언이 옛 계약(560 아래에서 감춘다)을 정확히 뒤집는다.

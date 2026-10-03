@@ -17,9 +17,13 @@ function entry(over: Partial<ScheduleEntry> & { scheduledDate: string }): Schedu
   };
 }
 
-function week(over: Partial<WeekView> = {}): WeekView {
+// 기본은 "이번 주"를 보는 경우다. 제목 판정만 따로 잰다(아래 describe).
+function week(
+  over: Partial<WeekView & { currentWeek: string }> = {},
+): WeekView & { currentWeek: string } {
   return {
     weekStartDate: MON,
+    currentWeek: MON,
     note: null,
     publishedAt: null,
     draft: false,
@@ -33,6 +37,19 @@ function week(over: Partial<WeekView> = {}): WeekView {
     ...over,
   };
 }
+
+describe("buildWeekCard 제목", () => {
+  /* 한때 "이번 주 방송"으로 고정돼 지난주를 열어도 이번 주라고 말했고, 그대로 PNG 에 구워졌다. */
+  it.each([
+    ["2026-07-20", "이번 주 방송"],
+    ["2026-07-27", "지난주 방송"],
+    ["2026-07-13", "다음주 방송"],
+    ["2026-08-10", "주간 방송"],
+    ["2026-07-22", "이번 주 방송"], // 월요일이 아닌 날을 줘도 그 주로 정규화한다
+  ])("이번 주가 %s 일 때 7.20 주의 제목은 %s", (currentWeek, heading) => {
+    expect(buildWeekCard(week({ currentWeek })).heading).toBe(heading);
+  });
+});
 
 describe("buildWeekCard", () => {
   it("주 범위 라벨과 요일 라벨을 weekDates 순서 그대로 접는다", () => {

@@ -5,15 +5,23 @@
    해 뒀다. 월간 캘린더는 다음 작업순서(5의 /calendar)라 여기 없다.
 
    PNG 다운로드(이슈 #109 작업순서 3)는 week 가 있을 때만 건다 — 없으면(미발행) 이미 위
-   "아직이야…" 빈 상태가 그 사실을 말하므로, 비활성 버튼을 또 하나 얹지 않는다(WeekCardDownload
+   "준비 중" 빈 상태가 그 사실을 말하므로, 비활성 버튼을 또 하나 얹지 않는다(WeekCardDownload
    는 그 변형도 지원하지만 이 화면에선 늘 card 가 있을 때만 쓴다). */
 
-import { toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
+import { toIsoDate, WEEKDAY_LABELS, weekDates, weekRelation } from "@/core/calendar";
 import type { GameOption } from "@/features/games/service";
 import { buildWeekCard } from "@/features/schedule/card";
 import type { WeekView } from "@/features/schedule/service";
 import { formatMD, WeekNav } from "./schedule-shared";
 import { WeekCardDownload } from "./week-card-download";
+
+/* 빈 상태 문구는 그 주가 언제인가에 따라 다르다. 지난 주에 "준비 중"이라고 하면 거짓이다. */
+const EMPTY_MESSAGE = {
+  current: "이번 주 일정은 아직 준비 중입니다.",
+  next: "다음주 일정은 아직 준비 중입니다.",
+  prev: "지난주에는 공개된 일정이 없습니다.",
+  other: "이 주에는 공개된 일정이 없습니다.",
+} as const;
 
 export function ScheduleReadView({
   weekStartDate,
@@ -69,7 +77,10 @@ export function ScheduleReadView({
               </p>
             )}
 
-            <WeekCardDownload card={buildWeekCard(week)} weekStartDate={weekStartDate} />
+            <WeekCardDownload
+              card={buildWeekCard({ ...week, currentWeek })}
+              weekStartDate={weekStartDate}
+            />
 
             <ol className="sched__days" data-od-id="schedule-days">
               {days.map((date, i) => {
@@ -175,8 +186,9 @@ export function ScheduleReadView({
           </>
         ) : (
           <div className="sched__empty" data-od-id="schedule-empty">
-            <span className="t-hand">아직이야…</span>
-            <span>이번 주 일정은 아직 준비 중입니다.</span>
+            <span>
+              {EMPTY_MESSAGE[weekRelation(toIsoDate(weekStartDate), toIsoDate(currentWeek))]}
+            </span>
           </div>
         )}
       </div>

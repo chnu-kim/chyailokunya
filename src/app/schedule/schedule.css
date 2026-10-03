@@ -191,6 +191,12 @@
 .sched-nav__today {
   color: var(--fg);
 }
+/* 지금 보고 있는 주. 누를 곳이 없다는 것만 말하고 자리는 그대로 지킨다 — 테두리를 걷으면
+   버튼 셋의 줄이 흔들려 보인다. 글자는 --fg-muted 라 본문 4.5:1 을 그대로 지킨다. */
+.sched-nav__today--current {
+  color: var(--fg-muted);
+  border-style: dashed;
+}
 .sched-nav__step:hover,
 .sched-nav__today:hover {
   color: var(--fg);
@@ -1900,36 +1906,33 @@ dialog.sched-confirm::backdrop {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-/* 카드 위 다운로드 아이콘(편집기 전용). **색을 테마 토큰이 아니라 브랜드 앵커로 쓴다** —
-   이 버튼이 앉는 바닥은 카드이고, 카드는 라이트·다크 양쪽에서 크림 종이다(사진지 섬과 같은
-   규칙, kunya-design §4). `--fg`/`--surface` 를 쓰면 다크에서 잉크 위 잉크가 되어 사라진다.
-   대비: --brand-ink(#181818) on 92% --brand-paper 위 16.9:1(스크립트 계산).
+/* 다운로드 아이콘(편집기 전용). **카드 위에 얹지 않고 카드 아래에 둔다**(2026-10-03). 한때 카드
+   오른쪽 위에 absolute 로 얹고 좁은 폭(560)에서만 아래로 내렸는데, 그 분기가 뷰포트 기준이라
+   곁칸이 좁은 편집기에선 아이콘이 주 범위 표기를 덮었다(1470 에서 26×12px, 1600 에서도 맞닿음 —
+   리뷰 실측). 미리보기가 무엇이 받아질지 가리면 미리보기가 아니므로, 어느 폭에서나 카드 다음
+   블록으로 내려 겹칠 수 없게 한다. 바닥이 카드 종이가 아니라 페이지라 색은 테마 토큰이다.
 
    44×44 는 터치 하한이고 여기선 **패딩이 아니라 고정 치수**로 준다 — 아이콘 하나뿐이라
    글자 크기가 하한을 좌우하지 않는다(.btn 계열의 상습적 함정을 애초에 안 만든다). */
 .week-card-download__icon {
-  position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
+  margin-top: var(--space-2);
   display: grid;
   place-items: center;
   width: 44px;
   height: 44px;
   padding: 0;
   cursor: pointer;
-  color: var(--brand-ink);
-  background: color-mix(in srgb, var(--brand-paper) 92%, transparent);
-  border: 1px solid var(--thumb-edge);
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  box-shadow: 0 1px 4px rgba(24, 24, 24, 0.16);
 }
 .week-card-download__icon svg {
   width: 20px;
   height: 20px;
 }
 .week-card-download__icon:hover:not(:disabled) {
-  background: var(--brand-paper);
-  border-color: var(--brand-ink);
+  background: var(--surface-2);
 }
 .week-card-download__icon:focus-visible {
   outline: 2px solid var(--focus);
@@ -1940,21 +1943,14 @@ dialog.sched-confirm::backdrop {
   cursor: default;
 }
 /* 아이콘엔 "만드는 중…"을 실을 글자 자리가 없어 이 칩이 그 상태를 대신 말한다(글자 버튼은
-   자기 라벨로 말한다). 아이콘 왼쪽에 나란히 서므로 오른쪽 여백이 아이콘 44 + 간격이다.
-   바닥이 카드라 색은 위 아이콘과 같은 브랜드 앵커를 쓴다. */
+   자기 라벨로 말한다). 아이콘처럼 카드 아래 페이지 바탕에 앉는다. */
 .week-card-download__busy {
-  position: absolute;
-  top: var(--space-3);
-  right: calc(var(--space-3) + 44px + var(--space-2));
+  margin-top: var(--space-2);
   display: flex;
   align-items: center;
   height: 44px;
-  padding: 0 var(--space-3);
   font-size: var(--text-sm);
-  color: var(--brand-ink);
-  background: color-mix(in srgb, var(--brand-paper) 92%, transparent);
-  border: 1px solid var(--thumb-edge);
-  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
 }
 .week-card-download__btn {
   /* .btn 계열엔 min-height 가 없다(games.css .head__act 주석과 같은 함정) — 직접 못박는다. */
@@ -2054,38 +2050,6 @@ dialog.sched-zoom::backdrop {
      앞이라 그만큼 목록이 밀리지만, 카드를 감춰서 아끼던 그 자리가 **확대 경로 전체**와
      맞바꾼 것이라 받아들인다. */
 
-  /* **이 폭에서만 다운로드 아이콘이 카드 밖으로 내려온다**(실측 2026-08-01).
-     44×44 는 터치 하한이라 못 줄이는데 카드는 여기서 340×178 까지 작아져, 카드 위에 얹으면
-     아이콘이 카드 높이의 4분의 1을 덮고 우측 상단의 주 범위 표기(`6.2 – 6.8`)를 그대로
-     가린다(1600px 에선 같은 44 가 카드의 작은 귀퉁이라 아무것도 안 가린다 — 캡처로 확인).
-     **미리보기가 무엇이 받아질지 가리면 미리보기가 아니다**, 이 파일이 옛 `display: none`
-     규칙에서 세웠던 바로 그 기준이라 여기서도 같은 기준을 적용한다.
-
-     `position: static` 이면 stage 안에서 카드 다음 블록으로 자연히 내려간다 — 별도 배치
-     규칙이 필요 없다. 카드 클릭(확대)은 그대로라 조작 둘이 위아래로 갈릴 뿐이다. */
-  .week-card-download__icon,
-  .week-card-download__busy {
-    position: static;
-    margin-top: var(--space-2);
-  }
-  /* 내려온 뒤엔 카드 종이가 아니라 페이지 바탕 위에 앉는다 — 크림 앵커(--brand-paper)를 그대로
-     두면 다크에서 흰 알약이 떠 버린다. 이 폭에서만 테마 토큰으로 되돌린다. */
-  .week-card-download__icon {
-    color: var(--fg);
-    background: var(--surface);
-    border-color: var(--border-strong);
-    box-shadow: none;
-  }
-  .week-card-download__icon:hover:not(:disabled) {
-    background: var(--surface-2);
-    border-color: var(--border-strong);
-  }
-  .week-card-download__busy {
-    color: var(--fg-muted);
-    background: transparent;
-    border-color: transparent;
-    padding-left: 0;
-  }
   /* 하루 카드는 라벨을 위로 올린다 — 좁으면 왼쪽 고정폭 라벨이 항목 폭을 너무 먹는다.
      **이제 읽기 화면에만 실효가 있다**(2026-07-31) — 편집기는 이 골격이 기본이 됐다
      (`.sched--edit .sched-day`). 편집기 쪽에서 이 재정의가 하던 일을 위로 올린 것이라
