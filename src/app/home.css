@@ -148,19 +148,22 @@
   margin-top: var(--space-3);
 }
 
+/* 세 갈래(소개 · 주간 일정 · 플레이 게임, 2026-10-03 홈 개편 시안 A). 일정이 푸터에만 있어
+   팬이 가장 자주 볼 정보가 가장 깊이 숨어 있었다. */
 .cards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-6);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5);
 }
 /* 쉼 상태를 --rest-rot/--rest-y 로 두는 게 핵심: 각도를 transform 에 직접 박으면 아래
    좁은-화면 쿼리가 transform 을 덮을 때 hover·active 까지 삼켜 키보드 사용자가 lift 를
    잃는다. 변수로 두면 쿼리는 쉼 상태만 0 으로 덮고 상호작용 규칙은 하나로 유지된다. */
 .navcard {
-  display: block;
+  display: flex;
+  flex-direction: column;
   text-decoration: none;
   color: inherit;
-  padding: var(--space-7);
+  padding: var(--space-6);
   --rest-rot: 0deg;
   --rest-y: 0px;
   transform: rotate(var(--rest-rot)) translateY(var(--rest-y));
@@ -168,14 +171,16 @@
     transform var(--dur-base) var(--ease-paper),
     box-shadow var(--dur-base);
 }
-/* 손으로 붙인 두 장이라 각도가 거울상이 아니다. 세로 오프셋을 왼쪽에만 주는 건 오른쪽
-   카드 아래 모서리에 마스코트 스티커가 붙어 있어서다. */
+/* 손으로 붙인 세 장이라 각도가 거울상이 아니다. 가운데만 살짝 띄우고 오른쪽 카드 아래
+   모서리엔 마스코트 스티커가 붙는다. */
 .navcard:nth-child(1) {
-  --rest-rot: -1.6deg;
-  --rest-y: 9px;
+  --rest-rot: -1.2deg;
 }
 .navcard:nth-child(2) {
-  --rest-rot: 0.6deg;
+  --rest-y: -6px;
+}
+.navcard:nth-child(3) {
+  --rest-rot: 0.8deg;
 }
 .navcard:hover,
 .navcard:focus-visible {
@@ -201,16 +206,43 @@
   font-size: var(--text-sm);
   margin: 0;
 }
+/* 그 갈래의 지금 상태 한 줄(이번 주 발행 여부, 최근 게임). 카드 높이가 갈려도 바닥에 붙는다. */
+.navcard .navcard__status {
+  margin-top: auto;
+  padding-top: var(--space-4);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--fg);
+  font-weight: 700;
+}
+.navcard__meta {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+.navcard__value {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--fg-muted);
+  text-align: right;
+}
+/* 마지막 카드의 오른쪽 아래 모서리엔 마스코트 스티커가 걸쳐 앉는다 — 오른쪽 정렬된 값이 그
+   밑으로 들어가지 않게 자리를 비운다(스티커가 카드 안으로 들어오는 폭은 데스크톱 ~54 ·
+   600 아래 ~58, 카드 패딩이 그중 24~32 를 이미 덮는다). */
+.navcard:nth-child(3) .navcard__status {
+  padding-right: 44px;
+}
 
-/* 카드가 읽을 만한 폭을 가질 수 있을 때만 2열. 640px 에서 각 카드 280px, 패딩 48 을 빼면
-   184px(한 줄 ~13자)라 이 그리드는 600px "모바일" 한참 위에서 이미 접힌다. 진짜 모바일만
-   콜라주 회전을 마저 잃고 패딩을 조인다. */
-@media (max-width: 760px) {
+/* 카드가 읽을 만한 폭을 가질 수 있을 때만 3열. 860px 에서 각 카드 ~255px, 패딩 32 를 빼면
+   ~190px(한 줄 ~14자)이 하한이라 그 아래에선 1열로 접는다(860 은 landing 이 이미 쓰는 폭).
+   진짜 모바일만 콜라주 회전을 마저 잃고 패딩을 조인다. */
+@media (max-width: 860px) {
   .cards {
     grid-template-columns: 1fr;
   }
-  /* 세로 오프셋은 "나란히 붙인 두 장" 표현이라 1열에선 의미가 없다. */
-  .navcard:nth-child(1) {
+  /* 세로 오프셋은 "나란히 붙인 세 장" 표현이라 1열에선 의미가 없다. */
+  .navcard:nth-child(2) {
     --rest-y: 0px;
   }
 }
@@ -218,14 +250,13 @@
   .navcard {
     padding: var(--space-5);
   }
-  .navcard:nth-child(1),
-  .navcard:nth-child(2) {
+  .navcard:nth-child(n) {
     --rest-rot: 0deg;
   }
   /* 마스코트 스티커(아래 54px, 카드 오른쪽 아래 모서리에 걸침)의 자리를 글에서 비운다. 안 비우면
      390 에서 설명 끝("것부터")이 스티커 밑으로 들어갔다(2026-10-03 리뷰 실측). 카드 패딩 24 위에
      스티커가 카드 안으로 들어오는 폭(약 58)을 덮을 만큼 더한다. */
-  .navcard:nth-child(2) p {
+  .navcard:nth-child(3) p {
     padding-right: 40px;
   }
 }
@@ -296,7 +327,7 @@
    셀렉터에 걸린 한 장만 받고 테마 스왑에 깜빡임도 없다. 높이는 원본비(206:308)로 고정. */
 .cards-outer {
   position: relative;
-  max-width: 880px;
+  max-width: 1072px;
   margin: 0 auto;
 }
 .mascot-sticker {

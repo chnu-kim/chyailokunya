@@ -159,17 +159,18 @@ async function trackCount(page: Page, selector: string): Promise<number> {
 }
 
 const REDUCTIONS = [
-  // home.css:209 — 카드가 읽을 만한 폭을 못 가지면 접는다. 761 이 2열이 유지되는 마지막 폭.
-  { path: "/", selector: ".cards", boundary: 760 },
+  // home.css — 카드가 읽을 만한 폭을 못 가지면 접는다. 861 이 3열이 유지되는 마지막 폭
+  // (2026-10-03 홈 세 갈래 개편으로 2열·760 에서 옮겼다).
+  { path: "/", selector: ".cards", boundary: 860, cols: 3 },
   // landing.css:506 — hero 2열(minmax(0,1fr) 360px) → 1열, 사진이 order:-1 로 위에 선다.
-  { path: "/landing", selector: ".hero__grid", boundary: 860 },
+  { path: "/landing", selector: ".hero__grid", boundary: 860, cols: 2 },
   // 같은 쿼리가 profile 도 접는다(320px minmax(0,1fr) → 1fr). 한 쿼리에 둘이 들었으니 둘 다 본다.
-  { path: "/landing", selector: ".profile__grid", boundary: 860 },
+  { path: "/landing", selector: ".profile__grid", boundary: 860, cols: 2 },
 ] as const;
 
 test.describe("감축 경로 — 경계", () => {
   for (const r of REDUCTIONS) {
-    test(`${r.selector}: ${r.boundary}px 경계에서 2열 → 1열`, async ({ page }) => {
+    test(`${r.selector}: ${r.boundary}px 경계에서 ${r.cols}열 → 1열`, async ({ page }) => {
       await page.setViewportSize({ width: r.boundary, height: 800 });
       await page.goto(r.path);
       expect(await trackCount(page, r.selector), `${r.boundary}px 는 접혀야 한다`).toBe(1);
@@ -182,7 +183,10 @@ test.describe("감축 경로 — 경계", () => {
          스크롤바라 그게 성립하지만, 스크롤바가 폭을 먹는 환경에서 돌리면 경계가 한 칸
          밀려 무너진다. 이 스펙을 다른 브라우저로 옮길 땐 여기부터 확인한다. */
       await page.setViewportSize({ width: r.boundary + 1, height: 800 });
-      expect(await trackCount(page, r.selector), `${r.boundary + 1}px 는 2열이어야 한다`).toBe(2);
+      expect(
+        await trackCount(page, r.selector),
+        `${r.boundary + 1}px 는 ${r.cols}열이어야 한다`,
+      ).toBe(r.cols);
     });
   }
 });
@@ -230,7 +234,7 @@ test.describe("본문 터치 타깃", () => {
       await page.goto("/");
       await page.evaluate(() => document.fonts.ready);
 
-      for (const id of ["nav-card-about", "nav-card-games"]) {
+      for (const id of ["nav-card-about", "nav-card-schedule", "nav-card-games"]) {
         await expectTouchTarget(page.locator(`[data-od-id="${id}"]`), id);
       }
       // 덮임까지 본다 — 마스코트 스티커가 이 카드 위로 겹쳐 앉는 자리다(home.css:386).

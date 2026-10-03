@@ -5,11 +5,18 @@ test("홈: 히어로·런처 카드가 렌더되고 테마 토글이 data-theme 
 
   await expect(page.getByRole("heading", { level: 1, name: "챠이로 쿠냐" })).toBeVisible();
 
-  // 두 런처 카드 — 각각 소개/게임으로 간다(index/landing 분리 유지).
+  // 세 런처 카드 — 소개/일정/게임으로 간다(index/landing 분리 유지).
   const about = page.locator('[data-od-id="nav-card-about"]');
+  const schedule = page.locator('[data-od-id="nav-card-schedule"]');
   const games = page.locator('[data-od-id="nav-card-games"]');
   await expect(about).toHaveAttribute("href", "/landing");
+  await expect(schedule).toHaveAttribute("href", "/schedule");
   await expect(games).toHaveAttribute("href", "/games");
+  /* 일정 카드는 이번 주의 공개 상태를 표기로 말한다 — 값은 픽스처에 달려 있어 둘 중 하나만 본다.
+     주 범위(M.D – M.D)가 있어야 "이번 주"가 언제인지 읽힌다. */
+  await expect(page.locator('[data-od-id="nav-card-schedule-status"]')).toHaveText(
+    /^이번 주\s*\d{1,2}\.\d{1,2} – \d{1,2}\.\d{1,2}\s*(공개|준비 중)$/,
+  );
 
   // 첫 페인트 전 인라인 스크립트가 data-theme 를 심고, 토글이 그걸 뒤집는다.
   const html = page.locator("html");

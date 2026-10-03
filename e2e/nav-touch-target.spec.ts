@@ -8,7 +8,7 @@ import { E2E_USER, expectSignedIn, signIn } from "./session";
    폭은 home.spec.ts 의 두 describe 를 따른다: 390 은 nav 압축 회귀가 가장 심했던 폭,
    320 은 WCAG 1.4.10 reflow 기준 폭이다. */
 
-const PAGES = ["/", "/landing", "/games"] as const;
+const PAGES = ["/", "/landing", "/games", "/schedule"] as const;
 
 test.describe("nav 브랜드 터치 타깃", () => {
   for (const width of [320, 390]) {
@@ -100,9 +100,10 @@ test.describe("nav 브랜드 — 로그인 상태", () => {
    1) 증분 검출력 — .nav__link 의 ≤560px 패딩을 `6px 9px` → `6px 11px` 로(링크 2개 × 좌우
       2px = 8px 소비): **이 단언만 빨강**(10.41 → 2.41px), 위 describe 의 `overflow <= 0` 은
       그대로 초록. 즉 기존 단언의 중복이 아니다.
-   2) 실제 위협 — routes.ts 의 `/schedule` 을 primary:true 로(3번째 링크): 세 페이지 전부
-      빨강이지만 헤드룸은 페이지마다 갈린다(실측: `/` −42.17px·문서 넘침 43px,
-      `/landing`·`/games` −42.83px·넘침 44px — 기존 단언도 세 페이지 전부 함께 빨강).
+   2) 실제 위협 — routes.ts 의 `/schedule` 을 primary:true 로(3번째 링크): 그때의 여백
+      그대로면 세 페이지 전부 빨강이었다(실측: `/` −42.17px·문서 넘침 43px, `/landing`·
+      `/games` −42.83px·넘침 44px). 2026-10-03 에 실제로 올리며 chrome.css 의 430px 규칙이
+      여백만 덜어 9.17px 로 맞췄다 — 그 규칙을 되돌리면 이 단언이 다시 빨개진다.
    3) fixture 유효성 — expectSignedIn 을 빼고 세션 없이 돌리면 **초록으로 통과한다**
       (비로그인 헤드룸은 세 페이지 모두 24.00px). 세션을 실제로 세우지 못하면 이 테스트가
       통째로 무의미해진다는 뜻이라 expectSignedIn 은 장식이 아니다. */

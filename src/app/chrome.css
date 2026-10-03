@@ -896,6 +896,26 @@ h2.t-script {
    쓰기 권한은 allowlist 관리자뿐이라 그 조합은 사실상 관리자 전용이고, 잘린 마크가
    겹친 마크보다 낫다는 .brand 의 계약은 그대로다. */
 @media (max-width: 430px) {
+  /* 일정이 상단 nav 의 세 번째 링크가 되며(2026-10-03, 홈 개편 시안 A) 320px 로그인 상태에서
+     42.83px 가 모자랐다(실측). 터치 타깃(44)은 그대로 두고 **사이 여백만** 덜어낸다:
+     nav 좌우 패딩 24→12, nav 항목 간격 8→4, 링크 사이 간격 8→0(링크는 각자 좌우 9px 패딩이
+     있어 글자끼리는 18px 떨어진다). 로그아웃을 아이콘으로 접는 안(22.47px)은 "밑줄은
+     로그아웃에만" 계약을 건드려 택하지 않았다. 폭 예산은 nav-touch-target 스펙이 지킨다. */
+  .nav__inner {
+    padding-inline: var(--space-3);
+    gap: 4px;
+  }
+  .nav__links {
+    gap: 0;
+  }
+  /* 로그인 후엔 위 셋으로도 2.83px 가 모자랐다(실측) — 토글과 계정 사이 간격, 로그아웃 좌우
+     패딩을 마저 줄인다. "로그아웃" 네 글자가 54px 라 패딩 2px 에서도 폭이 44 를 넘는다. */
+  .nav__end {
+    gap: 4px;
+  }
+  .nav__signout {
+    padding: 0 2px;
+  }
   .nav__signin-brand {
     position: absolute;
     width: 1px;
