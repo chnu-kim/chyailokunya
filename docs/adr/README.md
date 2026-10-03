@@ -49,3 +49,4 @@ ADR 이 그 맥락을 붙박는다. 규칙(불변식·경계·플레이북)의 �
 | [0028](./0028-fanart-bytes-in-r2.md)                         | 팬아트 = R2 바이트 + Worker 프록시 (외부 URL 기각)                   | Accepted                                                   |
 | [0029](./0029-verification-layers-and-coverage-ratchet.md)   | 검증 = 다섯 층 · 커버리지는 래칫 (목표치 기각)                       | Accepted                                                   |
 | [0030](./0030-fanart-dimensions-as-layout-hint.md)           | 팬아트 치수 = R2 객체에 묶고 표시 상한은 CSS (0028 확장)             | Accepted (0028 확장)                                       |
+| [0031](./0031-minimal-agents-md.md)                          | 에이전트 지침 = 최소 · 필요할 때 더한다                              | Accepted (0013 확장)                                       |

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* PR 전후 스크린샷을 픽셀 단위로 비교해 before/after/diff PNG 와 요약(summary.json)을 만든다.
    정답 대조가 아니라 참고용이다 — 실제 시각 회귀 판정(baseline 비교)은 로컬 npm run e2e:visual
-   이 맡는다(AGENTS.md, OS 별 베이스라인이라 CI 게이트엔 없다).
+   이 맡는다(ADR-0029, OS 별 베이스라인이라 CI 게이트엔 없다).
 
    e2e:visual 프로젝트가 만드는 <이름>-visual-<platform>.png 파일명은 before·after 두 잡이
    같은 OS(ubuntu-latest)에서 돌아 항상 일치한다 — 로컬 macOS 베이스라인(-darwin)과는 무관하고
