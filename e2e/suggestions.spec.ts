@@ -23,7 +23,7 @@ function openCard(page: Page, name: string) {
 
 /* 관리자를 **별도 컨텍스트**로 연다. 같은 페이지에서 쿠키만 바꿔 goto 하면 ERR_ABORTED 가 난다 —
    제안을 보내면 상세까지 닫히면서 히스토리 엔트리를 되돌리는데(history.back 은 비동기 왕복이다)
-   그 사이 네비게이션이 겹치기 때문이다(AGENTS.md 지뢰). 컨텍스트를 나누면 그 히스토리와 아예
+   그 사이 네비게이션이 겹치기 때문이다(docs/pitfalls.md). 컨텍스트를 나누면 그 히스토리와 아예
    무관해지고, 실제로도 관리자는 다른 사람의 브라우저다. */
 async function openAsAdmin(browser: Browser, baseURL: string): Promise<Page> {
   const context = await browser.newContext();

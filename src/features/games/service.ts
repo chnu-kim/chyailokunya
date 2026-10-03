@@ -184,7 +184,7 @@ export function playEntriesOf(db: Db, gameId: number) {
    없는" 절반 상태가 남고, 관리자는 성공/실패 중 뭘 본 건지 모른다.
 
    game_id 를 last_insert_rowid() 로 받는 게 이 batch 의 핵심이다 — D1 엔 대화형 트랜잭션이
-   없어 앞 문의 RETURNING 을 뒤 문이 못 읽는다(AGENTS.md 지뢰). SQLite 함수라 **같은 batch 안
+   없어 앞 문의 RETURNING 을 뒤 문이 못 읽는다(docs/pitfalls.md). SQLite 함수라 **같은 batch 안
    순차 실행**에 기대는데, 그게 실제로 성립하는지는 추측이 아니라 실측했다(2026-07-24, workerd
    +Miniflare D1: game.id=1 → entry.game_id=1). **이 가정이 깨지면 항목이 엉뚱한 게임에 붙는
    조용한 오염이라** 타입도 게이트도 못 잡는다 — router.test.ts 의 "방금 넣은 게임에 붙는다"가
@@ -270,7 +270,7 @@ export async function addGame(db: Db, input: AddGameInput): Promise<GameCard> {
    /schedule 에서 같은 게임의 항목을 더하면, 여기선 "0개"로 본 판단이 낡는다 — 결과는 항목이
    하나 늘어나는 것뿐이고(오염이 아니라 중복) /schedule 에서 지우면 된다. saveWeek 이 revision
    CAS 로 닫은 것과 달리 여기엔 CAS 를 안 건다: 게임 폼의 날짜는 주 전체가 아니라 항목 하나를
-   건드리고, 관리자 소수·주간 편성이라 겹칠 창이 실질적으로 없다(AGENTS.md 의 D1 수용 경계). */
+   건드리고, 관리자 소수·주간 편성이라 겹칠 창이 실질적으로 없다(docs/pitfalls.md 의 D1 수용 경계). */
 export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCard | null> {
   /* 게임 존재 확인과 항목 조회를 한 왕복으로 묶는다. 존재 확인이 먼저 필요한 이유: 없는 id 면
      NOT_FOUND 여야 하는데, 확인 없이 batch 를 날리면 항목 INSERT 가 FK 로 죽어 전체가 롤백된
@@ -296,7 +296,7 @@ export async function updateGame(db: Db, input: UpdateGameInput): Promise<GameCa
      검사가 읽고→비교라 여기와 batch 사이에 창이 남는다(D1 엔 대화형 트랜잭션이 없다). saveWeek
      이 CAS 를 쓰기 조건으로 옮겨 닫은 것과 달리 여기선 그대로 둔다 — 항목 하나를 건드리는
      쓰기라 피해 반경이 주 전체 교체와 다르고, 현실적으로 나는 건 "분 단위로 벌어진 stale
-     저장"이며 그건 이 검사가 잡는다(AGENTS.md 의 D1 수용 경계와 같은 판단). */
+     저장"이며 그건 이 검사가 잡는다(docs/pitfalls.md 의 D1 수용 경계와 같은 판단). */
   if (touchesSchedule && (input.playedDateWas ?? null) !== (entries[0]?.scheduledDate ?? null)) {
     throw new PlayDateChangedElsewhere();
   }
