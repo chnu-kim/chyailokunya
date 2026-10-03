@@ -34,7 +34,7 @@ export default function Landing() {
               Chyailo Kunya
             </h1>
             <p className="hero__sub">
-              갈색 고양이 버추얼 스트리머, <strong>챠이로 쿠냐</strong>
+              버추얼 스트리머 <strong>챠이로 쿠냐</strong>
             </p>
             {/* 액센트는 이 페이지의 유일한 핑크 — 진짜로 어딘가에 도착하는 링크(게임)에 건다.
                 채널 버튼은 같은 페이지 앵커라 시각 무게를 낮춘다(순서는 그대로: 페이지 주제는
