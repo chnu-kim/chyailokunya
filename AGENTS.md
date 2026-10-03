@@ -9,18 +9,28 @@ Tailwind v4 · XState. 라이브는 `https://chyailokunya.com` 하나다.
 
 ## 검증
 
+빠른 로컬 루프다. CI 게이트 전체(`.github/workflows/ci.yml`)는 아니다.
+
 ```bash
 npm run format:check && npm run lint && npm run typecheck && npm run boundaries && npm test && npm run build
 ```
+
+다음 변경은 위 루프가 초록이어도 끝난 게 아니다. CI 의 해당 단계를 로컬에서 같이 돌린다.
+
+- **스키마나 마이그레이션을 바꿨다:** `npx drizzle-kit check`.
+- **런타임·번들러·`wrangler.jsonc`·서버 라우트를 건드렸다:** `npx opennextjs-cloudflare build`
+  다음 배포 번들 스모크. `npm run db:migrate:local` 을 한 뒤,
+  `npx wrangler dev --port 3200 --local` 을 띄우고 `node scripts/post-deploy-smoke.mjs http://localhost:3200`
+  를 실행한다. `next build` 가 초록이어도 배포는 깨질 수 있다.
+
+그 밖에 지킬 것:
 
 - 결과는 exit code 로 본다. `| tail` 같은 파이프를 걸면 0 이 나온다.
 - e2e 는 `PORT=3100 npm run e2e` 로 돌린다. 3000 은 다른 dev 서버가 쓰기 쉽다. 그 서버를 재사용하면
   e2e 세션 키를 읽지 못해 로그인 스펙이 깨진다.
 - 커버리지 임계치는 래칫이다. 테스트를 늘리는 PR 은 `vitest.config.ts` 의 `thresholds` 도 함께
   올린다([ADR-0029](./docs/adr/0029-verification-layers-and-coverage-ratchet.md)).
-- `next build` 가 초록이어도 배포는 깨질 수 있다. 런타임이나 번들러를 건드렸으면
-  `npm run preview` 까지 본다. 시계, CPU 한도, Workers 전역처럼 런타임이 다르게 구현하는 부분은
-  배포 후 스모크만 볼 수 있다.
+- 시계, CPU 한도, Workers 전역처럼 런타임이 다르게 구현하는 부분은 배포 후 스모크만 볼 수 있다.
 - 머지와 배포는 다른 일이다. CI 가 흔들리면 Deploy 가 조용히 skipped 된다. 머지한 뒤 deploy
   결과를 확인한다.
 

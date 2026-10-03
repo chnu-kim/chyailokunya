@@ -25,7 +25,7 @@
   확인한다.** CI 게이트에 이 빌드가 들어 있다(`배포 빌드` 스텝). (Phase 4 인증)
 
 - **`wrangler.jsonc` 에 `env.*` 섹션을 추가하면 e2e 가 통째로 죽는다.** e2e 는 dev 서버에
-  테스트 세션 키를 먹이려고 환경명 `e2e` 를 쓰는데([ADR-0021](./docs/adr/0021-e2e-session-fixture-signed-access-cookie.md)),
+  테스트 세션 키를 먹이려고 환경명 `e2e` 를 쓰는데([ADR-0021](./adr/0021-e2e-session-fixture-signed-access-cookie.md)),
   정의되지 않은 환경명을 wrangler 가 **경고로 넘기는 건 그 파일에 `env` 키가 하나도 없을 때뿐**
   이다. 아무 env 섹션이나 생기면 같은 상황이 에러로 승격돼 dev 서버가 안 뜨고, Playwright 엔
   "webServer 가 안 떴다"로만 보인다. `env.e2e` 를 만들어 막으려 하지 마라 — 환경은
