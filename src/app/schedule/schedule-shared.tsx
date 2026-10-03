@@ -17,7 +17,9 @@ export function timeLabel(startTime: string | null): string {
 
 /* 주 이동. 쿼리 파라미터로 주를 지정한다(?week=월요일) — 동적 세그먼트 /schedule/[week] 는
    safeReturnTo 가 고정 문자열 대조라 인증 코드를 건드려야 해서 피한다(core/auth.ts 주석·결정).
-   "이번 주"는 지금 그 주가 아닐 때만 — 현재 주 판정은 서버가 한 번 계산해(page.tsx) currentWeek
+   "이번 주"는 늘 자리를 차지한다. 지금 그 주면 링크가 아니라 글자로만 선다 —
+   한때 그 주가 아닐 때만 렌더해 버튼이 2개와 3개를 오갔고, 지난주를 누르려던 클릭이 자리가
+   밀린 다음주로 갔다(2026-10-03 리뷰에서 재현). 현재 주 판정은 서버가 한 번 계산해(page.tsx) currentWeek
    로 내려준다. 클라이언트가 todayKST 를 다시 부르면 자정 근처에서 SSR 과 갈려 하이드레이션이
    튄다. */
 export function WeekNav({ weekStart, currentWeek }: { weekStart: string; currentWeek: string }) {
@@ -29,7 +31,11 @@ export function WeekNav({ weekStart, currentWeek }: { weekStart: string; current
       <Link className="sched-nav__step" href={`/schedule?week=${prev}`} rel="prev">
         <span aria-hidden="true">←</span> 지난주
       </Link>
-      {weekStart !== currentWeek && (
+      {weekStart === currentWeek ? (
+        /* aria-current 를 달지 않는다 — 이 화면은 그 속성을 "오늘 칸" 하나에만 쓴다(읽기·편집기
+           모두). 링크가 아니라는 것 자체가 "지금 여기"라는 신호다. */
+        <span className="sched-nav__today sched-nav__today--current">이번 주</span>
+      ) : (
         <Link className="sched-nav__today" href="/schedule">
           이번 주
         </Link>

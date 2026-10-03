@@ -195,7 +195,9 @@ export function GameFacts({
       <dd data-od-id={idPrefix + "-cleared"}>
         {cleared ? (
           clearedDate ? (
-            <>{formatDate(clearedDate)} 클리어</>
+            /* "완료" 뒤에 날짜를 붙인다. 한때 "2026.01.29 클리어"였는데 라벨("클리어")을 값이
+               되풀이해, 같은 칸의 "완료"·"미완료"와 세 형태가 됐다(2026-10-03 리뷰). */
+            <>완료 · {formatDate(clearedDate)}</>
           ) : (
             // 날짜를 모르는 클리어도 유효한 상태다 — 빈칸으로 두면 안 깬 것처럼 읽힌다.
             // 날짜가 붙은 값과 나란히 놓여야 "날짜만 모른다"가 저절로 드러난다.

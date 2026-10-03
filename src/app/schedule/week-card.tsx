@@ -60,7 +60,7 @@ export function WeekCard({
       <span className="week-card__tape week-card__tape--right" aria-hidden="true" />
 
       <div className="week-card__head">
-        <h2 className="week-card__heading">이번 주 방송</h2>
+        <h2 className="week-card__heading">{card.heading}</h2>
         <p className="week-card__subheading">챠이로 쿠냐</p>
         <p className="week-card__range">{card.rangeLabel}</p>
       </div>

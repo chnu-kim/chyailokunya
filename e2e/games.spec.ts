@@ -90,13 +90,13 @@ test("게임: 카드를 열면 날짜·클리어가 상세에 뜬다(로그아�
   /* 클리어한 날은 **상세에만** 뜬다. 정렬 축이 아닌 날짜를 앞면에 실으면 순서가 어긋나 보이므로
      보드에선 뺐는데(위 스펙), 그렇다고 값이 사라진 건 아니라는 걸 여기가 증명한다. */
   await openCard(page, "셀레스테");
-  await expect(detail.locator('[data-od-id="detail-cleared"]')).toHaveText("2026.01.29 클리어");
+  await expect(detail.locator('[data-od-id="detail-cleared"]')).toHaveText("완료 · 2026.01.29");
   await page.keyboard.press("Escape");
   await expect(detail).toHaveCount(0);
 
   /* 깼는데 날짜를 모르는 상태도 글자로 말한다 — 빈칸으로 두면 안 깬 것과 구별이 안 되고,
      그 구별이 클리어를 날짜와 독립된 플래그로 둔 이유 그 자체다. "완료"(날짜 모름)와 위의
-     "2026.01.29 클리어"가 **다른 글자여야** 그 구별이 산다. 일정 항목도 없는 행이라
+     "완료 · 2026.01.29"가 **다른 글자여야** 그 구별이 산다. 일정 항목도 없는 행이라
      "기록 없음"까지 한 화면에서 함께 본다. */
   await openCard(page, "할로우 나이트");
   await expect(detail.locator('[data-od-id="detail-cleared"]')).toHaveText("완료");

@@ -5,7 +5,7 @@
    `core` 가 아니라 `features/schedule` 에 두는 이유: `WeekView`(features/schedule/service)를
    입력으로 받는데, core 는 db 계층 타입을 몰라야 한다(레이어 경계). */
 
-import { formatMD, toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar";
+import { formatMD, toIsoDate, WEEKDAY_LABELS, weekDates, weekRelation } from "@/core/calendar";
 
 /* WeekView 전체가 아니라 카드가 실제로 쓰는 부분집합만 받는다(작업순서 3). 편집기(schedule-editor.tsx)
    가 다운로드 미리보기를 만들 때 서버 왕복 없이 **저장된 상태**(schedule-save 머신의 baseline,
@@ -16,6 +16,9 @@ import { formatMD, toIsoDate, WEEKDAY_LABELS, weekDates } from "@/core/calendar"
    변환 없이 그대로 만족한다(TypeScript 구조적 타이핑, 여분 필드는 무시된다). */
 export type WeekCardSource = {
   weekStartDate: string;
+  /* 서버가 계산한 이번 주의 월요일(page.tsx). 카드 제목이 "이번 주"인지 "지난주"인지를 정한다 —
+     PNG 는 며칠 뒤에도 돌아다니지만 제목은 **카드를 만든 순간**의 관계를 말하므로 이게 맞다. */
+  currentWeek: string;
   note: string | null;
   entries: { scheduledDate: string; title: string }[];
   /* 하루의 속성(이슈 #117). 기본값인 날은 안 실려 오므로 날짜로 찾아 없으면 기본값으로 그린다 —
@@ -87,6 +90,7 @@ export type WeekCardFanart = {
 };
 
 export type WeekCardData = {
+  heading: string;
   rangeLabel: string;
   note: string | null;
   days: WeekCardDay[];
@@ -103,10 +107,19 @@ export type WeekCardData = {
    있다 — 그래도 안전한 이유는 weekDates 자체가 내부에서 weekStartOf 를 한 번 더 태워 무슨 요일을
    넣든 그 주의 월요일부터 7일을 돌려주기 때문이다(calendar.ts 주석). 그래서 entries 를 가른 질의
    (서버의 weekBounds)와 여기의 days 가 같은 정규화를 거쳐 항상 같은 7일을 가리킨다. */
+/* 이웃한 주가 아니면 상대 표현이 없다 — 범위 표기(rangeLabel)가 그 주를 말한다. */
+const WEEK_HEADING = {
+  current: "이번 주 방송",
+  prev: "지난주 방송",
+  next: "다음주 방송",
+  other: "주간 방송",
+} as const;
+
 export function buildWeekCard(source: WeekCardSource): WeekCardData {
   const days = weekDates(toIsoDate(source.weekStartDate));
   const dayByDate = new Map(source.days.map((d) => [d.scheduledDate, d]));
   return {
+    heading: WEEK_HEADING[weekRelation(days[0]!, toIsoDate(source.currentWeek))],
     rangeLabel: `${formatMD(days[0]!)} – ${formatMD(days[6]!)}`,
     /* 공지도 **여기서 정규화한다**(2026-08-01). 아래 표기와 같은 부류인데 이것만 밖에 있었다 —
        편집기가 `draft.note.trim() || null` 로 접어서 넘겼다. 서버 스키마가 공백만인 공지를

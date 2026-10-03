@@ -20,6 +20,7 @@ vi.mock("@/core/error-message", async (importOriginal) => {
 import { toPng } from "html-to-image";
 
 const CARD: WeekCardData = {
+  heading: "이번 주 방송",
   rangeLabel: "7.20 – 7.26",
   note: null,
   days: [
@@ -90,7 +91,7 @@ describe("WeekCardDownload", () => {
      전엔 잠긴 버튼 + "발행된 주만 카드로 내려받을 수 있습니다."를 그렸다. 그 문장이 걷히면
      이 가지에 남는 건 아무 설명 없이 흐려진 버튼 하나뿐이라 화면에 있는 것이 정보가 0 이다.
      이 갈래로 오는 유일한 호출자인 읽기 화면은 `week` 가 있을 때만 이 컴포넌트를 그리므로
-     실전에서 안 닿고, 닿더라도 그 화면의 "아직이야…" 빈 상태가 같은 사실을 말한다. */
+     실전에서 안 닿고, 닿더라도 그 화면의 "준비 중" 빈 상태가 같은 사실을 말한다. */
   it("카드가 없으면 아무것도 안 그린다", () => {
     const { container } = render(<WeekCardDownload card={null} weekStartDate="2026-07-20" />);
     expect(container).toBeEmptyDOMElement();

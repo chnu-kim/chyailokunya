@@ -252,6 +252,7 @@ export function ScheduleEditor({
     () =>
       buildWeekCard({
         weekStartDate,
+        currentWeek,
         /* 공지는 **날것 그대로 넘긴다** — 접는 일은 `buildWeekCard` 가 한다(2026-08-01에 옮겼다,
            그 파일의 같은 자리 주석에 근거). 한때 여기서 `draft.note.trim() || null` 로 접었는데,
            팬아트 표기(같은 부류)는 진작 조립부에서 접고 있었으므로 기준이 두 자리로 갈려 있었다. */
@@ -283,7 +284,7 @@ export function ScheduleEditor({
         fanartImageWidth: null,
         fanartImageHeight: null,
       }),
-    [weekStartDate, draft],
+    [weekStartDate, currentWeek, draft],
   );
 
   /* 미저장 이탈 경고. 두 겹이 필요하다 — 한 겹으로는 절반만 덮인다.

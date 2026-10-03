@@ -144,6 +144,19 @@ export function addWeeks(date: IsoDate, weeks: number): IsoDate {
   return branded(Temporal.PlainDate.from(date).add({ weeks }));
 }
 
+/* 보고 있는 주가 이번 주와 어떤 사이인가. 화면·공유 카드의 "이번 주"라는 말은 이 판정을 거쳐야
+   한다 — 한때 카드 제목이 "이번 주 방송"으로 고정돼, 지난주를 열어도 이번 주라고 말했고 그대로
+   PNG 에 구워졌다. 두 인자 모두 월요일로 정규화한 뒤 비교한다. */
+export type WeekRelation = "prev" | "current" | "next" | "other";
+export function weekRelation(week: IsoDate, current: IsoDate): WeekRelation {
+  const w = weekStartOf(week);
+  const c = weekStartOf(current);
+  if (w === c) return "current";
+  if (w === addWeeks(c, -1)) return "prev";
+  if (w === addWeeks(c, 1)) return "next";
+  return "other";
+}
+
 /* 요일 라벨. weekDates 의 반환 순서와 **같은 사실**이라 같은 파일에 둔다 — 떨어뜨려 두면
    주의 시작을 일요일로 바꾸는 날 한쪽만 고쳐도 게이트가 전부 초록이고, 화면에서 요일과
    날짜가 하루씩 밀린 채로 나간다. */
