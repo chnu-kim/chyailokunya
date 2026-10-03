@@ -30,7 +30,7 @@ export const SITE_LINKS = [
      걸림돌은 320px 로그인 상태의 폭 예산이었다 — 세 번째 링크가 42.83px 를 넘치게 했다(실측
      `/landing`·`/games`). 터치 타깃(44)은 하나도 줄이지 않고 **여백만** 덜어 맞췄다
      (chrome.css 의 430px 규칙: nav 좌우 패딩·항목 간격·링크 간격·로그아웃 패딩). 맞춘 뒤
-     320px 로그인 여유는 9.17px 다. 예산은 `e2e/nav-touch-target.spec.ts` 의 "nav 폭 예산 —
+     320px 로그인 여유는 macOS 12px · 리눅스 CI 약 10px 다(리눅스가 글자를 더 넓게 그린다). 예산은 `e2e/nav-touch-target.spec.ts` 의 "nav 폭 예산 —
      로그인 상태"(오른쪽 여유 >= --space-2)가 계속 못박는다 — 링크를 하나 더 얹으면 거기가
      먼저 빨개진다. */
   { href: "/schedule", label: "일정", primary: true },
