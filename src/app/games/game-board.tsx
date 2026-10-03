@@ -309,7 +309,7 @@ function GameBoardView({
 
           {games.length === 0 && (
             <div className="grid-empty" data-od-id="game-grid-empty">
-              <span className="t-hand">텅 비었네냥…</span>
+              <span className="t-hand">게임이 없습니다.</span>
               <span>아직 등록된 게임이 없습니다.</span>
             </div>
           )}

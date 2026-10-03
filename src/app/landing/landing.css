@@ -30,23 +30,11 @@
   font-size: var(--text-2xl);
   margin-top: var(--space-2);
 }
-.hero__lead {
-  font-size: var(--text-lg);
-  color: var(--fg-muted);
-  max-width: 48ch;
-  margin: var(--space-4) 0 var(--space-6);
-}
 .hero__cta {
   display: flex;
+  margin-top: var(--space-6);
   flex-wrap: wrap;
   gap: var(--space-3);
-}
-.hero__note {
-  font-family: var(--font-hand);
-  font-size: var(--text-xl);
-  color: var(--brand-taupe);
-  margin-top: var(--space-5);
-  transform: rotate(-1.5deg);
 }
 /* 컷아웃의 다이컷 테두리·접지 그림자는 .sticker 가 filter 로 담당한다 — 여기선 카드
    전체 각도와 호버만 얹는다. 클립·리본이 걸칠 사각 모서리는 아래 .kv 액자가 만든다. */
@@ -298,17 +286,6 @@
   font-family: var(--font-display);
   font-size: var(--text-xl);
 }
-/* 한마디만 한 줄을 통째로 먹는다 — flex-basis 100% 가 강제 줄바꿈을 만들어, 위 너덜한
-   메모 더미와 아래 넓은 한 장이라는 대비가 생긴다. */
-.spec__item--wide {
-  flex: 1 1 100%;
-}
-.spec__item--wide dd {
-  font-family: var(--font-body);
-  font-weight: 500;
-  font-size: var(--text-base);
-  max-width: 62ch;
-}
 
 /* ---- Content / 컨텐츠 ------------------------------------------------- */
 .content {
@@ -365,13 +342,6 @@
   margin-bottom: var(--space-2);
   position: relative;
 }
-.ccard p {
-  color: var(--fg-muted);
-  font-size: var(--text-sm);
-  margin: 0;
-  position: relative;
-  max-width: 34ch;
-}
 
 /* ---- Social ----------------------------------------------------------- */
 .social {
@@ -393,14 +363,12 @@
 .social__panel h2 {
   font-size: var(--text-3xl);
 }
-.social__panel p {
-  color: var(--fg-muted);
-  margin: var(--space-2) 0 var(--space-6);
+.social__panel h2 {
+  margin-bottom: var(--space-6);
 }
 /* 마스코트가 차지한 오른쪽 차선을 글이 침범하지 못하게 폭으로 예약한다. 46ch 는 넓은
    화면에서 한 줄이 너무 길지 않게 막는 상한 — min() 이라 둘 중 좁은 쪽이 이긴다. */
-.social__panel h2,
-.social__panel p {
+.social__panel h2 {
   max-width: min(46ch, calc(100% - var(--mascot-lane)));
 }
 
