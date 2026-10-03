@@ -148,6 +148,18 @@ export async function getPublishedWeek(db: Db, weekStartDate: string): Promise<W
   return week.publishedAt !== null ? week : null;
 }
 
+/* 그 주가 발행됐는가만(홈 카드의 "공개/준비 중"). getPublishedWeek 는 항목·하루·팬아트까지
+   조립하는데 홈은 이 한 비트만 필요하다 — 매 요청 도는 자리라 메타 행 하나만 읽는다. 기준은
+   getPublishedWeek 와 같다(publishedAt 이 있으면 발행). 행이 없으면 미발행이다. */
+export async function isWeekPublished(db: Db, weekStartDate: string): Promise<boolean> {
+  const [row] = await db
+    .select({ publishedAt: scheduleWeeks.publishedAt })
+    .from(scheduleWeeks)
+    .where(eq(scheduleWeeks.weekStartDate, weekStartDate))
+    .limit(1);
+  return row?.publishedAt != null;
+}
+
 /* 다른 편집자(또는 다른 탭)가 먼저 저장해 revision 이 어긋났다. 라우터가 CONFLICT 로 올린다.
    서비스는 tRPC 무관이라 TRPCError 를 안 쓰고 도메인 오류로 던진다(games 의 "없으면 null" 과
    같은 결 — 매핑은 라우터가 한다). */
