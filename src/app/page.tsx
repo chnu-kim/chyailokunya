@@ -2,11 +2,10 @@ import type { Metadata } from "next";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { todayKST, weekStartOf } from "@/core/calendar";
-import { homeHubStatus } from "@/core/home-hub";
+import { todayKST } from "@/core/calendar";
 import { makeDb } from "@/db";
-import { listGames } from "@/features/games/service";
-import { getPublishedWeek } from "@/features/schedule/service";
+import { loadHomeHub } from "@/features/home/hub";
+import { RecentGameStatus, ScheduleStatus } from "./home-status";
 import "./home.css";
 import { OG_IMAGE, OG_LOCALE, OG_SITE_NAME } from "./site-meta";
 
@@ -31,20 +30,9 @@ const rise = (delay: string): CSSProperties => ({ ["--rise-delay"]: delay }) as 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const db = makeDb(getCloudflareContext().env.DB);
-  // 시계는 Date.now() 기반 todayKST 로만 읽는다(배포 Workers 의 Temporal.Now 는 에포크 0 이다).
-  const today = todayKST();
-  /* 발행된 주만 본다 — 초안은 공개 화면에 안 샌다(ADR-0022). 신원과 무관하게 같은 값이라
-     관리자도 홈에선 팬이 보는 상태를 본다. */
-  const [publishedWeek, games] = await Promise.all([
-    getPublishedWeek(db, weekStartOf(today)),
-    listGames(db),
-  ]);
-  const hub = homeHubStatus({
-    today,
-    weekPublished: publishedWeek !== null,
-    gamesByRecency: games,
-  });
+  /* 상태 줄은 부가 정보라 조회가 실패해도 홈은 그대로 뜬다 — 그때 hub 는 null 이고 상태 줄만
+     빠진다(features/home/hub). 시계는 Date.now() 기반 todayKST 로만 읽는다. */
+  const hub = await loadHomeHub(makeDb(getCloudflareContext().env.DB), todayKST());
 
   return (
     <main className="home" id="main" data-od-id="home">
@@ -178,10 +166,7 @@ export default async function Home() {
               </svg>
               <h2>주간 일정</h2>
               <p>요일별 방송 시각과 할 일.</p>
-              <p className="navcard__status" data-od-id="nav-card-schedule-status">
-                이번 주<span className="navcard__meta">{hub.weekRange}</span>
-                <span className="navcard__value">{hub.scheduleState}</span>
-              </p>
+              <ScheduleStatus hub={hub} />
             </Link>
 
             <Link className="paper navcard" href="/games" data-od-id="nav-card-games">
@@ -201,11 +186,7 @@ export default async function Home() {
               </svg>
               <h2>플레이 게임</h2>
               <p>방송에서 플레이한 게임 보드. 최근에 한 것부터.</p>
-              {hub.recentGame && (
-                <p className="navcard__status" data-od-id="nav-card-games-recent">
-                  최근<span className="navcard__value">{hub.recentGame}</span>
-                </p>
-              )}
+              <RecentGameStatus hub={hub} />
             </Link>
           </div>
           <span className="mascot-sticker" aria-hidden="true" />

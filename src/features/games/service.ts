@@ -74,6 +74,28 @@ export function listGames(db: Db): Promise<GameCard[]> {
     );
 }
 
+/* 마지막으로 플레이한 게임 이름 하나(홈 카드의 "최근" 줄). listGames 와 **같은 유도식·같은 정렬**
+   이라 보드 맨 위 카드와 항상 같은 게임을 가리킨다 — 기준이 갈리면 홈은 A 를, 보드는 B 를 최근이라
+   부른다. 목록 전체를 읽지 않으려고 LIMIT 1 로 따로 둔다(홈은 매 요청 D1 을 읽는다). 기록이 하나도
+   없으면 정렬상 맨 위가 lastPlayed null 이라 null 을 돌려준다. */
+export async function mostRecentPlayedGameName(db: Db): Promise<string | null> {
+  const [row] = await db
+    .select({ name: games.categoryValue, lastPlayed: lastPlayedExpr })
+    .from(games)
+    .leftJoin(scheduleEntries, eq(scheduleEntries.gameId, games.id))
+    .leftJoin(scheduleWeeks, eq(scheduleWeeks.weekStartDate, entryWeekStart))
+    .leftJoin(scheduleDays, eq(scheduleDays.scheduledDate, scheduleEntries.scheduledDate))
+    .groupBy(games.id)
+    .orderBy(
+      sql`${lastPlayedExpr} IS NULL`,
+      desc(lastPlayedExpr),
+      desc(games.createdAt),
+      desc(games.id),
+    )
+    .limit(1);
+  return row?.lastPlayed ? row.name : null;
+}
+
 /* 일정 편집기가 항목에 게임을 이어 붙일 때 고를 후보(이슈 #56 결정 11). 보드에 이미 있는
    게임만 준다 — 항목의 game_id 는 games.id FK 라, 없는 게임을 가리키면 저장이 롤백된다.
    유도 조인이 필요 없어 listGames 보다 가볍고(이름·표지만), 이름순이라 편집기 검색이 사전순으로

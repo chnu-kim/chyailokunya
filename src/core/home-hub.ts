@@ -19,15 +19,14 @@ export type HomeHubStatus = {
 export function homeHubStatus(input: {
   today: IsoDate;
   weekPublished: boolean;
-  /* 마지막으로 플레이한 순(최근이 앞, 기록 없는 게임은 뒤)이라고 가정한다 — listGames 의 정렬이다.
-     여기서 다시 정렬하지 않는 이유: 그 정렬은 발행 경계를 아는 SQL 이 정본이라(lastPlayedExpr)
-     같은 규칙을 두 자리에 두면 갈라진다. */
-  gamesByRecency: readonly { categoryValue: string; lastPlayed: string | null }[];
+  /* 마지막으로 플레이한 게임 이름. 고르는 규칙(발행 경계·휴방 제외·정렬)은 보드와 같은 SQL 이
+     정본이라(features/games 의 mostRecentPlayedGameName) 여기서 다시 고르지 않는다. */
+  recentGame: string | null;
 }): HomeHubStatus {
   const days = weekDates(input.today);
   return {
     weekRange: `${formatMD(days[0]!)} – ${formatMD(days[6]!)}`,
     scheduleState: input.weekPublished ? "공개" : "준비 중",
-    recentGame: input.gamesByRecency.find((g) => g.lastPlayed !== null)?.categoryValue ?? null,
+    recentGame: input.recentGame,
   };
 }
